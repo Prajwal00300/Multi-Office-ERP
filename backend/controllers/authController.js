@@ -10,6 +10,7 @@ const signup = async (req, res) => {
     // Validate request
     if (!username || username.trim() === '') {
       return res.status(400).json({ error: 'Username is required' });
+
     }
     if (!password || password.trim() === '') {
       return res.status(400).json({ error: 'Password is required' });
