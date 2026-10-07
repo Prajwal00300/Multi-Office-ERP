@@ -3,11 +3,16 @@ const express = require('express');
 const sequelize = require('./config/database');
 const organizationRoutes = require('./routes/organizationRoutes');
 const authRoutes = require('./routes/authRoutes');
+const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware to parse JSON
+// Middleware
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  credentials: true
+}));
 app.use(express.json());
 
 // Register API Routes
