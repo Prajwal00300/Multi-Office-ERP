@@ -20,7 +20,7 @@ import {
 const Sidebar = ({ isOpen }) => {
   const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/super-admin/dashboard', active: true },
-    { name: 'Organizations', icon: Building2, path: '#', disabled: true },
+    { name: 'Organizations', icon: Building2, path: '/super-admin/organizations' },
     { name: 'Users & Roles', icon: Users, path: '#', disabled: true },
     { name: 'Master Data', icon: Database, path: '#', disabled: true },
     { name: 'Estimates', icon: FileText, path: '#', disabled: true },

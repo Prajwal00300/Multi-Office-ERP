@@ -3,6 +3,7 @@ const express = require('express');
 const sequelize = require('./config/database');
 const organizationRoutes = require('./routes/organizationRoutes');
 const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
 const cors = require('cors');
 
 const app = express();
@@ -18,6 +19,7 @@ app.use(express.json());
 // Register API Routes
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 
 // Basic health check route
 app.get('/api/health', (req, res) => {

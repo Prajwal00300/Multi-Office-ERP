@@ -7,6 +7,9 @@ import Unauthorized from '../pages/Unauthorized';
 import ProtectedRoute from './ProtectedRoute';
 import Layout from '../components/layout/Layout';
 import SuperAdminDashboard from '../pages/super-admin/SuperAdminDashboard';
+import OrganizationsList from '../pages/super-admin/OrganizationsList';
+import OrganizationForm from '../pages/super-admin/OrganizationForm';
+import OrganizationUsers from '../pages/super-admin/OrganizationUsers';
 
 const AppRoutes = () => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
@@ -30,6 +33,10 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN']} />}>
         <Route element={<Layout />}>
           <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
+          <Route path="/super-admin/organizations" element={<OrganizationsList />} />
+          <Route path="/super-admin/organizations/new" element={<OrganizationForm />} />
+          <Route path="/super-admin/organizations/:id/edit" element={<OrganizationForm />} />
+          <Route path="/super-admin/organizations/:id/users" element={<OrganizationUsers />} />
         </Route>
       </Route>
 
