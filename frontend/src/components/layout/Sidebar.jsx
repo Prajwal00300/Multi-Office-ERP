@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { NavLink } from 'react-router-dom';
+import { AuthContext } from '../../context/AuthContext';
 import { 
   LayoutDashboard, 
   Building2, 
@@ -18,10 +19,13 @@ import {
 } from 'lucide-react';
 
 const Sidebar = ({ isOpen }) => {
+  const { user } = useContext(AuthContext);
+
+  // Define nav items and the roles allowed to see them
   const navItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: '/super-admin/dashboard', active: true },
-    { name: 'Organizations', icon: Building2, path: '/super-admin/organizations' },
-    { name: 'Users & Roles', icon: Users, path: '#', disabled: true },
+    { name: 'Dashboard', icon: LayoutDashboard, path: user?.role === 'SUPER_ADMIN' ? '/super-admin/dashboard' : '/', roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING', 'PAYMENT_COLLECTOR'] },
+    { name: 'Organizations', icon: Building2, path: '/super-admin/organizations', roles: ['SUPER_ADMIN'] },
+    { name: 'Customers', icon: Users, path: '/customers', roles: ['SUPER_ADMIN'] },
     { name: 'Master Data', icon: Database, path: '#', disabled: true },
     { name: 'Estimates', icon: FileText, path: '#', disabled: true },
     { name: 'Billing', icon: Receipt, path: '#', disabled: true },
@@ -35,6 +39,15 @@ const Sidebar = ({ isOpen }) => {
     { name: 'System Lock', icon: Lock, path: '#', disabled: true, textClass: 'text-red-500' },
   ];
 
+  // Filter items. If roles array exists, check if user's role is in it. If not, assume it's visible to all (or hidden if we prefer strict, let's keep disabled ones visible to show upcoming features)
+  const visibleNavItems = navItems.filter(item => {
+    if (item.disabled) return true; // Show disabled items to everyone
+    if (item.roles && user) {
+      return item.roles.includes(user.role);
+    }
+    return true; // default visible
+  });
+
   return (
     <aside 
       className={`${isOpen ? 'translate-x-0' : '-translate-x-full'} 
@@ -46,7 +59,7 @@ const Sidebar = ({ isOpen }) => {
       
       <div className="flex-1 overflow-y-auto py-4 scrollbar-thin">
         <ul className="space-y-1 px-3">
-          {navItems.map((item, index) => (
+          {visibleNavItems.map((item, index) => (
             <li key={index}>
               {item.disabled ? (
                 <div className="flex items-center px-3 py-2.5 rounded-lg text-slate-500 cursor-not-allowed opacity-75">

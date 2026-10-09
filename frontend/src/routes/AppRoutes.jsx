@@ -10,6 +10,7 @@ import SuperAdminDashboard from '../pages/super-admin/SuperAdminDashboard';
 import OrganizationsList from '../pages/super-admin/OrganizationsList';
 import OrganizationForm from '../pages/super-admin/OrganizationForm';
 import OrganizationUsers from '../pages/super-admin/OrganizationUsers';
+import CustomersList from '../pages/customers/CustomersList';
 
 const AppRoutes = () => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
@@ -37,6 +38,13 @@ const AppRoutes = () => {
           <Route path="/super-admin/organizations/new" element={<OrganizationForm />} />
           <Route path="/super-admin/organizations/:id/edit" element={<OrganizationForm />} />
           <Route path="/super-admin/organizations/:id/users" element={<OrganizationUsers />} />
+        </Route>
+      </Route>
+
+      {/* Mixed Access Routes (Temporarily SUPER_ADMIN only) */}
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN']} />}>
+        <Route element={<Layout />}>
+          <Route path="/customers" element={<CustomersList />} />
         </Route>
       </Route>
 
