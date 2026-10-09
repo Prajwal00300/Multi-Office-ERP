@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
-import { Plus, Search, Building, Phone, MapPin, Hash, User } from 'lucide-react';
+import { Plus, Search, Building, Phone, MapPin, Hash, User, Edit2, Trash2 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
 
@@ -14,27 +14,22 @@ const CustomersList = () => {
   const [showModal, setShowModal] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState('');
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
     address: '',
     city: '',
     tin: '',
-    organizationId: user?.organizationId || '' // For Super Admin override if needed, but normally derived from context
+    organizationId: user?.organizationId || '' 
   });
-
-  // Determine if user is super admin and needs to provide an org ID (if not already set)
-  // We'll simplify: for this specific task, Super Admin might be looking at a specific org or we just require them to have an org context.
-  // The backend currently demands an organizationId if super admin. Let's provide a text input for org ID just for Super Admin, or assume they are assigned.
-  // Actually, standard behavior: normal employees have an org ID.
 
   const fetchCustomers = useCallback(async (searchQuery = '') => {
     try {
       setLoading(true);
       setError('');
       
-      // If super admin and no org ID is set, they might get an error unless they specify it. 
-      // We'll pass the org ID if available.
       const params = new URLSearchParams();
       if (searchQuery) params.append('search', searchQuery);
       if (user?.role === 'SUPER_ADMIN' && user?.organizationId) {
@@ -47,7 +42,7 @@ const CustomersList = () => {
       setCustomers(response.data);
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.error || 'Failed to fetch customers. Ensure you are assigned to an organization.');
+      setError(err.response?.data?.error || 'Failed to fetch customers.');
       setCustomers([]);
     } finally {
       setLoading(false);
@@ -55,7 +50,6 @@ const CustomersList = () => {
   }, [user, formData.organizationId]);
 
   useEffect(() => {
-    // Debounce search
     const delayDebounceFn = setTimeout(() => {
       fetchCustomers(searchTerm);
     }, 500);
@@ -63,7 +57,49 @@ const CustomersList = () => {
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm, fetchCustomers]);
 
-  const handleCreateCustomer = async (e) => {
+  const handleOpenCreate = () => {
+    setEditingCustomer(null);
+    setFormData({
+      name: '',
+      phone: '',
+      address: '',
+      city: '',
+      tin: '',
+      organizationId: formData.organizationId
+    });
+    setModalError('');
+    setShowModal(true);
+  };
+
+  const handleOpenEdit = (customer) => {
+    setEditingCustomer(customer);
+    setFormData({
+      name: customer.name || '',
+      phone: customer.phone || '',
+      address: customer.address || '',
+      city: customer.city || '',
+      tin: customer.tin || '',
+      organizationId: customer.organizationId
+    });
+    setModalError('');
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to delete the customer "${name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await api.delete(`/customers/${id}`);
+      setCustomers(customers.filter(c => c.id !== id));
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Failed to delete customer');
+    }
+  };
+
+  const handleSubmitCustomer = async (e) => {
     e.preventDefault();
     if (!formData.name || !formData.name.trim()) {
       return setModalError('Customer name is required');
@@ -75,22 +111,20 @@ const CustomersList = () => {
       
       const payload = { ...formData };
       
-      const response = await api.post('/customers', payload);
+      if (editingCustomer) {
+        // Update existing
+        const response = await api.put(`/customers/${editingCustomer.id}`, payload);
+        setCustomers(customers.map(c => c.id === editingCustomer.id ? response.data.customer : c));
+      } else {
+        // Create new
+        const response = await api.post('/customers', payload);
+        setCustomers([response.data.customer, ...customers]);
+      }
       
-      // Add to list and close
-      setCustomers([response.data.customer, ...customers]);
       setShowModal(false);
-      setFormData({
-        ...formData,
-        name: '',
-        phone: '',
-        address: '',
-        city: '',
-        tin: ''
-      });
     } catch (err) {
       console.error(err);
-      setModalError(err.response?.data?.error || 'Failed to create customer.');
+      setModalError(err.response?.data?.error || 'Failed to save customer.');
     } finally {
       setModalLoading(false);
     }
@@ -99,14 +133,6 @@ const CustomersList = () => {
   const handleModalClose = () => {
     setShowModal(false);
     setModalError('');
-    setFormData({
-      ...formData,
-      name: '',
-      phone: '',
-      address: '',
-      city: '',
-      tin: ''
-    });
   };
 
   return (
@@ -114,7 +140,7 @@ const CustomersList = () => {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0">
         <h2 className="text-2xl font-bold text-gray-800">Customer Management</h2>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={handleOpenCreate}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium flex items-center transition-colors"
         >
           <Plus size={18} className="mr-2" />
@@ -158,12 +184,13 @@ const CustomersList = () => {
                 <th className="px-6 py-4 font-medium">City</th>
                 <th className="px-6 py-4 font-medium">Phone</th>
                 <th className="px-6 py-4 font-medium">TIN</th>
+                <th className="px-6 py-4 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan="4" className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
                     <div className="flex justify-center items-center">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-2"></div>
                       Searching customers...
@@ -172,14 +199,14 @@ const CustomersList = () => {
                 </tr>
               ) : customers.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="px-6 py-12 text-center">
+                  <td colSpan="5" className="px-6 py-12 text-center">
                     <div className="flex flex-col items-center justify-center space-y-3">
                       <div className="bg-gray-100 p-3 rounded-full">
                         <Search className="h-6 w-6 text-gray-400" />
                       </div>
                       <p className="text-gray-500 text-lg">No customer found.</p>
                       <button
-                        onClick={() => setShowModal(true)}
+                        onClick={handleOpenCreate}
                         className="text-blue-600 hover:text-blue-800 font-medium text-sm mt-2"
                       >
                         + Add New Customer
@@ -222,6 +249,22 @@ const CustomersList = () => {
                         </div>
                       ) : '-'}
                     </td>
+                    <td className="px-6 py-4 text-sm font-medium text-right">
+                      <button 
+                        onClick={() => handleOpenEdit(customer)}
+                        className="text-blue-600 hover:text-blue-900 mr-4 transition-colors"
+                        title="Edit Customer"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                      <button 
+                        onClick={() => handleDelete(customer.id, customer.name)}
+                        className="text-red-600 hover:text-red-900 transition-colors"
+                        title="Delete Customer"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -230,12 +273,14 @@ const CustomersList = () => {
         </div>
       </div>
 
-      {/* Create Customer Modal */}
+      {/* Create / Edit Customer Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-xl font-bold text-gray-800">Add New Customer</h3>
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
+              </h3>
               <button onClick={handleModalClose} className="text-gray-400 hover:text-gray-600">
                 &times;
               </button>
@@ -243,7 +288,7 @@ const CustomersList = () => {
             
             {modalError && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-md text-sm">{modalError}</div>}
             
-            <form onSubmit={handleCreateCustomer} className="space-y-4">
+            <form onSubmit={handleSubmitCustomer} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Customer Name <span className="text-red-500">*</span>
@@ -342,7 +387,7 @@ const CustomersList = () => {
                   disabled={modalLoading}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors disabled:opacity-50"
                 >
-                  {modalLoading ? 'Saving...' : 'Save Customer'}
+                  {modalLoading ? 'Saving...' : (editingCustomer ? 'Save Changes' : 'Save Customer')}
                 </button>
               </div>
             </form>

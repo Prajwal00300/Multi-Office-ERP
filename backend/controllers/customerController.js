@@ -117,3 +117,75 @@ exports.getCustomerById = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// Update customer
+exports.updateCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, address, city, tin } = req.body;
+    
+    const customer = await Customer.findByPk(id);
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Auth check
+    if (req.user.role !== 'SUPER_ADMIN' && customer.organizationId !== req.user.organizationId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Customer name is required' });
+    }
+
+    // Check duplicate name if name changed
+    if (name.trim() !== customer.name) {
+      const existingCustomer = await Customer.findOne({
+        where: { 
+          name: name.trim(),
+          organizationId: customer.organizationId
+        }
+      });
+      if (existingCustomer) {
+        return res.status(409).json({ error: 'Another customer with this name already exists' });
+      }
+    }
+
+    await customer.update({
+      name: name.trim(),
+      phone: phone ? phone.trim() : null,
+      address: address ? address.trim() : null,
+      city: city ? city.trim() : null,
+      tin: tin ? tin.trim() : null,
+    });
+
+    res.status(200).json({ message: 'Customer updated successfully', customer });
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Delete customer
+exports.deleteCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const customer = await Customer.findByPk(id);
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Auth check
+    if (req.user.role !== 'SUPER_ADMIN' && customer.organizationId !== req.user.organizationId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await customer.destroy();
+
+    res.status(200).json({ message: 'Customer deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting customer:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
