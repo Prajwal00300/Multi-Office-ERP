@@ -15,6 +15,12 @@ const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
   host: DB_HOST,
   port: DB_PORT || 3306,
   dialect: 'mysql',
+  dialectOptions: process.env.DB_SSL === 'true' ? {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false
+    }
+  } : {},
   logging: false, // Disable logging or set to console.log to see SQL queries
   pool: {
     max: 5,
