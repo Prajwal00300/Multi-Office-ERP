@@ -48,6 +48,10 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Backend is running' });
 });
 
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'OK', message: 'OfficeFlow ERP API is running' });
+});
+
 // Function to initialize the database and start the server
 const startServer = async () => {
   try {
