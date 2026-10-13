@@ -71,4 +71,14 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// If not running in Vercel serverless, start standalone server
+if (!process.env.VERCEL) {
+  startServer();
+} else {
+  // In Vercel serverless environment, authenticate DB connection asynchronously
+  sequelize.authenticate()
+    .then(() => console.log('✅ Connected to Aiven MySQL (Vercel Serverless)'))
+    .catch(err => console.error('❌ Vercel DB connection error:', err));
+}
+
+module.exports = app;
