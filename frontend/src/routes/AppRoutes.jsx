@@ -11,6 +11,7 @@ import OrganizationsList from '../pages/super-admin/OrganizationsList';
 import OrganizationForm from '../pages/super-admin/OrganizationForm';
 import OrganizationUsers from '../pages/super-admin/OrganizationUsers';
 import CustomersList from '../pages/customers/CustomersList';
+import ProductsList from '../pages/products/ProductsList';
 
 const AppRoutes = () => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
@@ -45,6 +46,7 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN']} />}>
         <Route element={<Layout />}>
           <Route path="/customers" element={<CustomersList />} />
+          <Route path="/products" element={<ProductsList />} />
         </Route>
       </Route>
 
