@@ -12,6 +12,10 @@ import OrganizationForm from '../pages/super-admin/OrganizationForm';
 import OrganizationUsers from '../pages/super-admin/OrganizationUsers';
 import CustomersList from '../pages/customers/CustomersList';
 import ProductsList from '../pages/products/ProductsList';
+import EstimatesList from '../pages/estimates/EstimatesList';
+import EstimateForm from '../pages/estimates/EstimateForm';
+import EstimateDetail from '../pages/estimates/EstimateDetail';
+import EstimatePrint from '../pages/estimates/EstimatePrint';
 
 const AppRoutes = () => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
@@ -42,11 +46,22 @@ const AppRoutes = () => {
         </Route>
       </Route>
 
-      {/* Mixed Access Routes (Temporarily SUPER_ADMIN only) */}
+      {/* Mixed Access Routes (Temporarily SUPER_ADMIN only for customer & product master) */}
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN']} />}>
         <Route element={<Layout />}>
           <Route path="/customers" element={<CustomersList />} />
           <Route path="/products" element={<ProductsList />} />
+        </Route>
+      </Route>
+
+      {/* Protected Estimate Routes (SUPER_ADMIN, ADMIN, OPERATIONS_BILLING) */}
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING']} />}>
+        <Route element={<Layout />}>
+          <Route path="/estimates" element={<EstimatesList />} />
+          <Route path="/estimates/new" element={<EstimateForm />} />
+          <Route path="/estimates/:id" element={<EstimateDetail />} />
+          <Route path="/estimates/:id/edit" element={<EstimateForm />} />
+          <Route path="/estimates/:id/print" element={<EstimatePrint />} />
         </Route>
       </Route>
 
