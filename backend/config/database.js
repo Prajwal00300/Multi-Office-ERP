@@ -1,4 +1,5 @@
 const { Sequelize } = require('sequelize');
+const mysql2 = require('mysql2');
 require('dotenv').config();
 
 // Extract database configuration from environment variables
@@ -15,6 +16,7 @@ const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
   host: DB_HOST,
   port: DB_PORT || 3306,
   dialect: 'mysql',
+  dialectModule: mysql2,
   dialectOptions: process.env.DB_SSL === 'true' ? {
     ssl: {
       require: true,
