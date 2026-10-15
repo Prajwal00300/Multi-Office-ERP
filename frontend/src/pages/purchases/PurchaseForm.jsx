@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -12,12 +12,7 @@ import {
   CheckCircle, 
   ShieldAlert, 
   Calendar, 
-  DollarSign, 
-  Package, 
-  Layers, 
-  Ruler, 
-  X,
-  Sparkles
+  DollarSign
 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
@@ -29,12 +24,6 @@ import {
   overridePurchase 
 } from '../../services/purchaseService';
 
-const CATEGORIES = [
-  'Reinforcing Steel Bar',
-  'Pipe',
-  'Other'
-];
-
 const STANDARD_UNITS = [
   'Kg',
   'Ton',
@@ -43,7 +32,10 @@ const STANDARD_UNITS = [
   'Bundle',
   'Length',
   'Box',
-  'Nos'
+  'Nos',
+  'Quintal',
+  'Feet',
+  'Sq.Ft'
 ];
 
 const PurchaseForm = () => {
@@ -65,11 +57,9 @@ const PurchaseForm = () => {
   const [overrideReason, setOverrideReason] = useState('');
   const [manualAmount, setManualAmount] = useState('');
 
-  // Line items
+  // Line items (purely manual entry - no product catalog)
   const [items, setItems] = useState([
     {
-      productId: '',
-      isManual: false,
       productNameSnapshot: '',
       productCategorySnapshot: '',
       productSizeSnapshot: '',
@@ -83,27 +73,6 @@ const PurchaseForm = () => {
 
   // Master lists
   const [organizations, setOrganizations] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [productsLoading, setProductsLoading] = useState(false);
-
-  // Quick Add Product to Catalogue Modal State
-  const [showProductModal, setShowProductModal] = useState(false);
-  const [targetRowIndex, setTargetRowIndex] = useState(null);
-  const [modalLoading, setModalLoading] = useState(false);
-  const [modalError, setModalError] = useState('');
-  const [newProductForm, setNewProductForm] = useState({
-    name: '',
-    category: 'Reinforcing Steel Bar',
-    customCategory: '',
-    size: '',
-    unit: 'Kg',
-    description: '',
-    organizationId: '',
-    steelGrade: '',
-    pipePressureRating: '',
-    pipeLength: '',
-    extraSpecs: ''
-  });
 
   // UI state
   const [loading, setLoading] = useState(isEditMode);
@@ -136,28 +105,6 @@ const PurchaseForm = () => {
     }
   }, [user]);
 
-  // Load Products for current organization
-  const fetchProducts = useCallback(async () => {
-    try {
-      setProductsLoading(true);
-      const params = new URLSearchParams();
-      params.append('status', 'ACTIVE');
-      if (effectiveOrgId) {
-        params.append('organizationId', effectiveOrgId);
-      }
-      const res = await api.get(`/products?${params.toString()}`);
-      setProducts(res.data || []);
-    } catch (err) {
-      console.error('Failed to load products:', err);
-    } finally {
-      setProductsLoading(false);
-    }
-  }, [effectiveOrgId]);
-
-  useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
-
   // Load existing purchase if edit or override
   useEffect(() => {
     if (!id) return;
@@ -182,8 +129,6 @@ const PurchaseForm = () => {
         if (data.items && data.items.length > 0) {
           setItems(data.items.map(i => ({
             id: i.id,
-            productId: i.productId || '',
-            isManual: !i.productId,
             productNameSnapshot: i.productNameSnapshot || '',
             productCategorySnapshot: i.productCategorySnapshot || '',
             productSizeSnapshot: i.productSizeSnapshot || '',
@@ -241,63 +186,13 @@ const PurchaseForm = () => {
     setItems(updated);
   };
 
-  // Handle Product Selection on a Row
-  const handleProductSelect = (index, value) => {
-    if (value === 'CREATE_NEW') {
-      setTargetRowIndex(index);
-      setNewProductForm({
-        name: '',
-        category: 'Reinforcing Steel Bar',
-        customCategory: '',
-        size: '',
-        unit: 'Kg',
-        description: '',
-        organizationId: effectiveOrgId || '',
-        steelGrade: '',
-        pipePressureRating: '',
-        pipeLength: '',
-        extraSpecs: ''
-      });
-      setModalError('');
-      setShowProductModal(true);
-      return;
-    }
-
-    const updated = [...items];
-    if (value === 'MANUAL') {
-      updated[index].productId = '';
-      updated[index].isManual = true;
-    } else if (!value) {
-      updated[index].productId = '';
-      updated[index].isManual = false;
-      updated[index].productNameSnapshot = '';
-      updated[index].productCategorySnapshot = '';
-      updated[index].productSizeSnapshot = '';
-      updated[index].productSpecificationsSnapshot = '';
-    } else {
-      const prod = products.find(p => String(p.id) === String(value));
-      if (prod) {
-        updated[index].productId = prod.id;
-        updated[index].isManual = false;
-        updated[index].productNameSnapshot = prod.name;
-        updated[index].productCategorySnapshot = prod.category;
-        updated[index].productSizeSnapshot = prod.size;
-        updated[index].productSpecificationsSnapshot = prod.specifications || '';
-        updated[index].unit = prod.unit || 'Kg';
-      }
-    }
-    setItems(updated);
-  };
-
-  // Add Item Row
-  const handleAddItem = (isManual = false) => {
+  // Add Item Row (Manual entry)
+  const handleAddItem = () => {
     setItems([
       ...items,
       {
-        productId: '',
-        isManual: Boolean(isManual),
         productNameSnapshot: '',
-        productCategorySnapshot: isManual ? 'Other' : '',
+        productCategorySnapshot: '',
         productSizeSnapshot: '',
         productSpecificationsSnapshot: '',
         quantity: 1,
@@ -310,130 +205,6 @@ const PurchaseForm = () => {
 
   const handleRemoveItem = (index) => {
     setItems(items.filter((_, idx) => idx !== index));
-  };
-
-  // Open Add Product to Catalogue Modal
-  const handleOpenAddProductModal = (rowIndex = null) => {
-    setTargetRowIndex(rowIndex);
-    setNewProductForm({
-      name: '',
-      category: 'Reinforcing Steel Bar',
-      customCategory: '',
-      size: '',
-      unit: 'Kg',
-      description: '',
-      organizationId: effectiveOrgId || (organizations[0]?.id) || '',
-      steelGrade: '',
-      pipePressureRating: '',
-      pipeLength: '',
-      extraSpecs: ''
-    });
-    setModalError('');
-    setShowProductModal(true);
-  };
-
-  // Submit New Product to Catalogue (Strictly NO Price Fields)
-  const handleCreateProductSubmit = async (e) => {
-    e.preventDefault();
-    setModalError('');
-
-    if (!newProductForm.name || !newProductForm.name.trim()) {
-      return setModalError('Product name is required.');
-    }
-
-    const actualCategory = newProductForm.category === 'Other'
-      ? newProductForm.customCategory?.trim()
-      : newProductForm.category;
-
-    if (!actualCategory) {
-      return setModalError('Product category is required.');
-    }
-
-    if (!newProductForm.size || !newProductForm.size.trim()) {
-      return setModalError('Product size / diameter is required (e.g. 10 mm, 2 inch).');
-    }
-
-    if (!newProductForm.unit || !newProductForm.unit.trim()) {
-      return setModalError('Unit of measurement is required.');
-    }
-
-    const targetOrg = newProductForm.organizationId || effectiveOrgId || (organizations.length > 0 ? organizations[0].id : '') || user?.organizationId;
-    if (user?.role === 'SUPER_ADMIN' && !targetOrg) {
-      return setModalError('Please select an Organization for this product.');
-    }
-
-    try {
-      setModalLoading(true);
-
-      const specsObj = {};
-      if (actualCategory === 'Reinforcing Steel Bar') {
-        if (newProductForm.steelGrade.trim()) specsObj.grade = newProductForm.steelGrade.trim();
-      } else if (actualCategory === 'Pipe') {
-        if (newProductForm.pipePressureRating.trim()) specsObj.pressureRating = newProductForm.pipePressureRating.trim();
-        if (newProductForm.pipeLength.trim()) specsObj.length = newProductForm.pipeLength.trim();
-      }
-      if (newProductForm.extraSpecs.trim()) {
-        specsObj.extra = newProductForm.extraSpecs.trim();
-      }
-
-      // Payload - strictly NO price fields
-      const payload = {
-        name: newProductForm.name.trim(),
-        category: actualCategory,
-        size: newProductForm.size.trim(),
-        unit: newProductForm.unit.trim(),
-        description: newProductForm.description.trim() || null,
-        specifications: Object.keys(specsObj).length > 0 ? specsObj : null,
-        status: 'ACTIVE',
-        organizationId: targetOrg
-      };
-
-      const res = await api.post('/products', payload);
-      const createdProd = res.data.product;
-
-      // Add to local catalogue products state
-      setProducts(prev => [createdProd, ...prev]);
-
-      // If targeted to a row, auto-select it
-      if (targetRowIndex !== null && targetRowIndex >= 0 && targetRowIndex < items.length) {
-        const updated = [...items];
-        updated[targetRowIndex].productId = createdProd.id;
-        updated[targetRowIndex].isManual = false;
-        updated[targetRowIndex].productNameSnapshot = createdProd.name;
-        updated[targetRowIndex].productCategorySnapshot = createdProd.category;
-        updated[targetRowIndex].productSizeSnapshot = createdProd.size;
-        updated[targetRowIndex].productSpecificationsSnapshot = createdProd.specifications || '';
-        updated[targetRowIndex].unit = createdProd.unit || 'Kg';
-        setItems(updated);
-      } else {
-        // Append a new row with this product
-        setItems(prev => [
-          ...prev,
-          {
-            productId: createdProd.id,
-            isManual: false,
-            productNameSnapshot: createdProd.name,
-            productCategorySnapshot: createdProd.category,
-            productSizeSnapshot: createdProd.size,
-            productSpecificationsSnapshot: createdProd.specifications || '',
-            quantity: 1,
-            unit: createdProd.unit || 'Kg',
-            rate: '',
-            amount: 0
-          }
-        ]);
-      }
-
-      setSuccessMsg(`Product "${createdProd.name}" added to catalogue successfully.`);
-      setTimeout(() => setSuccessMsg(''), 4000);
-      setShowProductModal(false);
-      setTargetRowIndex(null);
-    } catch (err) {
-      console.error(err);
-      setModalError(err.response?.data?.error || 'Failed to create product in catalogue.');
-    } finally {
-      setModalLoading(false);
-    }
   };
 
   // Submit Handler
@@ -450,7 +221,7 @@ const PurchaseForm = () => {
       for (let i = 0; i < items.length; i++) {
         const itm = items[i];
         if (!itm.productNameSnapshot || !itm.productNameSnapshot.trim()) {
-          setError(`Item Row #${i + 1}: Product name / description is required.`);
+          setError(`Item Row #${i + 1}: Product / Item description is required.`);
           return;
         }
         const q = parseFloat(itm.quantity);
@@ -460,7 +231,7 @@ const PurchaseForm = () => {
         }
         const r = parseFloat(itm.rate);
         if (isNaN(r) || r < 0) {
-          setError(`Item Row #${i + 1}: Rate must be a valid positive number.`);
+          setError(`Item Row #${i + 1}: Purchase rate must be a valid positive number.`);
           return;
         }
       }
@@ -488,11 +259,11 @@ const PurchaseForm = () => {
         remarks: remarks.trim(),
         totalAmount: calculatedTotals.totalAmount,
         items: items.map(itm => ({
-          productId: (itm.productId && itm.productId !== 'MANUAL') ? parseInt(itm.productId, 10) : null,
+          productId: null, // Pure manual entry
           productNameSnapshot: itm.productNameSnapshot.trim(),
-          productCategorySnapshot: itm.productCategorySnapshot || null,
-          productSizeSnapshot: itm.productSizeSnapshot || null,
-          productSpecificationsSnapshot: itm.productSpecificationsSnapshot || null,
+          productCategorySnapshot: itm.productCategorySnapshot ? itm.productCategorySnapshot.trim() : null,
+          productSizeSnapshot: itm.productSizeSnapshot ? itm.productSizeSnapshot.trim() : null,
+          productSpecificationsSnapshot: itm.productSpecificationsSnapshot ? itm.productSpecificationsSnapshot.trim() : null,
           quantity: parseFloat(itm.quantity),
           unit: itm.unit || 'Kg',
           rate: parseFloat(itm.rate)
@@ -566,7 +337,7 @@ const PurchaseForm = () => {
             <p className="text-sm text-gray-500">
               {isOverrideMode
                 ? 'Supervisor override for approved purchase with permanent audit logging'
-                : 'Select products from catalogue, enter manual custom items, or register new catalogue products'}
+                : 'Enter supplier details, purchased items, quantities, and agreed purchase rates'}
             </p>
           </div>
         </div>
@@ -737,52 +508,24 @@ const PurchaseForm = () => {
         </div>
       </div>
 
-      {/* Section 2: Products Table */}
+      {/* Section 2: Products Table (Pure Manual Entry) */}
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 pb-3">
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-gray-900">Purchase Line Items</h2>
-              {productsLoading ? (
-                <span className="text-xs text-gray-400 animate-pulse">Loading catalogue...</span>
-              ) : (
-                <span className="text-xs bg-blue-100 text-blue-800 font-medium px-2 py-0.5 rounded-full">
-                  {products.length} in catalogue
-                </span>
-              )}
-            </div>
+            <h2 className="text-base font-bold text-gray-900">Purchase Line Items</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Select products from catalogue, enter manual custom items, or register new catalogue products.
+              Enter product details, specifications, quantities, and agreed purchase rates directly.
             </p>
           </div>
 
-          {/* Line Item Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => handleAddItem(false)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-medium transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add from Catalogue
-            </button>
-            <button
-              type="button"
-              onClick={() => handleAddItem(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-medium transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Manual Item
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOpenAddProductModal(null)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-medium transition-colors"
-            >
-              <Package className="w-3.5 h-3.5" />
-              + Add to Catalogue
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleAddItem}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 rounded-lg text-xs font-medium transition-colors shadow-sm self-start sm:self-auto"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Line Item
+          </button>
         </div>
 
         {items.length === 0 ? (
@@ -791,17 +534,10 @@ const PurchaseForm = () => {
             <div className="flex flex-wrap justify-center items-center gap-3">
               <button
                 type="button"
-                onClick={() => handleAddItem(false)}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
+                onClick={handleAddItem}
+                className="px-3.5 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
               >
-                + Choose from Catalogue
-              </button>
-              <button
-                type="button"
-                onClick={() => handleAddItem(true)}
-                className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700"
-              >
-                + Add Manual Product
+                + Add Line Item
               </button>
               <span className="text-xs text-gray-400">or enter total purchase amount directly:</span>
               <div className="w-36">
@@ -823,102 +559,73 @@ const PurchaseForm = () => {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-gray-600 uppercase font-semibold">
                   <th className="py-2.5 px-3 w-10 text-center">#</th>
-                  <th className="py-2.5 px-3 min-w-[220px]">Product Selection</th>
-                  <th className="py-2.5 px-3 min-w-[200px]">Item Description *</th>
-                  <th className="py-2.5 px-3 w-28">Size / Spec</th>
-                  <th className="py-2.5 px-3 w-24">Quantity *</th>
-                  <th className="py-2.5 px-3 w-24">Unit</th>
-                  <th className="py-2.5 px-3 w-32 text-right">Purchase Rate (₹) *</th>
-                  <th className="py-2.5 px-3 w-32 text-right">Amount (₹)</th>
+                  <th className="py-2.5 px-3 min-w-[240px]">Product / Item Description *</th>
+                  <th className="py-2.5 px-3 w-36">Category (Optional)</th>
+                  <th className="py-2.5 px-3 w-36">Size / Spec (Optional)</th>
+                  <th className="py-2.5 px-3 w-28">Quantity *</th>
+                  <th className="py-2.5 px-3 w-28">Unit</th>
+                  <th className="py-2.5 px-3 w-36 text-right">Purchase Rate (₹) *</th>
+                  <th className="py-2.5 px-3 w-36 text-right">Amount (₹)</th>
                   <th className="py-2.5 px-3 w-10 text-center"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {items.map((item, index) => {
                   const lineAmt = Math.round(((parseFloat(item.quantity) || 0) * (parseFloat(item.rate) || 0) + Number.EPSILON) * 100) / 100;
-                  const isCatalogueItem = Boolean(item.productId);
 
                   return (
                     <tr key={index} className="hover:bg-gray-50/50">
-                      <td className="py-2 px-3 text-gray-400 font-mono text-center">{index + 1}</td>
+                      <td className="py-2.5 px-3 text-gray-400 font-mono text-center">{index + 1}</td>
                       
-                      {/* Product Selector */}
-                      <td className="py-2 px-3">
-                        <select
-                          value={item.productId || (item.isManual ? 'MANUAL' : '')}
-                          onChange={(e) => handleProductSelect(index, e.target.value)}
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        >
-                          <option value="">-- Choose Catalogue Product --</option>
-                          <option value="MANUAL">✏️ Custom / Manual Product (Not in Catalogue)</option>
-                          <option value="CREATE_NEW">✨ + Add New Product to Catalogue...</option>
-                          {products.length > 0 && (
-                            <optgroup label={`Catalogue Products (${products.length})`}>
-                              {products.map(p => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} [{p.category}] ({p.size || 'N/A'})
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
-                        <div className="mt-1">
-                          {isCatalogueItem ? (
-                            <span className="inline-flex items-center text-[10px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                              ✓ In Catalogue: {item.productCategorySnapshot || ''}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
-                              ✏️ Manual / Custom Product
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Item Description */}
-                      <td className="py-2 px-3">
+                      {/* Product Description */}
+                      <td className="py-2.5 px-3">
                         <input
                           type="text"
                           value={item.productNameSnapshot}
                           onChange={(e) => handleItemChange(index, 'productNameSnapshot', e.target.value)}
-                          placeholder="e.g. Iron Pipe 20mm or Custom Item"
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                          placeholder="e.g. 12mm TMT Steel Rebar, MS Pipe, Iron Angle"
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
                           required
                         />
                       </td>
 
+                      {/* Category */}
+                      <td className="py-2.5 px-3">
+                        <input
+                          type="text"
+                          value={item.productCategorySnapshot}
+                          onChange={(e) => handleItemChange(index, 'productCategorySnapshot', e.target.value)}
+                          placeholder="e.g. Steel Bar, Pipe"
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                        />
+                      </td>
+
                       {/* Size / Specs */}
-                      <td className="py-2 px-3">
-                        {isCatalogueItem ? (
-                          <div className="text-xs text-gray-700 font-medium py-1 px-1 bg-gray-50 rounded border border-gray-200 truncate" title={item.productSizeSnapshot || ''}>
-                            {item.productSizeSnapshot || '-'}
-                          </div>
-                        ) : (
-                          <input
-                            type="text"
-                            value={item.productSizeSnapshot || ''}
-                            onChange={(e) => handleItemChange(index, 'productSizeSnapshot', e.target.value)}
-                            placeholder="e.g. 10 mm"
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                          />
-                        )}
+                      <td className="py-2.5 px-3">
+                        <input
+                          type="text"
+                          value={item.productSizeSnapshot}
+                          onChange={(e) => handleItemChange(index, 'productSizeSnapshot', e.target.value)}
+                          placeholder="e.g. 12 mm, Fe 500D"
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                        />
                       </td>
 
                       {/* Quantity */}
-                      <td className="py-2 px-3">
+                      <td className="py-2.5 px-3">
                         <input
                           type="number"
                           step="any"
                           min="0"
                           value={item.quantity}
                           onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 font-mono"
                           required
                         />
                       </td>
 
                       {/* Unit */}
-                      <td className="py-2 px-3">
+                      <td className="py-2.5 px-3">
                         <select
                           value={item.unit}
                           onChange={(e) => handleItemChange(index, 'unit', e.target.value)}
@@ -931,7 +638,7 @@ const PurchaseForm = () => {
                       </td>
 
                       {/* Purchase Rate */}
-                      <td className="py-2 px-3 text-right">
+                      <td className="py-2.5 px-3 text-right">
                         <input
                           type="number"
                           step="0.01"
@@ -939,22 +646,22 @@ const PurchaseForm = () => {
                           value={item.rate}
                           onChange={(e) => handleItemChange(index, 'rate', e.target.value)}
                           placeholder="0.00"
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs text-right focus:ring-1 focus:ring-blue-500 font-mono font-medium"
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs text-right focus:ring-1 focus:ring-blue-500 font-mono font-medium"
                           required
                         />
                       </td>
 
                       {/* Amount */}
-                      <td className="py-2 px-3 text-right font-mono font-semibold text-gray-900">
+                      <td className="py-2.5 px-3 text-right font-mono font-semibold text-gray-900">
                         ₹{lineAmt.toFixed(2)}
                       </td>
 
                       {/* Actions */}
-                      <td className="py-2 px-3 text-center">
+                      <td className="py-2.5 px-3 text-center">
                         <button
                           type="button"
                           onClick={() => handleRemoveItem(index)}
-                          className="text-gray-400 hover:text-red-600 transition-colors"
+                          className="text-gray-400 hover:text-red-600 transition-colors p-1"
                           title="Remove item"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1015,244 +722,6 @@ const PurchaseForm = () => {
           </div>
         </div>
       </div>
-
-      {/* Quick Add Product to Catalogue Modal */}
-      {showProductModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-              <div className="flex items-center space-x-2">
-                <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
-                  <Package size={20} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">Add Product to Catalogue</h3>
-                  <p className="text-xs text-gray-500">
-                    Product Master stores specifications only. Purchase rates belong to the purchase record.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowProductModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
-              >
-                &times;
-              </button>
-            </div>
-
-            {/* Modal Error */}
-            {modalError && (
-              <div className="my-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs flex items-center">
-                <AlertCircle size={15} className="mr-2 text-red-500 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
-
-            {/* Modal Form */}
-            <form onSubmit={handleCreateProductSubmit} className="space-y-4 pt-3">
-              {/* Organization (Super Admin Only) */}
-              {user?.role === 'SUPER_ADMIN' && (
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Organization <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={newProductForm.organizationId}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, organizationId: e.target.value })}
-                    className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    <option value="">Select Organization</option>
-                    {organizations.map(org => (
-                      <option key={org.id} value={org.id}>{org.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Product Name */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Product Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newProductForm.name}
-                  onChange={(e) => setNewProductForm({ ...newProductForm, name: e.target.value })}
-                  placeholder="e.g. TMT Reinforcing Bar, MS Seamless Pipe"
-                  className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              {/* Category & Custom Category */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Category <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={newProductForm.category}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, category: e.target.value })}
-                    className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    {CATEGORIES.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {newProductForm.category === 'Other' ? (
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Specify Category <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={newProductForm.customCategory}
-                      onChange={(e) => setNewProductForm({ ...newProductForm, customCategory: e.target.value })}
-                      placeholder="e.g. Iron Angle, Plate"
-                      className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Unit of Measurement <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={newProductForm.unit}
-                      onChange={(e) => setNewProductForm({ ...newProductForm, unit: e.target.value })}
-                      className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      {STANDARD_UNITS.map(u => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* Size & Unit (if Other) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Size / Diameter <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newProductForm.size}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, size: e.target.value })}
-                    placeholder="e.g. 10 mm, 2 inch"
-                    className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-
-                {newProductForm.category === 'Other' && (
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Unit of Measurement <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={newProductForm.unit}
-                      onChange={(e) => setNewProductForm({ ...newProductForm, unit: e.target.value })}
-                      className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      {STANDARD_UNITS.map(u => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* Category-specific specifications */}
-              {newProductForm.category === 'Reinforcing Steel Bar' && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Steel Grade (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={newProductForm.steelGrade}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, steelGrade: e.target.value })}
-                    placeholder="e.g. Fe 500D, Fe 550"
-                    className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              )}
-
-              {newProductForm.category === 'Pipe' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Pressure Rating (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={newProductForm.pipePressureRating}
-                      onChange={(e) => setNewProductForm({ ...newProductForm, pipePressureRating: e.target.value })}
-                      placeholder="e.g. Schedule 40, Class C"
-                      className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Standard Length (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={newProductForm.pipeLength}
-                      onChange={(e) => setNewProductForm({ ...newProductForm, pipeLength: e.target.value })}
-                      placeholder="e.g. 6 Meters"
-                      className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Description */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Product Description / Notes (Optional)
-                </label>
-                <textarea
-                  rows="2"
-                  value={newProductForm.description}
-                  onChange={(e) => setNewProductForm({ ...newProductForm, description: e.target.value })}
-                  placeholder="Manufacturing standards, specifications..."
-                  className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Modal Buttons */}
-              <div className="pt-3 flex justify-end space-x-3 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={() => setShowProductModal(false)}
-                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-xs font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={modalLoading}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-                >
-                  {modalLoading ? 'Saving...' : 'Save Product to Catalogue'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
