@@ -32,8 +32,10 @@ exports.getProducts = async (req, res) => {
     let targetOrgId = req.user.organizationId;
 
     if (req.user.role === 'SUPER_ADMIN') {
-      if (organizationId) {
-        targetOrgId = organizationId;
+      if (organizationId && organizationId !== 'ALL' && organizationId !== '') {
+        targetOrgId = parseInt(organizationId, 10);
+      } else {
+        targetOrgId = null; // Can view all organizations
       }
     } else {
       if (!targetOrgId) {

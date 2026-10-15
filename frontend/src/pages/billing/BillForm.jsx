@@ -131,10 +131,8 @@ const BillForm = () => {
         console.error('Failed to load products:', err);
       }
     };
-    if (effectiveOrgId || user?.role !== 'SUPER_ADMIN') {
-      fetchProducts();
-    }
-  }, [effectiveOrgId, user]);
+    fetchProducts();
+  }, [effectiveOrgId]);
 
   // Load Estimates for selected customer
   useEffect(() => {
@@ -723,12 +721,17 @@ const BillForm = () => {
                         onChange={(e) => handleItemChange(index, 'productId', e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                       >
-                        <option value="">-- Choose Product --</option>
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} [{p.category}] ({p.size || 'N/A'})
-                          </option>
-                        ))}
+                        <option value="">-- Choose Catalogue Product --</option>
+                        <option value="">✏️ Custom / Manual Item (Not in Catalogue)</option>
+                        {products.length > 0 && (
+                          <optgroup label={`Catalogue Products (${products.length})`}>
+                            {products.map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} [{p.category}] ({p.size || 'N/A'})
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                     </td>
 

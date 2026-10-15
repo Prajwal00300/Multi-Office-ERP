@@ -216,7 +216,9 @@ exports.createPurchase = async (req, res) => {
         let specifications = item.productSpecificationsSnapshot || item.specifications || null;
         let unit = item.unit || 'Kg';
 
-        let productId = item.productId || null;
+        let productId = (item.productId && !isNaN(Number(item.productId)) && Number(item.productId) > 0)
+          ? parseInt(item.productId, 10)
+          : null;
         if (productId) {
           const product = await Product.findByPk(productId, { transaction });
           if (product) {
@@ -372,7 +374,9 @@ exports.updatePurchase = async (req, res) => {
         let specifications = item.productSpecificationsSnapshot || item.specifications || null;
         let unit = item.unit || 'Kg';
 
-        let productId = item.productId || null;
+        let productId = (item.productId && !isNaN(Number(item.productId)) && Number(item.productId) > 0)
+          ? parseInt(item.productId, 10)
+          : null;
         if (productId) {
           const product = await Product.findByPk(productId, { transaction });
           if (product) {
@@ -727,7 +731,9 @@ exports.overridePurchase = async (req, res) => {
         let specifications = item.productSpecificationsSnapshot || item.specifications || null;
         let unit = item.unit || 'Kg';
 
-        let productId = item.productId || null;
+        let productId = (item.productId && !isNaN(Number(item.productId)) && Number(item.productId) > 0)
+          ? parseInt(item.productId, 10)
+          : null;
         if (productId) {
           const product = await Product.findByPk(productId, { transaction });
           if (product) {

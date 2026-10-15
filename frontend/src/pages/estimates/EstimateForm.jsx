@@ -512,11 +512,16 @@ const EstimateForm = () => {
                         className="block w-full px-2.5 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700"
                       >
                         <option value="">-- Choose from Product Master --</option>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} - {p.category} ({p.size})
-                          </option>
-                        ))}
+                        <option value="">✏️ Custom / Manual Item (Not in Catalogue)</option>
+                        {products.length > 0 && (
+                          <optgroup label={`Product Master (${products.length})`}>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} - {p.category} ({p.size})
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
 
                       <input
