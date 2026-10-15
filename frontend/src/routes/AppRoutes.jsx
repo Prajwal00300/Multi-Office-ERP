@@ -20,6 +20,9 @@ import BillsList from '../pages/billing/BillsList';
 import BillForm from '../pages/billing/BillForm';
 import BillDetail from '../pages/billing/BillDetail';
 import BillPrint from '../pages/billing/BillPrint';
+import PurchasesList from '../pages/purchases/PurchasesList';
+import PurchaseForm from '../pages/purchases/PurchaseForm';
+import PurchaseDetail from '../pages/purchases/PurchaseDetail';
 
 const AppRoutes = () => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
@@ -71,6 +74,10 @@ const AppRoutes = () => {
           <Route path="/bills/:id" element={<BillDetail />} />
           <Route path="/bills/:id/edit" element={<BillForm />} />
           <Route path="/bills/:id/print" element={<BillPrint />} />
+          <Route path="/purchases" element={<PurchasesList />} />
+          <Route path="/purchases/new" element={<PurchaseForm />} />
+          <Route path="/purchases/:id" element={<PurchaseDetail />} />
+          <Route path="/purchases/:id/edit" element={<PurchaseForm />} />
         </Route>
       </Route>
 
