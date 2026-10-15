@@ -7,6 +7,7 @@ const userRoutes = require('./routes/userRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const productRoutes = require('./routes/productRoutes');
 const estimateRoutes = require('./routes/estimateRoutes');
+const billRoutes = require('./routes/billRoutes');
 const cors = require('cors');
 
 const app = express();
@@ -42,6 +43,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/estimates', estimateRoutes);
+app.use('/api/bills', billRoutes);
 
 // Basic health check route
 app.get('/api/health', (req, res) => {

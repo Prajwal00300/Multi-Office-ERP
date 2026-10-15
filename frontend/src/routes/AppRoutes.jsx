@@ -16,6 +16,10 @@ import EstimatesList from '../pages/estimates/EstimatesList';
 import EstimateForm from '../pages/estimates/EstimateForm';
 import EstimateDetail from '../pages/estimates/EstimateDetail';
 import EstimatePrint from '../pages/estimates/EstimatePrint';
+import BillsList from '../pages/billing/BillsList';
+import BillForm from '../pages/billing/BillForm';
+import BillDetail from '../pages/billing/BillDetail';
+import BillPrint from '../pages/billing/BillPrint';
 
 const AppRoutes = () => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
@@ -54,7 +58,7 @@ const AppRoutes = () => {
         </Route>
       </Route>
 
-      {/* Protected Estimate Routes (SUPER_ADMIN, ADMIN, OPERATIONS_BILLING) */}
+      {/* Protected Estimate & Billing Routes (SUPER_ADMIN, ADMIN, OPERATIONS_BILLING) */}
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING']} />}>
         <Route element={<Layout />}>
           <Route path="/estimates" element={<EstimatesList />} />
@@ -62,6 +66,11 @@ const AppRoutes = () => {
           <Route path="/estimates/:id" element={<EstimateDetail />} />
           <Route path="/estimates/:id/edit" element={<EstimateForm />} />
           <Route path="/estimates/:id/print" element={<EstimatePrint />} />
+          <Route path="/bills" element={<BillsList />} />
+          <Route path="/bills/new" element={<BillForm />} />
+          <Route path="/bills/:id" element={<BillDetail />} />
+          <Route path="/bills/:id/edit" element={<BillForm />} />
+          <Route path="/bills/:id/print" element={<BillPrint />} />
         </Route>
       </Route>
 
