@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const Customer = require('../models/Customer');
+const Organization = require('../models/Organization');
 
 // Create a new customer
 exports.createCustomer = async (req, res) => {
@@ -54,24 +55,28 @@ exports.createCustomer = async (req, res) => {
   }
 };
 
-// Get all customers (with search support)
+// Get all customers (with search & organization support)
 exports.getCustomers = async (req, res) => {
   try {
     const { search, organizationId } = req.query;
     let targetOrgId = req.user.organizationId;
 
     if (req.user.role === 'SUPER_ADMIN') {
-      if (!organizationId) {
-        return res.status(400).json({ error: 'Super Admin must specify an organizationId context (?organizationId=...) to fetch customers.' });
+      if (organizationId && organizationId !== 'ALL' && organizationId !== '') {
+        targetOrgId = parseInt(organizationId, 10);
+      } else {
+        targetOrgId = null; // Can view all organizations
       }
-      targetOrgId = organizationId;
     } else {
       if (!targetOrgId) {
         return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
       }
     }
 
-    const whereClause = { organizationId: targetOrgId };
+    const whereClause = {};
+    if (targetOrgId) {
+      whereClause.organizationId = targetOrgId;
+    }
 
     if (search && search.trim() !== '') {
       const searchTerm = `%${search.trim()}%`;
@@ -85,6 +90,12 @@ exports.getCustomers = async (req, res) => {
 
     const customers = await Customer.findAll({
       where: whereClause,
+      include: [
+        {
+          model: Organization,
+          attributes: ['id', 'name']
+        }
+      ],
       order: [['createdAt', 'DESC']]
     });
 
@@ -100,7 +111,14 @@ exports.getCustomerById = async (req, res) => {
   try {
     const { id } = req.params;
     
-    const customer = await Customer.findByPk(id);
+    const customer = await Customer.findByPk(id, {
+      include: [
+        {
+          model: Organization,
+          attributes: ['id', 'name']
+        }
+      ]
+    });
     
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });

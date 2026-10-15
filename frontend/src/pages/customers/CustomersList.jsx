@@ -6,9 +6,11 @@ import { AuthContext } from '../../context/AuthContext';
 const CustomersList = () => {
   const { user } = useContext(AuthContext);
   const [customers, setCustomers] = useState([]);
+  const [organizations, setOrganizations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedOrgId, setSelectedOrgId] = useState(''); // '' means All Organizations
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
@@ -25,6 +27,22 @@ const CustomersList = () => {
     organizationId: user?.organizationId || '' 
   });
 
+  // Fetch Organizations for Super Admin
+  useEffect(() => {
+    if (user?.role === 'SUPER_ADMIN') {
+      const fetchOrgs = async () => {
+        try {
+          const res = await api.get('/organizations');
+          setOrganizations(res.data || []);
+        } catch (err) {
+          console.error('Failed to load organizations:', err);
+        }
+      };
+      fetchOrgs();
+    }
+  }, [user]);
+
+  // Fetch Customers with debounced search and organization filter
   const fetchCustomers = useCallback(async (searchQuery = '') => {
     try {
       setLoading(true);
@@ -32,14 +50,17 @@ const CustomersList = () => {
       
       const params = new URLSearchParams();
       if (searchQuery) params.append('search', searchQuery);
-      if (user?.role === 'SUPER_ADMIN' && user?.organizationId) {
-         params.append('organizationId', user.organizationId);
-      } else if (user?.role === 'SUPER_ADMIN' && formData.organizationId) {
-         params.append('organizationId', formData.organizationId);
+      
+      if (user?.role === 'SUPER_ADMIN') {
+        if (selectedOrgId) {
+          params.append('organizationId', selectedOrgId);
+        }
+      } else if (user?.organizationId) {
+        params.append('organizationId', user.organizationId);
       }
 
       const response = await api.get(`/customers?${params.toString()}`);
-      setCustomers(response.data);
+      setCustomers(response.data || []);
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.error || 'Failed to fetch customers.');
@@ -47,12 +68,12 @@ const CustomersList = () => {
     } finally {
       setLoading(false);
     }
-  }, [user, formData.organizationId]);
+  }, [user, selectedOrgId]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
       fetchCustomers(searchTerm);
-    }, 500);
+    }, 400);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm, fetchCustomers]);
@@ -65,7 +86,7 @@ const CustomersList = () => {
       address: '',
       city: '',
       tin: '',
-      organizationId: formData.organizationId
+      organizationId: selectedOrgId || (organizations.length > 0 ? organizations[0].id : (user?.organizationId || ''))
     });
     setModalError('');
     setShowModal(true);
@@ -105,6 +126,10 @@ const CustomersList = () => {
       return setModalError('Customer name is required');
     }
 
+    if (user?.role === 'SUPER_ADMIN' && !formData.organizationId) {
+      return setModalError('Please select an organization for this customer.');
+    }
+
     try {
       setModalLoading(true);
       setModalError('');
@@ -114,11 +139,22 @@ const CustomersList = () => {
       if (editingCustomer) {
         // Update existing
         const response = await api.put(`/customers/${editingCustomer.id}`, payload);
-        setCustomers(customers.map(c => c.id === editingCustomer.id ? response.data.customer : c));
+        const updated = response.data.customer;
+        // Attach organization name for table display if available
+        if (updated && !updated.Organization) {
+          const matchedOrg = organizations.find(o => String(o.id) === String(updated.organizationId));
+          if (matchedOrg) updated.Organization = matchedOrg;
+        }
+        setCustomers(customers.map(c => c.id === editingCustomer.id ? updated : c));
       } else {
         // Create new
         const response = await api.post('/customers', payload);
-        setCustomers([response.data.customer, ...customers]);
+        const created = response.data.customer;
+        if (created && !created.Organization) {
+          const matchedOrg = organizations.find(o => String(o.id) === String(created.organizationId));
+          if (matchedOrg) created.Organization = matchedOrg;
+        }
+        setCustomers([created, ...customers]);
       }
       
       setShowModal(false);
@@ -138,17 +174,22 @@ const CustomersList = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0">
-        <h2 className="text-2xl font-bold text-gray-800">Customer Management</h2>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Customer Management</h2>
+          <p className="text-sm text-gray-500">Manage buyer directory and organization assignment</p>
+        </div>
         <button
           onClick={handleOpenCreate}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium flex items-center transition-colors"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium flex items-center transition-colors shadow-sm"
         >
           <Plus size={18} className="mr-2" />
           Add Customer
         </button>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
+      {/* Filter and Search Bar */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row gap-3">
+        {/* Search Input */}
         <div className="relative flex-grow">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Search className="h-5 w-5 text-gray-400" />
@@ -161,15 +202,23 @@ const CustomersList = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
+
+        {/* Super Admin Organization Dropdown */}
         {user?.role === 'SUPER_ADMIN' && (
-           <input 
-              type="number"
-              placeholder="Org ID (Super Admin)"
-              className="block w-full sm:w-48 px-3 py-2 border border-gray-300 rounded-md sm:text-sm focus:ring-1 focus:ring-blue-500"
-              value={formData.organizationId}
-              onChange={(e) => setFormData({...formData, organizationId: e.target.value})}
-              title="Super Admins must specify an Organization ID context"
-           />
+          <div className="w-full sm:w-64 shrink-0">
+            <select
+              value={selectedOrgId}
+              onChange={(e) => setSelectedOrgId(e.target.value)}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md sm:text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium text-gray-700"
+            >
+              <option value="">All Organizations</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
       </div>
 
@@ -181,6 +230,9 @@ const CustomersList = () => {
             <thead>
               <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                 <th className="px-6 py-4 font-medium">Customer Name</th>
+                {user?.role === 'SUPER_ADMIN' && (
+                  <th className="px-6 py-4 font-medium">Organization</th>
+                )}
                 <th className="px-6 py-4 font-medium">City</th>
                 <th className="px-6 py-4 font-medium">Phone</th>
                 <th className="px-6 py-4 font-medium">TIN</th>
@@ -190,7 +242,7 @@ const CustomersList = () => {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={user?.role === 'SUPER_ADMIN' ? 6 : 5} className="px-6 py-8 text-center text-gray-500">
                     <div className="flex justify-center items-center">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-2"></div>
                       Searching customers...
@@ -199,7 +251,7 @@ const CustomersList = () => {
                 </tr>
               ) : customers.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="px-6 py-12 text-center">
+                  <td colSpan={user?.role === 'SUPER_ADMIN' ? 6 : 5} className="px-6 py-12 text-center">
                     <div className="flex flex-col items-center justify-center space-y-3">
                       <div className="bg-gray-100 p-3 rounded-full">
                         <Search className="h-6 w-6 text-gray-400" />
@@ -217,6 +269,7 @@ const CustomersList = () => {
               ) : (
                 customers.map((customer) => (
                   <tr key={customer.id} className="hover:bg-gray-50 transition-colors">
+                    {/* Customer Name */}
                     <td className="px-6 py-4">
                       <div className="flex items-center">
                         <div className="bg-blue-100 p-2 rounded-md mr-3 text-blue-600">
@@ -225,6 +278,20 @@ const CustomersList = () => {
                         <span className="text-sm font-semibold text-gray-800">{customer.name}</span>
                       </div>
                     </td>
+
+                    {/* Organization Column (Super Admin) */}
+                    {user?.role === 'SUPER_ADMIN' && (
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        <div className="flex items-center">
+                          <Building size={14} className="mr-1.5 text-indigo-500 shrink-0" />
+                          <span className="font-medium text-gray-800">
+                            {customer.Organization?.name || `Office #${customer.organizationId}`}
+                          </span>
+                        </div>
+                      </td>
+                    )}
+
+                    {/* City */}
                     <td className="px-6 py-4 text-sm text-gray-600">
                       {customer.city ? (
                         <div className="flex items-center">
@@ -233,6 +300,8 @@ const CustomersList = () => {
                         </div>
                       ) : '-'}
                     </td>
+
+                    {/* Phone */}
                     <td className="px-6 py-4 text-sm text-gray-600">
                       {customer.phone ? (
                         <div className="flex items-center">
@@ -241,6 +310,8 @@ const CustomersList = () => {
                         </div>
                       ) : '-'}
                     </td>
+
+                    {/* TIN */}
                     <td className="px-6 py-4 text-sm text-gray-600">
                       {customer.tin ? (
                         <div className="flex items-center">
@@ -249,6 +320,8 @@ const CustomersList = () => {
                         </div>
                       ) : '-'}
                     </td>
+
+                    {/* Actions */}
                     <td className="px-6 py-4 text-sm font-medium text-right">
                       <button 
                         onClick={() => handleOpenEdit(customer)}
@@ -281,7 +354,7 @@ const CustomersList = () => {
               <h3 className="text-xl font-bold text-gray-800">
                 {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
               </h3>
-              <button onClick={handleModalClose} className="text-gray-400 hover:text-gray-600">
+              <button onClick={handleModalClose} className="text-gray-400 hover:text-gray-600 text-2xl font-bold">
                 &times;
               </button>
             </div>
@@ -289,6 +362,28 @@ const CustomersList = () => {
             {modalError && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-md text-sm">{modalError}</div>}
             
             <form onSubmit={handleSubmitCustomer} className="space-y-4">
+              {/* Organization Selection for Super Admin */}
+              {user?.role === 'SUPER_ADMIN' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Organization <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.organizationId}
+                    onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm bg-white font-medium"
+                    required
+                  >
+                    <option value="">-- Select Organization --</option>
+                    {organizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Customer Name <span className="text-red-500">*</span>
@@ -378,16 +473,16 @@ const CustomersList = () => {
                 <button
                   type="button"
                   onClick={handleModalClose}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 font-medium text-sm transition-colors"
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={modalLoading}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm transition-colors disabled:opacity-50"
+                  className="px-4 py-2 bg-blue-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50"
                 >
-                  {modalLoading ? 'Saving...' : (editingCustomer ? 'Save Changes' : 'Save Customer')}
+                  {modalLoading ? 'Saving...' : editingCustomer ? 'Update Customer' : 'Add Customer'}
                 </button>
               </div>
             </form>
