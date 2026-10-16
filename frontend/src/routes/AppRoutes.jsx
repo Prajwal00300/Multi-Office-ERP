@@ -23,6 +23,13 @@ import BillPrint from '../pages/billing/BillPrint';
 import PurchasesList from '../pages/purchases/PurchasesList';
 import PurchaseForm from '../pages/purchases/PurchaseForm';
 import PurchaseDetail from '../pages/purchases/PurchaseDetail';
+import WeighbridgeList from '../pages/weighbridge/WeighbridgeList';
+import WeighbridgeForm from '../pages/weighbridge/WeighbridgeForm';
+import WeighbridgeDetail from '../pages/weighbridge/WeighbridgeDetail';
+import GatePassesList from '../pages/gate-passes/GatePassesList';
+import GatePassForm from '../pages/gate-passes/GatePassForm';
+import GatePassDetail from '../pages/gate-passes/GatePassDetail';
+import GatePassPrint from '../pages/gate-passes/GatePassPrint';
 
 const AppRoutes = () => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
@@ -81,7 +88,23 @@ const AppRoutes = () => {
         </Route>
       </Route>
 
-      {/* Root redirect based on auth state */}
+      {/* Protected Weighbridge & Gate Pass Routes */}
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING']} />}>
+        <Route element={<Layout />}>
+          {/* Weighbridge Management */}
+          <Route path="/weighbridge" element={<WeighbridgeList />} />
+          <Route path="/weighbridge/new" element={<WeighbridgeForm />} />
+          <Route path="/weighbridge/:id" element={<WeighbridgeDetail />} />
+
+          {/* Gate Pass Management */}
+          <Route path="/gate-passes" element={<GatePassesList />} />
+          <Route path="/gate-passes/new" element={<GatePassForm />} />
+          <Route path="/gate-passes/:id" element={<GatePassDetail />} />
+          <Route path="/gate-passes/:id/print" element={<GatePassPrint />} />
+        </Route>
+      </Route>
+
+      {/* Root redirect based on auth state and role */}
       <Route 
         path="/" 
         element={
@@ -89,6 +112,10 @@ const AppRoutes = () => {
             <Navigate to="/login" replace />
           ) : user?.role === 'SUPER_ADMIN' ? (
             <Navigate to="/super-admin/dashboard" replace />
+          ) : ['ADMIN', 'OPERATIONS_BILLING'].includes(user?.role) ? (
+            <Navigate to="/bills" replace />
+          ) : user?.role === 'WEIGHBRIDGE_CONTROLLER' ? (
+            <Navigate to="/weighbridge" replace />
           ) : (
             <Navigate to="/unauthorized" replace />
           )

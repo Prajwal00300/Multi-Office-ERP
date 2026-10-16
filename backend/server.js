@@ -9,6 +9,8 @@ const productRoutes = require('./routes/productRoutes');
 const estimateRoutes = require('./routes/estimateRoutes');
 const billRoutes = require('./routes/billRoutes');
 const purchaseRoutes = require('./routes/purchaseRoutes');
+const weighbridgeRoutes = require('./routes/weighbridgeRoutes');
+const gatePassRoutes = require('./routes/gatePassRoutes');
 const cors = require('cors');
 
 const app = express();
@@ -46,6 +48,8 @@ app.use('/api/products', productRoutes);
 app.use('/api/estimates', estimateRoutes);
 app.use('/api/bills', billRoutes);
 app.use('/api/purchases', purchaseRoutes);
+app.use('/api/weighbridge', weighbridgeRoutes);
+app.use('/api/gate-passes', gatePassRoutes);
 
 // Basic health check route
 app.get('/api/health', (req, res) => {
