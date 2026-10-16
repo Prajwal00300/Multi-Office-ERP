@@ -3,6 +3,8 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const billController = require('../controllers/billController');
 
+const checkModulePermission = require('../middleware/checkModulePermission');
+
 // Role-based authorization middleware for Billing module
 const authorizeBillingAccess = (req, res, next) => {
   const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'];
@@ -17,6 +19,7 @@ const authorizeBillingAccess = (req, res, next) => {
 
 router.use(authMiddleware);
 router.use(authorizeBillingAccess);
+router.use(checkModulePermission('BILLING'));
 
 // Billing routes
 router.get('/', billController.getBills);

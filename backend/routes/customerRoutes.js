@@ -3,9 +3,11 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const customerController = require('../controllers/customerController');
 
+const checkModulePermission = require('../middleware/checkModulePermission');
+
 // Role-based authorization middleware specifically for customers
 const authorizeCustomerAccess = (req, res, next) => {
-  const allowedRoles = ['SUPER_ADMIN'];
+  const allowedRoles = ['SUPER_ADMIN', 'ADMIN'];
   
   if (!allowedRoles.includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied. Insufficient permissions to manage customers.' });
@@ -15,6 +17,7 @@ const authorizeCustomerAccess = (req, res, next) => {
 
 router.use(authMiddleware);
 router.use(authorizeCustomerAccess);
+router.use(checkModulePermission('CUSTOMER_MASTER'));
 
 router.get('/', customerController.getCustomers);
 router.post('/', customerController.createCustomer);

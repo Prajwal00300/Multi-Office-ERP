@@ -1,0 +1,348 @@
+const sequelize = require('../config/database');
+const Organization = require('../models/Organization');
+const User = require('../models/User');
+const DutyAssignment = require('../models/DutyAssignment');
+const { 
+  MODULES, 
+  VALID_MODULE_IDS, 
+  IMPLEMENTED_MODULE_IDS 
+} = require('../config/moduleRegistry');
+
+/**
+ * GET /api/duty-assignments/modules
+ * Return all registered system modules and their implementation status.
+ */
+exports.getModules = async (req, res) => {
+  try {
+    res.status(200).json({
+      modules: MODULES,
+      implementedModuleIds: IMPLEMENTED_MODULE_IDS
+    });
+  } catch (error) {
+    console.error('Error fetching modules:', error);
+    res.status(500).json({ error: 'Internal server error while fetching modules.' });
+  }
+};
+
+/**
+ * GET /api/duty-assignments/organizations
+ * Return all organizations (Super Admin only).
+ */
+exports.getOrganizations = async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Access denied: Super Admin only.' });
+    }
+
+    const organizations = await Organization.findAll({
+      order: [['name', 'ASC']],
+      attributes: ['id', 'name', 'phone', 'address', 'status']
+    });
+
+    res.status(200).json(organizations);
+  } catch (error) {
+    console.error('Error fetching organizations for duty assignment:', error);
+    res.status(500).json({ error: 'Internal server error while fetching organizations.' });
+  }
+};
+
+/**
+ * GET /api/duty-assignments/admins/:organizationId
+ * Return all users with role 'ADMIN' belonging to the specified organization.
+ */
+exports.getAdminsByOrganization = async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Access denied: Super Admin only.' });
+    }
+
+    const orgId = parseInt(req.params.organizationId, 10);
+    if (isNaN(orgId)) {
+      return res.status(400).json({ error: 'Valid Organization ID is required.' });
+    }
+
+    // Verify organization exists
+    const organization = await Organization.findByPk(orgId);
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found.' });
+    }
+
+    const admins = await User.findAll({
+      where: {
+        organizationId: orgId,
+        role: 'ADMIN'
+      },
+      attributes: ['id', 'username', 'role', 'organizationId', 'createdAt'],
+      order: [['username', 'ASC']]
+    });
+
+    res.status(200).json({
+      organization: {
+        id: organization.id,
+        name: organization.name
+      },
+      admins
+    });
+  } catch (error) {
+    console.error('Error fetching organization admins:', error);
+    res.status(500).json({ error: 'Internal server error while fetching organization admins.' });
+  }
+};
+
+/**
+ * GET /api/duty-assignments/permissions/:userId
+ * Return saved module permissions for the selected Admin.
+ */
+exports.getAdminPermissions = async (req, res) => {
+  try {
+    const targetUserId = parseInt(req.params.userId, 10);
+    const { organizationId } = req.query;
+
+    if (isNaN(targetUserId)) {
+      return res.status(400).json({ error: 'Valid User ID is required.' });
+    }
+
+    // Authorization: Super Admin, or user inspecting their own permissions
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.userId !== targetUserId) {
+      return res.status(403).json({ error: 'Access denied: You cannot view permissions for another user.' });
+    }
+
+    // Find target user
+    const targetUser = await User.findByPk(targetUserId, {
+      attributes: ['id', 'username', 'role', 'organizationId']
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    if (targetUser.role !== 'ADMIN') {
+      return res.status(400).json({ error: 'Duty assignments can only be viewed for users with the ADMIN role.' });
+    }
+
+    // Verify organization matching if query param provided
+    if (organizationId && targetUser.organizationId !== parseInt(organizationId, 10)) {
+      return res.status(400).json({ error: 'User does not belong to the requested organization.' });
+    }
+
+    // Fetch saved permissions
+    const savedRecords = await DutyAssignment.findAll({
+      where: {
+        userId: targetUser.id,
+        organizationId: targetUser.organizationId
+      }
+    });
+
+    const hasConfiguredDuties = savedRecords.length > 0;
+    const permissionsMap = {};
+
+    // Standardize all implemented modules
+    IMPLEMENTED_MODULE_IDS.forEach(moduleId => {
+      const existing = savedRecords.find(r => r.moduleKey === moduleId);
+      if (existing) {
+        permissionsMap[moduleId] = Boolean(existing.isEnabled);
+      } else {
+        // If duties have never been configured, default to true. If duties are configured, missing defaults to false.
+        permissionsMap[moduleId] = !hasConfiguredDuties;
+      }
+    });
+
+    res.status(200).json({
+      userId: targetUser.id,
+      username: targetUser.username,
+      organizationId: targetUser.organizationId,
+      hasConfiguredDuties,
+      permissions: permissionsMap
+    });
+  } catch (error) {
+    console.error('Error fetching admin permissions:', error);
+    res.status(500).json({ error: 'Internal server error while fetching admin permissions.' });
+  }
+};
+
+/**
+ * POST /api/duty-assignments/permissions
+ * Save or update module permissions for a specific organization Admin (Super Admin only).
+ */
+exports.saveAdminPermissions = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      await transaction.rollback();
+      return res.status(403).json({ error: 'Access denied: Only Super Admin can modify duty assignments.' });
+    }
+
+    const { organizationId, userId, permissions } = req.body;
+
+    if (!organizationId || !userId || !permissions || typeof permissions !== 'object') {
+      await transaction.rollback();
+      return res.status(400).json({ 
+        error: 'organizationId, userId, and a permissions object are required.' 
+      });
+    }
+
+    const orgId = parseInt(organizationId, 10);
+    const targetUserId = parseInt(userId, 10);
+
+    // Verify Organization exists
+    const organization = await Organization.findByPk(orgId, { transaction });
+    if (!organization) {
+      await transaction.rollback();
+      return res.status(404).json({ error: 'Organization not found.' });
+    }
+
+    // Verify User exists and belongs to this organization
+    const targetUser = await User.findByPk(targetUserId, { transaction });
+    if (!targetUser) {
+      await transaction.rollback();
+      return res.status(404).json({ error: 'Admin user not found.' });
+    }
+
+    if (targetUser.organizationId !== orgId) {
+      await transaction.rollback();
+      return res.status(400).json({ 
+        error: `Cross-organization assignment rejected: User "${targetUser.username}" does not belong to organization "${organization.name}".` 
+      });
+    }
+
+    if (targetUser.role !== 'ADMIN') {
+      await transaction.rollback();
+      return res.status(400).json({ 
+        error: `Invalid role: User "${targetUser.username}" is a ${targetUser.role}. Duty assignments can only be configured for ADMIN role accounts.` 
+      });
+    }
+
+    // Validate that no unimplemented modules are enabled
+    for (const key of Object.keys(permissions)) {
+      if (!VALID_MODULE_IDS.includes(key)) {
+        await transaction.rollback();
+        return res.status(400).json({ error: `Unknown module key "${key}".` });
+      }
+
+      if (!IMPLEMENTED_MODULE_IDS.includes(key) && permissions[key] === true) {
+        await transaction.rollback();
+        return res.status(400).json({ 
+          error: `Module "${key}" is not yet implemented in the ERP system and cannot be enabled.` 
+        });
+      }
+    }
+
+    // Upsert permissions for all implemented modules
+    const updatedPermissions = {};
+    for (const moduleId of IMPLEMENTED_MODULE_IDS) {
+      const isEnabled = Boolean(permissions[moduleId]);
+      updatedPermissions[moduleId] = isEnabled;
+
+      // Check if existing record
+      const existing = await DutyAssignment.findOne({
+        where: {
+          organizationId: orgId,
+          userId: targetUserId,
+          moduleKey: moduleId
+        },
+        transaction
+      });
+
+      if (existing) {
+        await existing.update({ isEnabled }, { transaction });
+      } else {
+        await DutyAssignment.create({
+          organizationId: orgId,
+          userId: targetUserId,
+          moduleKey: moduleId,
+          isEnabled
+        }, { transaction });
+      }
+    }
+
+    await transaction.commit();
+
+    res.status(200).json({
+      message: `Duty assignments for ${targetUser.username} saved successfully.`,
+      organizationId: orgId,
+      userId: targetUserId,
+      permissions: updatedPermissions
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('Error saving admin permissions:', error);
+    res.status(500).json({ error: 'Internal server error while saving duty assignments.' });
+  }
+};
+
+/**
+ * GET /api/duty-assignments/my-permissions
+ * Return active permissions for the currently logged-in user.
+ * Allows frontend sidebar and route guards to enforce permissions dynamically.
+ */
+exports.getMyPermissions = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Super Admin has unrestricted access to all implemented modules
+    if (req.user.role === 'SUPER_ADMIN') {
+      const superAdminPerms = {};
+      IMPLEMENTED_MODULE_IDS.forEach(m => {
+        superAdminPerms[m] = true;
+      });
+      return res.status(200).json({
+        role: 'SUPER_ADMIN',
+        organizationId: null,
+        permissions: superAdminPerms
+      });
+    }
+
+    // For ADMIN role, fetch duty assignments
+    if (req.user.role === 'ADMIN') {
+      const records = await DutyAssignment.findAll({
+        where: {
+          userId: req.user.userId,
+          organizationId: req.user.organizationId
+        }
+      });
+
+      const permsMap = {};
+      const hasConfiguredDuties = records.length > 0;
+
+      IMPLEMENTED_MODULE_IDS.forEach(moduleId => {
+        const found = records.find(r => r.moduleKey === moduleId);
+        if (found) {
+          permsMap[moduleId] = Boolean(found.isEnabled);
+        } else {
+          // If unconfigured, default to true; if configured, missing is false
+          permsMap[moduleId] = !hasConfiguredDuties;
+        }
+      });
+
+      return res.status(200).json({
+        role: 'ADMIN',
+        organizationId: req.user.organizationId,
+        permissions: permsMap
+      });
+    }
+
+    // For operational roles (OPERATIONS_BILLING, WEIGHBRIDGE_CONTROLLER):
+    // Standard role-based access
+    const operationalPerms = {};
+    IMPLEMENTED_MODULE_IDS.forEach(m => {
+      if (req.user.role === 'OPERATIONS_BILLING') {
+        operationalPerms[m] = ['ESTIMATES', 'BILLING', 'PURCHASES'].includes(m);
+      } else if (req.user.role === 'WEIGHBRIDGE_CONTROLLER') {
+        operationalPerms[m] = ['WEIGHBRIDGE', 'GATE_PASS'].includes(m);
+      } else {
+        operationalPerms[m] = false;
+      }
+    });
+
+    res.status(200).json({
+      role: req.user.role,
+      organizationId: req.user.organizationId,
+      permissions: operationalPerms
+    });
+  } catch (error) {
+    console.error('Error fetching my permissions:', error);
+    res.status(500).json({ error: 'Internal server error while fetching current user permissions.' });
+  }
+};

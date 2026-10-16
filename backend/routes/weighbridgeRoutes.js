@@ -3,8 +3,24 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const weighbridgeController = require('../controllers/weighbridgeController');
 
+const checkModulePermission = require('../middleware/checkModulePermission');
+
+// Role-based authorization middleware for Weighbridge module
+const authorizeWeighbridgeAccess = (req, res, next) => {
+  const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'];
+
+  if (!allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({
+      error: 'Access denied. Insufficient permissions to access Weighbridge Management.'
+    });
+  }
+  next();
+};
+
 // All weighbridge routes require authenticated user
 router.use(authMiddleware);
+router.use(authorizeWeighbridgeAccess);
+router.use(checkModulePermission('WEIGHBRIDGE'));
 
 // Search eligible transactions (Bills/Estimates)
 router.get('/transactions', weighbridgeController.searchTransactions);

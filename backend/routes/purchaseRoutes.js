@@ -3,6 +3,8 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const purchaseController = require('../controllers/purchaseController');
 
+const checkModulePermission = require('../middleware/checkModulePermission');
+
 // Role-based authorization middleware for Purchase module
 const authorizePurchaseAccess = (req, res, next) => {
   const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'];
@@ -17,6 +19,7 @@ const authorizePurchaseAccess = (req, res, next) => {
 
 router.use(authMiddleware);
 router.use(authorizePurchaseAccess);
+router.use(checkModulePermission('PURCHASES'));
 
 // Purchase routes
 router.get('/', purchaseController.getPurchases);

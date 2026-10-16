@@ -17,23 +17,25 @@ import {
   Wallet,
   BarChart3,
   ClipboardList,
-  Lock
+  Lock,
+  ShieldCheck
 } from 'lucide-react';
 
 const Sidebar = ({ isOpen }) => {
-  const { user } = useContext(AuthContext);
+  const { user, permissions } = useContext(AuthContext);
 
   // Define nav items and the roles allowed to see them
   const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: user?.role === 'SUPER_ADMIN' ? '/super-admin/dashboard' : '/', roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING', 'PAYMENT_COLLECTOR'] },
     { name: 'Organizations', icon: Building2, path: '/super-admin/organizations', roles: ['SUPER_ADMIN'] },
-    { name: 'Customers', icon: Users, path: '/customers', roles: ['SUPER_ADMIN'] },
-    { name: 'Products', icon: Package, path: '/products', roles: ['SUPER_ADMIN'] },
-    { name: 'Estimates', icon: FileText, path: '/estimates', roles: ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'] },
-    { name: 'Billing', icon: Receipt, path: '/bills', roles: ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'] },
-    { name: 'Purchases', icon: ShoppingCart, path: '/purchases', roles: ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'] },
-    { name: 'Weighbridge', icon: Scale, path: '/weighbridge', roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'] },
-    { name: 'Gate Pass', icon: Ticket, path: '/gate-passes', roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'] },
+    { name: 'Duty Assignment', icon: ShieldCheck, path: '/super-admin/duty-assignment', roles: ['SUPER_ADMIN'] },
+    { name: 'Customers', icon: Users, path: '/customers', roles: ['SUPER_ADMIN', 'ADMIN'], moduleKey: 'CUSTOMER_MASTER' },
+    { name: 'Products', icon: Package, path: '/products', roles: ['SUPER_ADMIN', 'ADMIN'], moduleKey: 'PRODUCT_MASTER' },
+    { name: 'Estimates', icon: FileText, path: '/estimates', roles: ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
+    { name: 'Billing', icon: Receipt, path: '/bills', roles: ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
+    { name: 'Purchases', icon: ShoppingCart, path: '/purchases', roles: ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
+    { name: 'Weighbridge', icon: Scale, path: '/weighbridge', roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'], moduleKey: 'WEIGHBRIDGE' },
+    { name: 'Gate Pass', icon: Ticket, path: '/gate-passes', roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'], moduleKey: 'GATE_PASS' },
     { name: 'Payments', icon: CreditCard, path: '#', disabled: true },
     { name: 'Expenses', icon: Wallet, path: '#', disabled: true },
     { name: 'Reports', icon: BarChart3, path: '#', disabled: true },
@@ -41,13 +43,24 @@ const Sidebar = ({ isOpen }) => {
     { name: 'System Lock', icon: Lock, path: '#', disabled: true, textClass: 'text-red-500' },
   ];
 
-  // Filter items. If roles array exists, check if user's role is in it. If not, assume it's visible to all (or hidden if we prefer strict, let's keep disabled ones visible to show upcoming features)
+  // Filter items:
+  // 1. Roles-based filter
+  // 2. For ADMIN, dynamically filter out modules disabled via Duty Assignment
   const visibleNavItems = navItems.filter(item => {
     if (item.disabled) return true; // Show disabled items to everyone
-    if (item.roles && user) {
-      return item.roles.includes(user.role);
+
+    if (item.roles && user && !item.roles.includes(user.role)) {
+      return false;
     }
-    return true; // default visible
+
+    // Check duty assignment permission for ADMIN role
+    if (user?.role === 'ADMIN' && item.moduleKey) {
+      if (permissions && permissions[item.moduleKey] === false) {
+        return false;
+      }
+    }
+
+    return true;
   });
 
   return (

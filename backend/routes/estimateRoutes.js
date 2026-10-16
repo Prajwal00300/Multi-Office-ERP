@@ -3,6 +3,8 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const estimateController = require('../controllers/estimateController');
 
+const checkModulePermission = require('../middleware/checkModulePermission');
+
 // Role-based authorization middleware for Estimate module
 const authorizeEstimateAccess = (req, res, next) => {
   const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'];
@@ -17,6 +19,7 @@ const authorizeEstimateAccess = (req, res, next) => {
 
 router.use(authMiddleware);
 router.use(authorizeEstimateAccess);
+router.use(checkModulePermission('ESTIMATES'));
 
 // Estimate routes
 router.get('/', estimateController.getEstimates);
