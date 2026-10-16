@@ -12,6 +12,9 @@ router.get('/modules', dutyAssignmentController.getModules);
 // Get active user's permissions (accessible by any authenticated user)
 router.get('/my-permissions', dutyAssignmentController.getMyPermissions);
 
+// Get real-time summary for Admin console (counts & permitted modules)
+router.get('/admin-dashboard-summary', dutyAssignmentController.getAdminDashboardSummary);
+
 // Super Admin endpoints
 router.get('/organizations', dutyAssignmentController.getOrganizations);
 router.get('/admins/:organizationId', dutyAssignmentController.getAdminsByOrganization);

@@ -31,11 +31,17 @@ export const getMyPermissions = async () => {
   return res.data;
 };
 
+export const getAdminDashboardSummary = async () => {
+  const res = await api.get('/duty-assignments/admin-dashboard-summary');
+  return res.data;
+};
+
 export default {
   getModules,
   getOrganizations,
   getAdminsByOrganization,
   getAdminPermissions,
   saveAdminPermissions,
-  getMyPermissions
+  getMyPermissions,
+  getAdminDashboardSummary
 };

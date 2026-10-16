@@ -60,7 +60,9 @@ const checkModulePermission = (moduleKey) => {
         const moduleDisplayName = moduleDef ? moduleDef.name : moduleKey;
 
         return res.status(403).json({
-          error: `Access denied. The "${moduleDisplayName}" module has been disabled for your account by the Super Admin.`
+          error: `Access denied. The "${moduleDisplayName}" module has been disabled for your account by the Super Admin.`,
+          code: 'MODULE_ACCESS_DISABLED',
+          moduleKey
         });
       }
 

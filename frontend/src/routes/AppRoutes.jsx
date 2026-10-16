@@ -11,6 +11,7 @@ import OrganizationsList from '../pages/super-admin/OrganizationsList';
 import OrganizationForm from '../pages/super-admin/OrganizationForm';
 import OrganizationUsers from '../pages/super-admin/OrganizationUsers';
 import DutyAssignment from '../pages/super-admin/DutyAssignment';
+import AdminDashboard from '../pages/admin/AdminDashboard';
 import CustomersList from '../pages/customers/CustomersList';
 import ProductsList from '../pages/products/ProductsList';
 import EstimatesList from '../pages/estimates/EstimatesList';
@@ -74,6 +75,13 @@ const AppRoutes = () => {
           <Route path="/super-admin/organizations/:id/edit" element={<OrganizationForm />} />
           <Route path="/super-admin/organizations/:id/users" element={<OrganizationUsers />} />
           <Route path="/super-admin/duty-assignment" element={<DutyAssignment />} />
+        </Route>
+      </Route>
+
+      {/* Protected Admin Console Routes */}
+      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'SUPER_ADMIN']} />}>
+        <Route element={<Layout />}>
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
         </Route>
       </Route>
 
@@ -151,7 +159,7 @@ const AppRoutes = () => {
           ) : user?.role === 'SUPER_ADMIN' ? (
             <Navigate to="/super-admin/dashboard" replace />
           ) : user?.role === 'ADMIN' ? (
-            <Navigate to={getAdminHomeRoute(permissions)} replace />
+            <Navigate to="/admin/dashboard" replace />
           ) : user?.role === 'OPERATIONS_BILLING' ? (
             <Navigate to="/bills" replace />
           ) : user?.role === 'WEIGHBRIDGE_CONTROLLER' ? (

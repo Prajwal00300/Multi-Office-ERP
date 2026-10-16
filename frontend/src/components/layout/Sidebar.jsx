@@ -26,7 +26,12 @@ const Sidebar = ({ isOpen }) => {
 
   // Define nav items and the roles allowed to see them
   const navItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: user?.role === 'SUPER_ADMIN' ? '/super-admin/dashboard' : '/', roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING', 'PAYMENT_COLLECTOR'] },
+    { 
+      name: 'Dashboard', 
+      icon: LayoutDashboard, 
+      path: user?.role === 'SUPER_ADMIN' ? '/super-admin/dashboard' : user?.role === 'ADMIN' ? '/admin/dashboard' : '/', 
+      roles: ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING', 'PAYMENT_COLLECTOR'] 
+    },
     { name: 'Organizations', icon: Building2, path: '/super-admin/organizations', roles: ['SUPER_ADMIN'] },
     { name: 'Duty Assignment', icon: ShieldCheck, path: '/super-admin/duty-assignment', roles: ['SUPER_ADMIN'] },
     { name: 'Customers', icon: Users, path: '/customers', roles: ['SUPER_ADMIN', 'ADMIN'], moduleKey: 'CUSTOMER_MASTER' },

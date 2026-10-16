@@ -2,6 +2,13 @@ const sequelize = require('../config/database');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 const DutyAssignment = require('../models/DutyAssignment');
+const Customer = require('../models/Customer');
+const Product = require('../models/Product');
+const Estimate = require('../models/Estimate');
+const Bill = require('../models/Bill');
+const Purchase = require('../models/Purchase');
+const WeighingRecord = require('../models/WeighingRecord');
+const GatePass = require('../models/GatePass');
 const { 
   MODULES, 
   VALID_MODULE_IDS, 
@@ -344,5 +351,84 @@ exports.getMyPermissions = async (req, res) => {
   } catch (error) {
     console.error('Error fetching my permissions:', error);
     res.status(500).json({ error: 'Internal server error while fetching current user permissions.' });
+  }
+};
+
+/**
+ * GET /api/duty-assignments/admin-dashboard-summary
+ * Return real-time module status, permissions, and entity counts for the logged-in user's organization.
+ */
+exports.getAdminDashboardSummary = async (req, res) => {
+  try {
+    const orgId = req.user.organizationId;
+    const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+
+    if (!isSuperAdmin && !orgId) {
+      return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
+    }
+
+    const whereOrg = isSuperAdmin ? {} : { organizationId: orgId };
+
+    const [
+      customersCount,
+      productsCount,
+      estimatesCount,
+      billsCount,
+      purchasesCount,
+      weighbridgeCount,
+      gatePassCount,
+      orgData
+    ] = await Promise.all([
+      Customer.count({ where: whereOrg }).catch(() => 0),
+      Product.count({ where: whereOrg }).catch(() => 0),
+      Estimate.count({ where: whereOrg }).catch(() => 0),
+      Bill.count({ where: whereOrg }).catch(() => 0),
+      Purchase.count({ where: whereOrg }).catch(() => 0),
+      WeighingRecord.count({ where: whereOrg }).catch(() => 0),
+      GatePass.count({ where: whereOrg }).catch(() => 0),
+      orgId ? Organization.findByPk(orgId, { attributes: ['id', 'name', 'address', 'phone', 'status'] }) : null
+    ]);
+
+    // Permissions map
+    const permissions = {};
+    if (isSuperAdmin) {
+      IMPLEMENTED_MODULE_IDS.forEach(m => {
+        permissions[m] = true;
+      });
+    } else {
+      const records = await DutyAssignment.findAll({
+        where: {
+          userId: req.user.userId,
+          organizationId: orgId
+        }
+      });
+      const hasConfiguredDuties = records.length > 0;
+      IMPLEMENTED_MODULE_IDS.forEach(m => {
+        const found = records.find(r => r.moduleKey === m);
+        if (found) {
+          permissions[m] = Boolean(found.isEnabled);
+        } else {
+          permissions[m] = !hasConfiguredDuties;
+        }
+      });
+    }
+
+    res.status(200).json({
+      role: req.user.role,
+      organization: orgData,
+      permissions,
+      counts: {
+        CUSTOMER_MASTER: customersCount,
+        PRODUCT_MASTER: productsCount,
+        ESTIMATES: estimatesCount,
+        BILLING: billsCount,
+        PURCHASES: purchasesCount,
+        WEIGHBRIDGE: weighbridgeCount,
+        GATE_PASS: gatePassCount
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching admin dashboard summary:', error);
+    res.status(500).json({ error: 'Internal server error while fetching admin dashboard summary.' });
   }
 };

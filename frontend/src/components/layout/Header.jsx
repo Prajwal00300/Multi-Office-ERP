@@ -22,7 +22,13 @@ const Header = ({ toggleSidebar }) => {
         >
           <Menu size={24} />
         </button>
-        <h1 className="text-xl font-semibold text-gray-800 hidden sm:block">Super Admin Dashboard</h1>
+        <h1 className="text-xl font-semibold text-gray-800 hidden sm:block">
+          {user?.role === 'SUPER_ADMIN' 
+            ? 'Super Admin Dashboard' 
+            : user?.role === 'ADMIN' 
+              ? `${user?.organization?.name || 'Office'} Admin Console` 
+              : 'OfficeFlow ERP'}
+        </h1>
         <h1 className="text-lg font-bold text-gray-800 sm:hidden">ERP</h1>
       </div>
 

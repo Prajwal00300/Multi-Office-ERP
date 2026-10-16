@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Organization = require('../models/Organization');
 
 // POST /api/auth/signup
 const signup = async (req, res) => {
@@ -72,6 +73,14 @@ const login = async (req, res) => {
       return res.status(401).json({ error: 'Invalid login credentials' });
     }
 
+    // Fetch organization info if assigned
+    let org = null;
+    if (user.organizationId) {
+      org = await Organization.findByPk(user.organizationId, {
+        attributes: ['id', 'name', 'address', 'phone', 'status']
+      });
+    }
+
     // Generate JWT
     const payload = {
       userId: user.id,
@@ -88,9 +97,11 @@ const login = async (req, res) => {
       token,
       user: {
         id: user.id,
+        userId: user.id,
         username: user.username,
         role: user.role,
-        organizationId: user.organizationId
+        organizationId: user.organizationId,
+        organization: org
       }
     });
   } catch (error) {
@@ -102,9 +113,26 @@ const login = async (req, res) => {
 // GET /api/auth/me
 const getMe = async (req, res) => {
   try {
-    // req.user is set by authMiddleware
+    const user = await User.findByPk(req.user.userId, {
+      attributes: ['id', 'username', 'role', 'organizationId']
+    });
+
+    let org = null;
+    if (user && user.organizationId) {
+      org = await Organization.findByPk(user.organizationId, {
+        attributes: ['id', 'name', 'address', 'phone', 'status']
+      });
+    }
+
     res.status(200).json({
-      user: req.user
+      user: {
+        id: req.user.userId,
+        userId: req.user.userId,
+        username: user?.username || '',
+        role: req.user.role,
+        organizationId: req.user.organizationId,
+        organization: org
+      }
     });
   } catch (error) {
     console.error('Get me error:', error);
