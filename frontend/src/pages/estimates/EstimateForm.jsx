@@ -511,7 +511,7 @@ const EstimateForm = () => {
                         onChange={(e) => handleProductSelect(index, e.target.value)}
                         className="block w-full px-2.5 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700"
                       >
-                        <option value="" disabled>-- Select Product from Product Master --</option>
+                        <option value="">-- Select Product from Product Master --</option>
                         {products.map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.name} - {p.category} ({p.size})

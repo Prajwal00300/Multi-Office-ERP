@@ -92,9 +92,10 @@ const BillForm = () => {
       const fetchOrgs = async () => {
         try {
           const res = await api.get('/organizations');
-          setOrganizations(res.data || []);
-          if (!selectedOrgId && res.data?.length > 0) {
-            setSelectedOrgId(res.data[0].id);
+          const list = res.data || [];
+          setOrganizations(list);
+          if (list.length > 0) {
+            setSelectedOrgId(prev => prev || String(list[0].id));
           }
         } catch (err) {
           console.error('Failed to load organizations:', err);
@@ -102,7 +103,7 @@ const BillForm = () => {
       };
       fetchOrgs();
     }
-  }, [user, selectedOrgId]);
+  }, [user]);
 
   // Load Customers for current organization
   useEffect(() => {
@@ -734,7 +735,7 @@ const BillForm = () => {
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
                         required
                       >
-                        <option value="" disabled>-- Select Product --</option>
+                        <option value="">-- Select Product --</option>
                         {products.length === 0 ? (
                           <option value="" disabled>No products added in Products Module</option>
                         ) : (
