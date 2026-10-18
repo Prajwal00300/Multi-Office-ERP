@@ -124,9 +124,10 @@ const BillForm = () => {
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const params = effectiveOrgId ? `?organizationId=${effectiveOrgId}&status=ACTIVE` : '?status=ACTIVE';
+        const params = effectiveOrgId ? `?organizationId=${effectiveOrgId}` : '';
         const res = await api.get(`/products${params}`);
-        setProducts(res.data || []);
+        const activeOnly = (res.data || []).filter(p => p.status !== 'INACTIVE');
+        setProducts(activeOnly);
       } catch (err) {
         console.error('Failed to load products:', err);
       }
@@ -248,12 +249,19 @@ const BillForm = () => {
     if (field === 'productId') {
       const prod = products.find(p => String(p.id) === String(value));
       if (prod) {
-        updated[index].productNameSnapshot = prod.name;
-        updated[index].productCategorySnapshot = prod.category;
-        updated[index].productSizeSnapshot = prod.size;
-        updated[index].productSpecificationsSnapshot = prod.specifications;
+        updated[index].productId = prod.id;
+        updated[index].productNameSnapshot = prod.name + (prod.size ? ` (${prod.size})` : '');
+        updated[index].productCategorySnapshot = prod.category || '';
+        updated[index].productSizeSnapshot = prod.size || '';
+        updated[index].productSpecificationsSnapshot = prod.specifications || '';
         updated[index].unit = prod.unit || 'Kg';
         // Note: rate is deliberately left unchanged / empty because Product Master has no selling price!
+      } else {
+        updated[index].productId = '';
+        updated[index].productNameSnapshot = '';
+        updated[index].productCategorySnapshot = '';
+        updated[index].productSizeSnapshot = '';
+        updated[index].productSpecificationsSnapshot = '';
       }
     }
 
@@ -342,6 +350,10 @@ const BillForm = () => {
 
     for (let i = 0; i < items.length; i++) {
       const itm = items[i];
+      if (!itm.productId) {
+        setError(`Row #${i + 1}: Please select a product from the products module.`);
+        return;
+      }
       if (!itm.productNameSnapshot || !itm.productNameSnapshot.trim()) {
         setError(`Row #${i + 1}: Description Goods (product name) is required.`);
         return;
@@ -693,7 +705,7 @@ const BillForm = () => {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200 text-gray-600 uppercase font-semibold">
                 <th className="py-2.5 px-3 w-10">#</th>
-                <th className="py-2.5 px-3 min-w-[200px]">Product Selection</th>
+                <th className="py-2.5 px-3 min-w-[220px]">Product Selection *</th>
                 <th className="py-2.5 px-3 min-w-[220px]">Description Goods *</th>
                 <th className="py-2.5 px-3 w-24">Btls</th>
                 <th className="py-2.5 px-3 w-28">Quantity *</th>
@@ -719,18 +731,23 @@ const BillForm = () => {
                       <select
                         value={item.productId || ''}
                         onChange={(e) => handleItemChange(index, 'productId', e.target.value)}
-                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                        required
                       >
-                        <option value="">-- Choose Catalogue Product --</option>
-                        <option value="">✏️ Custom / Manual Item (Not in Catalogue)</option>
-                        {products.length > 0 && (
-                          <optgroup label={`Catalogue Products (${products.length})`}>
-                            {products.map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} [{p.category}] ({p.size || 'N/A'})
-                              </option>
-                            ))}
-                          </optgroup>
+                        <option value="" disabled>-- Select Product --</option>
+                        {products.length === 0 ? (
+                          <option value="" disabled>No products added in Products Module</option>
+                        ) : (
+                          products.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}{p.size ? ` (${p.size})` : ''}{p.category ? ` - ${p.category}` : ''}
+                            </option>
+                          ))
+                        )}
+                        {item.productId && !products.some(p => String(p.id) === String(item.productId)) && (
+                          <option value={item.productId}>
+                            {item.productNameSnapshot || `Product #${item.productId}`}
+                          </option>
                         )}
                       </select>
                     </td>
@@ -741,7 +758,7 @@ const BillForm = () => {
                         type="text"
                         value={item.productNameSnapshot}
                         onChange={(e) => handleItemChange(index, 'productNameSnapshot', e.target.value)}
-                        placeholder="e.g. Iron Pipe 20mm"
+                        placeholder={item.productId ? 'Product Description' : 'Select product first'}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                         required
                       />
