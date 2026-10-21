@@ -1,9 +1,9 @@
 import React, { useContext, useState } from 'react';
-import { Menu, User, LogOut, ChevronDown } from 'lucide-react';
+import { Menu, User, LogOut, ChevronDown, PanelLeftClose } from 'lucide-react';
 import { AuthContext } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
-const Header = ({ toggleSidebar }) => {
+const Header = ({ sidebarOpen, toggleSidebar }) => {
   const { user, logout } = useContext(AuthContext);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const navigate = useNavigate();
@@ -18,9 +18,11 @@ const Header = ({ toggleSidebar }) => {
       <div className="flex items-center">
         <button 
           onClick={toggleSidebar}
-          className="mr-4 p-2 rounded-md text-gray-500 hover:bg-gray-100 md:hidden focus:outline-none"
+          className="mr-3 p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none transition-colors"
+          title={sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
+          aria-label={sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
         >
-          <Menu size={24} />
+          {sidebarOpen ? <PanelLeftClose size={20} /> : <Menu size={22} />}
         </button>
         <h1 className="text-xl font-semibold text-gray-800 hidden sm:block">
           {user?.role === 'SUPER_ADMIN' 

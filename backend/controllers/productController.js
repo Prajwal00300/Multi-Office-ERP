@@ -1,9 +1,12 @@
 const { Op } = require('sequelize');
+const sequelize = require('../config/database');
 const Product = require('../models/Product');
 const Organization = require('../models/Organization');
 const BillItem = require('../models/BillItem');
 const EstimateItem = require('../models/EstimateItem');
 const PurchaseItem = require('../models/PurchaseItem');
+const GoodsReceiptItem = require('../models/GoodsReceiptItem');
+const InventoryMovement = require('../models/InventoryMovement');
 const {
   getAuthorizedOfficeScope,
   getAuthorizedTargetOfficeForCreation,
@@ -349,41 +352,48 @@ exports.updateProductStatus = async (req, res) => {
 
 // DELETE /api/products/:id
 exports.deleteProduct = async (req, res) => {
+  const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
 
-    const product = await Product.findByPk(id);
+    const product = await Product.findByPk(id, { transaction });
     if (!product) {
+      await transaction.rollback();
       return res.status(404).json({ error: 'Product not found' });
     }
 
     // Ownership check
-    await verifyRecordOwnership(product, req.user);
+    try {
+      await verifyRecordOwnership(product, req.user);
+    } catch (scopeErr) {
+      await transaction.rollback();
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
+    }
 
-    // Check if referenced in historical transactions
-    const [billItemCount, estimateItemCount, purchaseItemCount] = await Promise.all([
-      BillItem.count({ where: { productId: id } }),
-      EstimateItem.count({ where: { productId: id } }),
-      PurchaseItem.count({ where: { productId: id } })
+    const productId = parseInt(id, 10);
+
+    // Safely unlink productId in historical transaction line items.
+    // All bill, estimate, purchase, and receipt lines preserve full product details in snapshot fields,
+    // so historical documents and financial calculations remain 100% intact and unaffected.
+    await Promise.all([
+      BillItem.update({ productId: null }, { where: { productId }, transaction }),
+      EstimateItem.update({ productId: null }, { where: { productId }, transaction }),
+      PurchaseItem.update({ productId: null }, { where: { productId }, transaction }),
+      GoodsReceiptItem.update({ productId: null }, { where: { productId }, transaction }),
+      InventoryMovement.update({ productId: null }, { where: { productId }, transaction })
     ]);
 
-    if (billItemCount > 0 || estimateItemCount > 0 || purchaseItemCount > 0) {
-      return res.status(400).json({
-        error: `Cannot delete product "${product.name}" because it is referenced in existing transactions (${billItemCount} bills, ${estimateItemCount} estimates, ${purchaseItemCount} purchases). You can deactivate it instead.`
-      });
-    }
+    await product.destroy({ transaction });
 
-    await product.destroy();
+    await transaction.commit();
 
     res.status(200).json({
-      message: `Product "${product.name}" deleted successfully`,
-      id: parseInt(id, 10)
+      message: `Product "${product.name}" deleted successfully without affecting existing bills or transactions`,
+      id: productId
     });
   } catch (error) {
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
+    await transaction.rollback();
     console.error('Error deleting product:', error);
-    res.status(500).json({ error: 'Internal server error while deleting product' });
+    res.status(500).json({ error: error.message || 'Internal server error while deleting product' });
   }
 };

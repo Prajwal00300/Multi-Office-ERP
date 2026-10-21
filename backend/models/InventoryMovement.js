@@ -20,7 +20,7 @@ const InventoryMovement = sequelize.define('InventoryMovement', {
   },
   productId: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
     references: {
       model: 'products',
       key: 'id'

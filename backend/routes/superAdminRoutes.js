@@ -20,8 +20,9 @@ router.get('/ceos/:id', superAdminController.getCeoDetails);
 router.put('/ceos/:id', superAdminController.updateCeo);
 router.patch('/ceos/:id/status', superAdminController.updateCeoStatus);
 
-// Office assignment endpoint
+// Office assignment endpoints (both forms supported)
 router.patch('/offices/:id/assign-ceo', superAdminController.assignOfficeToCeo);
+router.post('/ceos/:id/assign-office', superAdminController.assignOfficeToCeo);
 
 // Drilldown into real module records for a specific CEO
 router.get('/ceos/:id/modules/:moduleKey', superAdminController.getCeoModuleData);

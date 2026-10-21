@@ -7,7 +7,10 @@ const Customer = require('../models/Customer');
 const Product = require('../models/Product');
 const Estimate = require('../models/Estimate');
 const Bill = require('../models/Bill');
+const BillItem = require('../models/BillItem');
+const EstimateItem = require('../models/EstimateItem');
 const Purchase = require('../models/Purchase');
+const PurchaseItem = require('../models/PurchaseItem');
 const WeighingRecord = require('../models/WeighingRecord');
 const GatePass = require('../models/GatePass');
 
@@ -133,7 +136,7 @@ exports.getCeoDetails = async (req, res) => {
 
     const ceo = await User.findOne({
       where: { id, role: 'CEO' },
-      attributes: ['id', 'username', 'fullName', 'phone', 'role', 'status', 'createdAt', 'updatedAt']
+      attributes: ['id', 'username', 'fullName', 'email', 'phone', 'role', 'status', 'createdAt', 'updatedAt']
     });
 
     if (!ceo) {
@@ -149,12 +152,46 @@ exports.getCeoDetails = async (req, res) => {
 
     const officeIds = offices.map(o => o.id);
 
+    // Compute per-office breakdown
+    const enrichedOffices = await Promise.all(offices.map(async (office) => {
+      const orgId = office.id;
+      const [
+        empCount,
+        billsCount,
+        billsSum,
+        estimatesCount,
+        purchasesCount,
+        productsCount,
+        customersCount
+      ] = await Promise.all([
+        User.count({ where: { organizationId: orgId } }),
+        Bill.count({ where: { organizationId: orgId } }),
+        Bill.sum('finalAmount', { where: { organizationId: orgId } }),
+        Estimate.count({ where: { organizationId: orgId } }),
+        Purchase.count({ where: { organizationId: orgId } }),
+        Product.count({ where: { organizationId: orgId } }),
+        Customer.count({ where: { organizationId: orgId } })
+      ]);
+
+      const oJson = office.toJSON();
+      return {
+        ...oJson,
+        employeeCount: empCount,
+        billsCount: billsCount || 0,
+        billsTotalAmount: parseFloat(billsSum || 0),
+        estimatesCount: estimatesCount || 0,
+        purchasesCount: purchasesCount || 0,
+        productsCount: productsCount || 0,
+        customersCount: customersCount || 0
+      };
+    }));
+
     // Fetch employees across all offices owned by this CEO
     let employees = [];
     if (officeIds.length > 0) {
       const empList = await User.findAll({
         where: { organizationId: { [Op.in]: officeIds } },
-        attributes: ['id', 'username', 'fullName', 'phone', 'role', 'status', 'organizationId', 'createdAt'],
+        attributes: ['id', 'username', 'fullName', 'email', 'phone', 'role', 'status', 'organizationId', 'createdAt'],
         include: [
           {
             model: Organization,
@@ -222,9 +259,13 @@ exports.getCeoDetails = async (req, res) => {
 
     res.status(200).json({
       ceo,
-      offices,
+      offices: enrichedOffices,
       employees,
-      stats
+      stats,
+      counts: {
+        offices: offices.length,
+        employees: employees.length
+      }
     });
   } catch (error) {
     console.error('Error fetching CEO details:', error);
@@ -322,15 +363,19 @@ exports.updateCeo = async (req, res) => {
 exports.assignOfficeToCeo = async (req, res) => {
   try {
     const { id } = req.params;
-    const { ceoId } = req.body;
+    const { ceoId, officeId } = req.body;
 
-    const office = await Organization.findByPk(id);
+    // Support both /offices/:id/assign-ceo and /ceos/:id/assign-office
+    const targetOfficeId = officeId || id;
+    const targetCeoId = ceoId !== undefined ? ceoId : (req.originalUrl?.includes('/ceos/') ? id : null);
+
+    const office = await Organization.findByPk(targetOfficeId);
     if (!office) {
       return res.status(404).json({ error: 'Office not found.' });
     }
 
-    if (ceoId) {
-      const ceo = await User.findOne({ where: { id: ceoId, role: 'CEO' } });
+    if (targetCeoId) {
+      const ceo = await User.findOne({ where: { id: targetCeoId, role: 'CEO' } });
       if (!ceo) {
         return res.status(404).json({ error: 'Selected CEO does not exist.' });
       }
@@ -387,7 +432,10 @@ exports.getCeoModuleData = async (req, res) => {
     const orgFilter = { organizationId: { [Op.in]: targetOfficeIds } };
     let records = [];
 
-    switch (moduleKey) {
+    // Normalize moduleKey to uppercase and replace hyphens with underscores (e.g. 'bills' -> 'BILLS', 'gate-passes' -> 'GATE_PASSES')
+    const normalizedKey = (moduleKey || '').toUpperCase().replace('-', '_');
+
+    switch (normalizedKey) {
       case 'CUSTOMERS':
         records = await Customer.findAll({
           where: orgFilter,
@@ -411,7 +459,8 @@ exports.getCeoModuleData = async (req, res) => {
           where: orgFilter,
           include: [
             { model: Organization, attributes: ['id', 'name'] },
-            { model: Customer, attributes: ['id', 'name'] }
+            { model: Customer, attributes: ['id', 'name', 'phone', 'city'] },
+            { model: EstimateItem, as: 'items' }
           ],
           order: [['createdAt', 'DESC']],
           limit: 100
@@ -423,7 +472,8 @@ exports.getCeoModuleData = async (req, res) => {
           where: orgFilter,
           include: [
             { model: Organization, attributes: ['id', 'name'] },
-            { model: Customer, attributes: ['id', 'name'] }
+            { model: Customer, attributes: ['id', 'name', 'phone', 'city'] },
+            { model: BillItem, as: 'items' }
           ],
           order: [['createdAt', 'DESC']],
           limit: 100
@@ -433,7 +483,10 @@ exports.getCeoModuleData = async (req, res) => {
       case 'PURCHASES':
         records = await Purchase.findAll({
           where: orgFilter,
-          include: [{ model: Organization, attributes: ['id', 'name'] }],
+          include: [
+            { model: Organization, attributes: ['id', 'name'] },
+            { model: PurchaseItem, as: 'items' }
+          ],
           order: [['createdAt', 'DESC']],
           limit: 100
         });

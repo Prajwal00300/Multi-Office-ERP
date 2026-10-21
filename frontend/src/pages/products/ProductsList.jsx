@@ -194,7 +194,7 @@ const ProductsList = () => {
   // Delete Product
   const handleDeleteProduct = async (product) => {
     const confirmDelete = window.confirm(
-      `Are you sure you want to delete product "${product.name}"?\n\nThis will permanently delete this product from your catalog.\nNote: Products used in past bills, estimates, or purchases cannot be deleted to preserve financial audit history.`
+      `Are you sure you want to delete product "${product.name}"?\n\nThis will permanently remove this product from the catalog. Existing bills, estimates, and transactions will remain completely unaffected.`
     );
 
     if (!confirmDelete) {

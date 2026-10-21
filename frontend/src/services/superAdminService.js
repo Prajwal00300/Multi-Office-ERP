@@ -28,14 +28,15 @@ export const superAdminService = {
   },
 
   assignOfficeToCeo: async (id, officeId) => {
-    const res = await api.post(`/super-admin/ceos/${id}/assign-office`, { officeId });
+    const res = await api.patch(`/super-admin/offices/${officeId}/assign-ceo`, { ceoId: id });
     return res.data;
   },
 
   getCeoModuleData: async (id, moduleName, officeId = null) => {
     const params = officeId ? { officeId } : {};
     const res = await api.get(`/super-admin/ceos/${id}/modules/${moduleName}`, { params });
-    return res.data;
+    // Normalize to always return the records array
+    return res.data?.records !== undefined ? res.data.records : res.data;
   }
 };
 
