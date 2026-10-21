@@ -24,6 +24,7 @@ router.use(checkModulePermission('ESTIMATES'));
 // Estimate routes
 router.get('/', estimateController.getEstimates);
 router.get('/by-number/:estimateNumber', estimateController.getEstimateByNumber);
+router.get('/next-number', estimateController.getNextEstimateNumber);
 router.get('/:id', estimateController.getEstimateById);
 router.get('/:id/audit', estimateController.getEstimateAudit);
 router.post('/', estimateController.createEstimate);

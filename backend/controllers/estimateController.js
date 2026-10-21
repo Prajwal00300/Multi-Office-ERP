@@ -214,6 +214,20 @@ exports.getEstimateByNumber = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/estimates/next-number - Retrieve next upcoming estimate number preview
+ */
+exports.getNextEstimateNumber = async (req, res) => {
+  try {
+    const nextEstimateNumber = await generateUniqueEstimateNumber();
+    res.status(200).json({ nextEstimateNumber });
+  } catch (error) {
+    console.error('Error generating next estimate number preview:', error);
+    res.status(500).json({ error: 'Failed to generate next estimate number preview' });
+  }
+};
+
+
 // POST /api/estimates - Create draft or generated estimate
 exports.createEstimate = async (req, res) => {
   const t = await sequelize.transaction();

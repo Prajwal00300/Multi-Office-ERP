@@ -25,6 +25,7 @@ router.use(checkModulePermission('BILLING'));
 router.get('/', billController.getBills);
 router.get('/navigation/previous', billController.getPreviousBill);
 router.get('/navigation/next', billController.getNextBill);
+router.get('/next-number', billController.getNextBillNumber);
 router.get('/:id', billController.getBillById);
 router.get('/:id/audit', billController.getBillAudits);
 router.post('/', billController.createBill);

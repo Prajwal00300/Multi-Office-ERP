@@ -1,49 +1,47 @@
-const { Op } = require('sequelize');
+const sequelize = require('../config/database');
 const Estimate = require('../models/Estimate');
 
 /**
  * Generates a persistent, sequential, unique estimate number.
- * Format: EST-YYYYMM-XXXX (e.g., EST-202610-0001)
+ * Format: simple sequential integer string (1, 2, 3, 4, 5...)
  *
- * @param {Object} transaction - Sequelize transaction for concurrency lock
+ * @param {Object} [transaction] - Sequelize transaction for concurrency lock
  * @returns {Promise<string>}
  */
 const generateUniqueEstimateNumber = async (transaction) => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const prefix = `EST-${year}${month}-`;
+  // Query for the maximum numeric estimate number currently existing in the database
+  const query = "SELECT MAX(CAST(estimateNumber AS UNSIGNED)) AS maxNum FROM estimates WHERE estimateNumber REGEXP '^[0-9]+$'";
 
-  // Find the latest estimate for the current year/month with row locking if available
-  const findOptions = {
-    where: {
-      estimateNumber: { [Op.like]: `${prefix}%` }
-    },
-    order: [['estimateNumber', 'DESC']]
-  };
-
+  const options = {};
   if (transaction) {
-    findOptions.transaction = transaction;
+    options.transaction = transaction;
     if (transaction.LOCK && transaction.LOCK.UPDATE) {
-      findOptions.lock = transaction.LOCK.UPDATE;
+      options.lock = transaction.LOCK.UPDATE;
     }
   }
 
-  const latestEstimate = await Estimate.findOne(findOptions);
+  const [results] = await sequelize.query(query, options);
 
   let nextSequence = 1;
-  if (latestEstimate && latestEstimate.estimateNumber) {
-    const parts = latestEstimate.estimateNumber.split('-');
-    if (parts.length === 3) {
-      const parsedSeq = parseInt(parts[2], 10);
-      if (!isNaN(parsedSeq)) {
-        nextSequence = parsedSeq + 1;
-      }
+  if (results && results[0] && results[0].maxNum !== null && results[0].maxNum !== undefined) {
+    const currentMax = parseInt(results[0].maxNum, 10);
+    if (!isNaN(currentMax) && currentMax >= 1) {
+      nextSequence = currentMax + 1;
     }
   }
 
-  const paddedSeq = String(nextSequence).padStart(4, '0');
-  return `${prefix}${paddedSeq}`;
+  // Safety check: ensure string sequence doesn't collide
+  while (true) {
+    const candidate = String(nextSequence);
+    const existing = await Estimate.findOne({
+      where: { estimateNumber: candidate },
+      transaction
+    });
+    if (!existing) {
+      return candidate;
+    }
+    nextSequence++;
+  }
 };
 
 module.exports = {

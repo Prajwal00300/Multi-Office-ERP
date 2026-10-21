@@ -285,6 +285,19 @@ exports.getNextBill = async (req, res) => {
 };
 
 /**
+ * GET /api/bills/next-number - Retrieve next upcoming bill number preview
+ */
+exports.getNextBillNumber = async (req, res) => {
+  try {
+    const nextBillNumber = await generateUniqueBillNumber();
+    res.status(200).json({ nextBillNumber });
+  } catch (error) {
+    console.error('Error generating next bill number preview:', error);
+    res.status(500).json({ error: 'Failed to generate next bill number preview' });
+  }
+};
+
+/**
  * GET /api/bills/:id - Retrieve bill details and bill items
  */
 exports.getBillById = async (req, res) => {
