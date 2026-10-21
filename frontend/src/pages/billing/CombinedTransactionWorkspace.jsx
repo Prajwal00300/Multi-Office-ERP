@@ -612,7 +612,8 @@ export default function CombinedTransactionWorkspace() {
       const estimateItemsPayload = transactionItems.map(item => ({
         productId: item.productId ? parseInt(item.productId, 10) : null,
         productNameSnapshot: item.productName.trim(),
-        productSpecificationsSnapshot: item.description || null,
+        productSpecificationsSnapshot: item.description ? item.description.trim() : null,
+        description: item.description ? item.description.trim() : null,
         quantity: parseFloat(item.quantity) || 1,
         unit: item.unit || 'Ton',
         negotiatedRate: parseFloat(item.finalRate) || 0
@@ -652,7 +653,8 @@ export default function CombinedTransactionWorkspace() {
       const billItemsPayload = transactionItems.map(item => ({
         productId: item.productId ? parseInt(item.productId, 10) : null,
         productNameSnapshot: item.productName.trim(),
-        productSpecificationsSnapshot: item.description || null,
+        productSpecificationsSnapshot: item.description ? item.description.trim() : null,
+        description: item.description ? item.description.trim() : null,
         quantity: parseFloat(item.quantity) || 1,
         unit: item.unit || 'Ton',
         rate: parseFloat(item.finalRate) || 0

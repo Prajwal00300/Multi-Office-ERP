@@ -462,7 +462,7 @@ exports.createBill = async (req, res) => {
       let productName = item.productNameSnapshot || item.name || '';
       let category = item.productCategorySnapshot || item.category || null;
       let size = item.productSizeSnapshot || item.size || null;
-      let specifications = item.productSpecificationsSnapshot || item.specifications || null;
+      let specifications = item.productSpecificationsSnapshot || item.specifications || item.description || null;
       let unit = item.unit || 'Kg';
 
       let productId = item.productId || null;
@@ -477,7 +477,9 @@ exports.createBill = async (req, res) => {
           category = product.category;
           size = product.size;
           unit = product.unit || unit;
-          specifications = product.specifications;
+          if (!specifications) {
+            specifications = product.specifications;
+          }
         }
       }
 
@@ -660,7 +662,7 @@ exports.updateBill = async (req, res) => {
       let productName = item.productNameSnapshot || item.name || '';
       let category = item.productCategorySnapshot || item.category || null;
       let size = item.productSizeSnapshot || item.size || null;
-      let specifications = item.productSpecificationsSnapshot || item.specifications || null;
+      let specifications = item.productSpecificationsSnapshot || item.specifications || item.description || null;
       let unit = item.unit || 'Kg';
 
       let productId = item.productId || null;
@@ -675,7 +677,9 @@ exports.updateBill = async (req, res) => {
           category = product.category;
           size = product.size;
           unit = product.unit || unit;
-          specifications = product.specifications;
+          if (!specifications) {
+            specifications = product.specifications;
+          }
         }
       }
 
@@ -958,7 +962,7 @@ exports.overrideBill = async (req, res) => {
       let productName = item.productNameSnapshot || item.name || '';
       let category = item.productCategorySnapshot || item.category || null;
       let size = item.productSizeSnapshot || item.size || null;
-      let specifications = item.productSpecificationsSnapshot || item.specifications || null;
+      let specifications = item.productSpecificationsSnapshot || item.specifications || item.description || null;
       let unit = item.unit || 'Kg';
 
       let productId = item.productId || null;
@@ -973,7 +977,9 @@ exports.overrideBill = async (req, res) => {
           category = product.category;
           size = product.size;
           unit = product.unit || unit;
-          specifications = product.specifications;
+          if (!specifications) {
+            specifications = product.specifications;
+          }
         }
       }
 

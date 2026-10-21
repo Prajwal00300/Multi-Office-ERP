@@ -284,7 +284,7 @@ exports.createEstimate = async (req, res) => {
       let productNameSnapshot = row.productNameSnapshot ? row.productNameSnapshot.trim() : '';
       let productCategorySnapshot = row.productCategorySnapshot || null;
       let productSizeSnapshot = row.productSizeSnapshot || null;
-      let productSpecificationsSnapshot = row.productSpecificationsSnapshot || null;
+      let productSpecificationsSnapshot = row.productSpecificationsSnapshot || row.specifications || row.description || null;
       let unit = row.unit ? row.unit.trim() : 'Kg';
 
       if (row.productId) {
@@ -299,7 +299,9 @@ exports.createEstimate = async (req, res) => {
           }
           productCategorySnapshot = product.category;
           productSizeSnapshot = product.size;
-          productSpecificationsSnapshot = product.specifications;
+          if (!productSpecificationsSnapshot) {
+            productSpecificationsSnapshot = product.specifications;
+          }
           unit = product.unit || unit;
         }
       }
@@ -487,7 +489,7 @@ exports.updateEstimate = async (req, res) => {
       let productNameSnapshot = row.productNameSnapshot ? row.productNameSnapshot.trim() : '';
       let productCategorySnapshot = row.productCategorySnapshot || null;
       let productSizeSnapshot = row.productSizeSnapshot || null;
-      let productSpecificationsSnapshot = row.productSpecificationsSnapshot || null;
+      let productSpecificationsSnapshot = row.productSpecificationsSnapshot || row.specifications || row.description || null;
       let unit = row.unit ? row.unit.trim() : 'Kg';
 
       if (row.productId) {
@@ -502,7 +504,9 @@ exports.updateEstimate = async (req, res) => {
           }
           productCategorySnapshot = product.category;
           productSizeSnapshot = product.size;
-          productSpecificationsSnapshot = product.specifications;
+          if (!productSpecificationsSnapshot) {
+            productSpecificationsSnapshot = product.specifications;
+          }
           unit = product.unit || unit;
         }
       }
@@ -782,7 +786,7 @@ exports.overrideEstimate = async (req, res) => {
       let productNameSnapshot = row.productNameSnapshot ? row.productNameSnapshot.trim() : '';
       let productCategorySnapshot = row.productCategorySnapshot || null;
       let productSizeSnapshot = row.productSizeSnapshot || null;
-      let productSpecificationsSnapshot = row.productSpecificationsSnapshot || null;
+      let productSpecificationsSnapshot = row.productSpecificationsSnapshot || row.specifications || row.description || null;
       let unit = row.unit ? row.unit.trim() : 'Kg';
 
       if (row.productId) {
@@ -797,7 +801,9 @@ exports.overrideEstimate = async (req, res) => {
           }
           productCategorySnapshot = product.category;
           productSizeSnapshot = product.size;
-          productSpecificationsSnapshot = product.specifications;
+          if (!productSpecificationsSnapshot) {
+            productSpecificationsSnapshot = product.specifications;
+          }
           unit = product.unit || unit;
         }
       }
