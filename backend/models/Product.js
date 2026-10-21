@@ -25,24 +25,30 @@ const Product = sequelize.define('Product', {
   },
   category: {
     type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: true,
-    }
+    allowNull: true,
+    defaultValue: 'General'
   },
   size: {
     type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: true,
-    }
+    allowNull: true,
+    defaultValue: '-'
   },
   unit: {
     type: DataTypes.STRING,
     allowNull: false,
+    defaultValue: 'Ton',
     validate: {
       notEmpty: true,
     }
+  },
+  price: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    validate: {
+      min: 0,
+    },
+    comment: 'Product price / rate (default per Ton)'
   },
   description: {
     type: DataTypes.TEXT,

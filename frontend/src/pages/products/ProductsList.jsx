@@ -7,6 +7,7 @@ import {
   Filter, 
   Edit2, 
   Power, 
+  Trash2,
   CheckCircle, 
   XCircle, 
   Layers, 
@@ -24,8 +25,8 @@ const CATEGORIES = [
 ];
 
 const STANDARD_UNITS = [
-  'Kg',
   'Ton',
+  'Kg',
   'Piece',
   'Meter',
   'Bundle',
@@ -53,21 +54,15 @@ const ProductsList = () => {
   const [modalError, setModalError] = useState('');
   const [editingProduct, setEditingProduct] = useState(null);
 
-  // Form Fields (STRICTLY NO PRICE FIELDS)
+  // Form Fields
   const [formData, setFormData] = useState({
     name: '',
-    category: 'Reinforcing Steel Bar',
-    customCategory: '',
-    size: '',
-    unit: 'Kg',
+    unit: 'Ton', // By default in tons
+    price: '',
     description: '',
+    specifications: '',
     status: 'ACTIVE',
-    organizationId: user?.organizationId || '',
-    // Category-specific specifications
-    steelGrade: '',
-    pipePressureRating: '',
-    pipeLength: '',
-    extraSpecs: ''
+    organizationId: user?.organizationId || ''
   });
 
   // Fetch Organizations for Super Admin dropdown
@@ -129,17 +124,12 @@ const ProductsList = () => {
     setEditingProduct(null);
     setFormData({
       name: '',
-      category: 'Reinforcing Steel Bar',
-      customCategory: '',
-      size: '',
-      unit: 'Kg',
+      unit: 'Ton', // By default in tons
+      price: '',
       description: '',
+      specifications: '',
       status: 'ACTIVE',
-      organizationId: selectedOrgId || (organizations.length > 0 ? organizations[0].id : '') || user?.organizationId || '',
-      steelGrade: '',
-      pipePressureRating: '',
-      pipeLength: '',
-      extraSpecs: ''
+      organizationId: selectedOrgId || (organizations.length > 0 ? organizations[0].id : '') || user?.organizationId || ''
     });
     setModalError('');
     setShowModal(true);
@@ -149,38 +139,30 @@ const ProductsList = () => {
   const handleOpenEdit = (product) => {
     setEditingProduct(product);
 
-    let parsedGrade = '';
-    let parsedPressure = '';
-    let parsedLength = '';
-    let parsedExtra = '';
-
+    let parsedSpecs = '';
     if (product.specifications) {
       try {
         const specs = JSON.parse(product.specifications);
-        parsedGrade = specs.grade || '';
-        parsedPressure = specs.pressureRating || '';
-        parsedLength = specs.length || '';
-        parsedExtra = specs.extra || '';
+        if (typeof specs === 'object' && specs !== null) {
+          parsedSpecs = Object.entries(specs)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ');
+        } else {
+          parsedSpecs = String(specs);
+        }
       } catch {
-        parsedExtra = product.specifications;
+        parsedSpecs = product.specifications;
       }
     }
 
-    const isPresetCat = ['Reinforcing Steel Bar', 'Pipe'].includes(product.category);
-
     setFormData({
       name: product.name || '',
-      category: isPresetCat ? product.category : 'Other',
-      customCategory: isPresetCat ? '' : product.category,
-      size: product.size || '',
-      unit: product.unit || 'Kg',
+      unit: product.unit || 'Ton',
+      price: product.price !== undefined && product.price !== null ? String(product.price) : '',
       description: product.description || '',
+      specifications: parsedSpecs,
       status: product.status || 'ACTIVE',
-      organizationId: product.organizationId || '',
-      steelGrade: parsedGrade,
-      pipePressureRating: parsedPressure,
-      pipeLength: parsedLength,
-      extraSpecs: parsedExtra
+      organizationId: product.organizationId || ''
     });
 
     setModalError('');
@@ -193,8 +175,8 @@ const ProductsList = () => {
     const actionText = isActivating ? 'activate' : 'deactivate';
 
     const confirmMessage = isActivating 
-      ? `Are you sure you want to activate "${product.name}" (${product.size})?`
-      : `Are you sure you want to deactivate "${product.name}" (${product.size})? Inactive products are preserved for historical estimates and billing records.`;
+      ? `Are you sure you want to activate "${product.name}"?`
+      : `Are you sure you want to deactivate "${product.name}"? Inactive products are preserved for historical estimates and billing records.`;
 
     if (!window.confirm(confirmMessage)) {
       return;
@@ -217,6 +199,33 @@ const ProductsList = () => {
     }
   };
 
+  // Delete Product
+  const handleDeleteProduct = async (product) => {
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete product "${product.name}"?\n\nThis will permanently delete this product from your catalog.\nNote: Products used in past bills, estimates, or purchases cannot be deleted to preserve financial audit history.`
+    );
+
+    if (!confirmDelete) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await api.delete(`/products/${product.id}`);
+      setProducts(prev => prev.filter(p => p.id !== product.id));
+      setSuccessMsg(`Product "${product.name}" deleted successfully.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      console.error('Delete product error:', err);
+      const errMsg = err.response?.data?.error || 'Failed to delete product.';
+      alert(errMsg);
+      setError(errMsg);
+      setTimeout(() => setError(''), 6000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Handle Submit Form
   const handleSubmitProduct = async (e) => {
     e.preventDefault();
@@ -226,20 +235,12 @@ const ProductsList = () => {
       return setModalError('Product name is required.');
     }
 
-    const actualCategory = formData.category === 'Other'
-      ? formData.customCategory?.trim()
-      : formData.category;
-
-    if (!actualCategory) {
-      return setModalError('Product category is required.');
-    }
-
-    if (!formData.size || !formData.size.trim()) {
-      return setModalError('Product size / diameter is required (e.g. 10 mm, 2 inch).');
-    }
-
     if (!formData.unit || !formData.unit.trim()) {
       return setModalError('Unit of measurement is required.');
+    }
+
+    if (formData.price === '' || formData.price === null || isNaN(parseFloat(formData.price)) || parseFloat(formData.price) < 0) {
+      return setModalError('Product price is required and must be a valid non-negative number.');
     }
 
     if (user?.role === 'SUPER_ADMIN' && !formData.organizationId) {
@@ -250,26 +251,13 @@ const ProductsList = () => {
       setModalLoading(true);
       setModalError('');
 
-      // Package specifications cleanly
-      const specsObj = {};
-      if (actualCategory === 'Reinforcing Steel Bar') {
-        if (formData.steelGrade.trim()) specsObj.grade = formData.steelGrade.trim();
-      } else if (actualCategory === 'Pipe') {
-        if (formData.pipePressureRating.trim()) specsObj.pressureRating = formData.pipePressureRating.trim();
-        if (formData.pipeLength.trim()) specsObj.length = formData.pipeLength.trim();
-      }
-      if (formData.extraSpecs.trim()) {
-        specsObj.extra = formData.extraSpecs.trim();
-      }
-
-      // Payload - strictly no price fields!
+      // Payload with price and unit in tons (category & size handled with safe defaults by backend)
       const payload = {
         name: formData.name.trim(),
-        category: actualCategory,
-        size: formData.size.trim(),
-        unit: formData.unit.trim(),
-        description: formData.description.trim() || null,
-        specifications: Object.keys(specsObj).length > 0 ? specsObj : null,
+        unit: formData.unit.trim() || 'Ton',
+        price: parseFloat(formData.price) || 0,
+        description: formData.description?.trim() || null,
+        specifications: formData.specifications?.trim() || null,
         status: formData.status,
         organizationId: formData.organizationId
       };
@@ -455,6 +443,7 @@ const ProductsList = () => {
                 <th className="px-6 py-4">Category</th>
                 <th className="px-6 py-4">Size / Diameter</th>
                 <th className="px-6 py-4">Unit</th>
+                <th className="px-6 py-4">Price / Rate</th>
                 <th className="px-6 py-4">Specifications & Details</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
@@ -463,7 +452,7 @@ const ProductsList = () => {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan="8" className="px-6 py-12 text-center text-gray-500">
                     <div className="flex justify-center items-center space-x-2">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                       <span className="text-sm font-medium">Loading catalogue...</span>
@@ -472,7 +461,7 @@ const ProductsList = () => {
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-6 py-14 text-center">
+                  <td colSpan="8" className="px-6 py-14 text-center">
                     <div className="flex flex-col items-center justify-center space-y-3">
                       <div className="bg-blue-50 text-blue-600 p-3.5 rounded-full">
                         <Package className="h-7 w-7" />
@@ -553,6 +542,12 @@ const ProductsList = () => {
                       </span>
                     </td>
 
+                    {/* Price */}
+                    <td className="px-6 py-4 text-sm font-semibold font-mono text-slate-900 whitespace-nowrap">
+                      ₹{parseFloat(product.price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <span className="text-[11px] text-gray-500 font-sans ml-1 font-normal">/ {product.unit || 'Ton'}</span>
+                    </td>
+
                     {/* Specifications & Details */}
                     <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
                       {renderSpecs(product)}
@@ -574,25 +569,33 @@ const ProductsList = () => {
                     </td>
 
                     {/* Actions */}
-                    <td className="px-6 py-4 text-sm font-medium text-right space-x-3 whitespace-nowrap">
+                    <td className="px-6 py-4 text-sm font-medium text-right space-x-2 whitespace-nowrap">
                       <button
                         onClick={() => handleOpenEdit(product)}
-                        className="text-blue-600 hover:text-blue-900 transition-colors p-1 rounded hover:bg-blue-50"
+                        className="text-blue-600 hover:text-blue-900 transition-colors p-1.5 rounded hover:bg-blue-50 inline-flex items-center"
                         title="Edit Product"
                       >
-                        <Edit2 size={17} />
+                        <Edit2 size={16} />
                       </button>
 
                       <button
                         onClick={() => handleToggleStatus(product)}
-                        className={`transition-colors p-1 rounded ${
+                        className={`transition-colors p-1.5 rounded inline-flex items-center ${
                           product.status === 'ACTIVE'
                             ? 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
                             : 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
                         }`}
                         title={product.status === 'ACTIVE' ? 'Deactivate Product' : 'Activate Product'}
                       >
-                        <Power size={17} />
+                        <Power size={16} />
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteProduct(product)}
+                        className="text-red-600 hover:text-red-800 transition-colors p-1.5 rounded hover:bg-red-50 inline-flex items-center"
+                        title="Delete Product"
+                      >
+                        <Trash2 size={16} />
                       </button>
                     </td>
                   </tr>
@@ -618,7 +621,7 @@ const ProductsList = () => {
                     {editingProduct ? 'Edit Product' : 'Add New Product'}
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Pricing is negotiated upon estimate generation.
+                    Default weight unit is Ton. Specify price per unit.
                   </p>
                 </div>
               </div>
@@ -672,170 +675,88 @@ const ProductsList = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. TMT Reinforcing Bar, MS Seamless Pipe"
+                  placeholder="e.g. TMT 500D Steel, MS Pipe 40mm, Steel Angle"
                   className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                   required
                 />
               </div>
 
-              {/* Category & Custom Category */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Price, Unit (Default: Ton), and Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                    Category <span className="text-red-500">*</span>
+                    Price / Rate (₹) <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 font-bold text-xs pointer-events-none">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.price}
+                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                      placeholder="0.00"
+                      className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm font-mono font-bold focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Per {formData.unit || 'Ton'}</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
+                    Unit of Weight <span className="text-red-500">*</span>
                   </label>
                   <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    value={formData.unit}
+                    onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                     className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
                     required
                   >
-                    {CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
+                    {STANDARD_UNITS.map((u) => (
+                      <option key={u} value={u}>
+                        {u} {u === 'Ton' ? '(Default)' : ''}
                       </option>
                     ))}
                   </select>
-                </div>
-
-                {formData.category === 'Other' ? (
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                      Specify Category <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.customCategory}
-                      onChange={(e) => setFormData({ ...formData, customCategory: e.target.value })}
-                      placeholder="e.g. Iron Angle, Steel Plate"
-                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                      Status
-                    </label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="ACTIVE">ACTIVE</option>
-                      <option value="INACTIVE">INACTIVE</option>
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* Size / Diameter and Unit */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                    Size / Diameter <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.size}
-                    onChange={(e) => setFormData({ ...formData, size: e.target.value })}
-                    placeholder="e.g. 10 mm, 20 mm, 2 inch"
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                  <p className="text-[11px] text-gray-400 mt-0.5">Allows mm, inch, or custom metric sizes.</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Default weight: Ton</p>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                    Unit of Measurement <span className="text-red-500">*</span>
+                    Status
                   </label>
-                  <div className="flex space-x-1">
-                    <select
-                      value={formData.unit}
-                      onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      {STANDARD_UNITS.map((u) => (
-                        <option key={u} value={u}>
-                          {u}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="INACTIVE">INACTIVE</option>
+                  </select>
                 </div>
               </div>
 
-              {/* Category-Specific Specifications Section */}
-              <div className="bg-gray-50/80 p-3.5 rounded-xl border border-gray-200/70 space-y-3">
-                <div className="flex items-center space-x-1.5 text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                  <Layers size={14} className="text-blue-600" />
-                  <span>Technical Specifications</span>
-                </div>
-
-                {formData.category === 'Reinforcing Steel Bar' && (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Steel Grade / Standard (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.steelGrade}
-                      onChange={(e) => setFormData({ ...formData, steelGrade: e.target.value })}
-                      placeholder="e.g. Fe 500D, Fe 550, IS 1786"
-                      className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                )}
-
-                {formData.category === 'Pipe' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Pressure Rating / Schedule (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.pipePressureRating}
-                        onChange={(e) => setFormData({ ...formData, pipePressureRating: e.target.value })}
-                        placeholder="e.g. Schedule 40, Class C, PN 10"
-                        className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Standard Length (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.pipeLength}
-                        onChange={(e) => setFormData({ ...formData, pipeLength: e.target.value })}
-                        placeholder="e.g. 6 Meters, 20 Feet"
-                        className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Additional Specifications (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.extraSpecs}
-                    onChange={(e) => setFormData({ ...formData, extraSpecs: e.target.value })}
-                    placeholder="e.g. Hot Rolled, Galvanized, ISI certified"
-                    className="block w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+              {/* Technical Specifications */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
+                  Technical Specifications (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={formData.specifications}
+                  onChange={(e) => setFormData({ ...formData, specifications: e.target.value })}
+                  placeholder="e.g. Fe 500D, IS 1786, Schedule 40, Galvanized"
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               {/* Product Description */}
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                  Product Description (Optional)
+                  Product Description / Notes (Optional)
                 </label>
                 <textarea
                   rows="2"

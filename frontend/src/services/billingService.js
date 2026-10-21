@@ -17,6 +17,24 @@ export const getBillById = async (id) => {
   return res.data;
 };
 
+export const getPreviousBill = async (currentId, organizationId) => {
+  const query = new URLSearchParams();
+  if (currentId) query.append('currentId', currentId);
+  if (organizationId) query.append('organizationId', organizationId);
+  const queryString = query.toString();
+  const res = await api.get(`/bills/navigation/previous${queryString ? `?${queryString}` : ''}`);
+  return res.data;
+};
+
+export const getNextBill = async (currentId, organizationId) => {
+  const query = new URLSearchParams();
+  if (currentId) query.append('currentId', currentId);
+  if (organizationId) query.append('organizationId', organizationId);
+  const queryString = query.toString();
+  const res = await api.get(`/bills/navigation/next${queryString ? `?${queryString}` : ''}`);
+  return res.data;
+};
+
 export const getBillAudits = async (id) => {
   const res = await api.get(`/bills/${id}/audit`);
   return res.data;
@@ -45,6 +63,7 @@ export const overrideBill = async (id, data) => {
 export default {
   getBills,
   getBillById,
+  getPreviousBill,
   getBillAudits,
   createBill,
   updateBill,

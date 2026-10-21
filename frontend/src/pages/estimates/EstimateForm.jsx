@@ -27,12 +27,12 @@ const DEFAULT_ITEM_ROW = {
   productSpecificationsSnapshot: '',
   btls: '',
   quantity: '',
-  unit: 'Kg',
+  unit: 'Ton',
   negotiatedRate: '',
   amount: 0
 };
 
-const STANDARD_UNITS = ['Kg', 'Ton', 'Piece', 'Meter', 'Bundle', 'Length'];
+const STANDARD_UNITS = ['Ton', 'Kg', 'Piece', 'Meter', 'Bundle', 'Length'];
 
 const EstimateForm = () => {
   const navigate = useNavigate();

@@ -26,6 +26,7 @@ import BillsList from '../pages/billing/BillsList';
 import BillForm from '../pages/billing/BillForm';
 import BillDetail from '../pages/billing/BillDetail';
 import BillPrint from '../pages/billing/BillPrint';
+import CombinedTransactionWorkspace from '../pages/billing/CombinedTransactionWorkspace';
 import PurchasesList from '../pages/purchases/PurchasesList';
 import PurchaseForm from '../pages/purchases/PurchaseForm';
 import PurchaseDetail from '../pages/purchases/PurchaseDetail';
@@ -136,6 +137,7 @@ const AppRoutes = () => {
         <Route element={<Layout />}>
           <Route path="/bills" element={<BillsList />} />
           <Route path="/bills/new" element={<BillForm />} />
+          <Route path="/bills/transaction" element={<CombinedTransactionWorkspace />} />
           <Route path="/bills/:id" element={<BillDetail />} />
           <Route path="/bills/:id/edit" element={<BillForm />} />
           <Route path="/bills/:id/print" element={<BillPrint />} />

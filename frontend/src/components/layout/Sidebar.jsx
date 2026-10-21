@@ -40,6 +40,7 @@ const Sidebar = ({ isOpen }) => {
     { name: 'Products', icon: Package, path: '/products', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN'], moduleKey: 'PRODUCT_MASTER' },
     { name: 'Estimates', icon: FileText, path: '/estimates', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
     { name: 'Billing', icon: Receipt, path: '/bills', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
+    { name: 'Sale Voucher (K)', icon: Receipt, path: '/bills/transaction', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
     { name: 'Purchases', icon: ShoppingCart, path: '/purchases', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
     { name: 'Weighbridge', icon: Scale, path: '/weighbridge', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'], moduleKey: 'WEIGHBRIDGE' },
     { name: 'Gate Pass', icon: Ticket, path: '/gate-passes', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'], moduleKey: 'GATE_PASS' },

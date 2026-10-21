@@ -6,6 +6,7 @@ const BillAudit = require('../models/BillAudit');
 const Customer = require('../models/Customer');
 const Product = require('../models/Product');
 const Estimate = require('../models/Estimate');
+const EstimateItem = require('../models/EstimateItem');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 const { calculateBillTotals } = require('../services/billingCalculationService');
@@ -108,6 +109,182 @@ exports.getBills = async (req, res) => {
 };
 
 /**
+ * GET /api/bills/navigation/previous - Retrieve immediately preceding bill within authorized office
+ * Query params: currentId (optional), organizationId (optional)
+ */
+exports.getPreviousBill = async (req, res) => {
+  try {
+    const { currentId, organizationId } = req.query;
+
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    if (currentId) {
+      whereClause.id = { [Op.lt]: parseInt(currentId, 10) };
+    }
+
+    const bill = await Bill.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Customer,
+          attributes: ['id', 'name', 'address', 'city', 'phone', 'tin']
+        },
+        {
+          model: Organization,
+          attributes: ['id', 'name', 'address', 'phone']
+        },
+        {
+          model: Estimate,
+          attributes: ['id', 'estimateNumber', 'estimateDate', 'status', 'basic', 'totalQuantity', 'total', 'others', 'grandTotal'],
+          include: [
+            {
+              model: EstimateItem,
+              as: 'items',
+              include: [
+                {
+                  model: Product,
+                  attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+                }
+              ]
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'finalizer',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'overrider',
+          attributes: ['id', 'username']
+        },
+        {
+          model: BillItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'DESC']]
+    });
+
+    if (!bill) {
+      return res.status(404).json({ error: 'No previous transaction found for this office' });
+    }
+
+    // Ownership check
+    await verifyRecordOwnership(bill, req.user);
+
+    res.status(200).json(bill);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching previous bill:', error);
+    res.status(500).json({ error: 'Internal server error while fetching previous bill' });
+  }
+};
+
+/**
+ * GET /api/bills/navigation/next - Retrieve immediately following bill within authorized office
+ * Query params: currentId (optional), organizationId (optional)
+ */
+exports.getNextBill = async (req, res) => {
+  try {
+    const { currentId, organizationId } = req.query;
+
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    if (currentId) {
+      whereClause.id = { [Op.gt]: parseInt(currentId, 10) };
+    }
+
+    const bill = await Bill.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Customer,
+          attributes: ['id', 'name', 'address', 'city', 'phone', 'tin']
+        },
+        {
+          model: Organization,
+          attributes: ['id', 'name', 'address', 'phone']
+        },
+        {
+          model: Estimate,
+          attributes: ['id', 'estimateNumber', 'estimateDate', 'status', 'basic', 'totalQuantity', 'total', 'others', 'grandTotal'],
+          include: [
+            {
+              model: EstimateItem,
+              as: 'items',
+              include: [
+                {
+                  model: Product,
+                  attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+                }
+              ]
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'finalizer',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'overrider',
+          attributes: ['id', 'username']
+        },
+        {
+          model: BillItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'ASC']]
+    });
+
+    if (!bill) {
+      return res.status(404).json({ error: 'No subsequent transaction found for this office' });
+    }
+
+    // Ownership check
+    await verifyRecordOwnership(bill, req.user);
+
+    res.status(200).json(bill);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching next bill:', error);
+    res.status(500).json({ error: 'Internal server error while fetching next bill' });
+  }
+};
+
+/**
  * GET /api/bills/:id - Retrieve bill details and bill items
  */
 exports.getBillById = async (req, res) => {
@@ -126,7 +303,19 @@ exports.getBillById = async (req, res) => {
         },
         {
           model: Estimate,
-          attributes: ['id', 'estimateNumber', 'estimateDate', 'status']
+          attributes: ['id', 'estimateNumber', 'estimateDate', 'status', 'basic', 'totalQuantity', 'total', 'others', 'grandTotal'],
+          include: [
+            {
+              model: EstimateItem,
+              as: 'items',
+              include: [
+                {
+                  model: Product,
+                  attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+                }
+              ]
+            }
+          ]
         },
         {
           model: User,

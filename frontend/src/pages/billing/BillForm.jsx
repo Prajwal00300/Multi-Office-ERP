@@ -60,7 +60,7 @@ const BillForm = () => {
       productSpecificationsSnapshot: '',
       btls: '',
       quantity: 1,
-      unit: 'Kg',
+      unit: 'Ton',
       rate: '',
       amount: 0
     }

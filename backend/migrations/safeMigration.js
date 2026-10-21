@@ -103,6 +103,39 @@ async function runSafeHierarchyMigration() {
       console.log("   ✅ organizations.ceoId added.");
     }
 
+    // 3. Inspect 'products' columns
+    const [productColumns] = await sequelize.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products'
+    `);
+
+    const productColumnNames = productColumns.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+
+    if (!productColumnNames.includes('price')) {
+      console.log("   -> Adding 'price' column to products...");
+      await sequelize.query(`
+        ALTER TABLE products 
+        ADD COLUMN price DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+      `);
+      console.log("   ✅ products.price added.");
+    }
+
+    // Relax category and size nullability so they are optional with safe defaults
+    try {
+      await sequelize.query(`
+        ALTER TABLE products 
+        MODIFY COLUMN category VARCHAR(255) NULL DEFAULT 'General'
+      `);
+      await sequelize.query(`
+        ALTER TABLE products 
+        MODIFY COLUMN size VARCHAR(255) NULL DEFAULT '-'
+      `);
+      console.log("   ✅ products.category and products.size relaxed to optional/default.");
+    } catch (colErr) {
+      console.warn("   ⚠️ Note altering products category/size:", colErr.message);
+    }
+
     console.log('✅ Safe hierarchy migration completed successfully.');
   } catch (error) {
     console.error('⚠️ Safe migration note (can be ignored if columns already up-to-date):', error.message);

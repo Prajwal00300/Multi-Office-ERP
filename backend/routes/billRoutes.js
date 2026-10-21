@@ -7,7 +7,7 @@ const checkModulePermission = require('../middleware/checkModulePermission');
 
 // Role-based authorization middleware for Billing module
 const authorizeBillingAccess = (req, res, next) => {
-  const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING'];
+  const allowedRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'];
 
   if (!allowedRoles.includes(req.user.role)) {
     return res.status(403).json({
@@ -23,6 +23,8 @@ router.use(checkModulePermission('BILLING'));
 
 // Billing routes
 router.get('/', billController.getBills);
+router.get('/navigation/previous', billController.getPreviousBill);
+router.get('/navigation/next', billController.getNextBill);
 router.get('/:id', billController.getBillById);
 router.get('/:id/audit', billController.getBillAudits);
 router.post('/', billController.createBill);

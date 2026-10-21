@@ -1,6 +1,9 @@
 const { Op } = require('sequelize');
 const Product = require('../models/Product');
 const Organization = require('../models/Organization');
+const BillItem = require('../models/BillItem');
+const EstimateItem = require('../models/EstimateItem');
+const PurchaseItem = require('../models/PurchaseItem');
 const {
   getAuthorizedOfficeScope,
   getAuthorizedTargetOfficeForCreation,
@@ -8,28 +11,7 @@ const {
   buildOfficeWhereClause
 } = require('../utils/scopeFilter');
 
-const FORBIDDEN_PRICE_FIELDS = [
-  'price',
-  'sellingPrice',
-  'selling_price',
-  'rate',
-  'cost',
-  'defaultPrice',
-  'defaultRate',
-  'negotiatedPrice',
-  'unitPrice',
-  'productPrice'
-];
-
-// Helper to reject any selling price fields
-const checkForPriceFields = (body) => {
-  for (const field of FORBIDDEN_PRICE_FIELDS) {
-    if (body[field] !== undefined) {
-      return `Selling price fields are strictly prohibited in Product Master. Field '${field}' was rejected.`;
-    }
-  }
-  return null;
-};
+// Product Controller
 
 // GET /api/products
 exports.getProducts = async (req, res) => {
@@ -119,17 +101,12 @@ exports.getProductById = async (req, res) => {
 // POST /api/products
 exports.createProduct = async (req, res) => {
   try {
-    // Strictly reject selling price fields
-    const priceFieldError = checkForPriceFields(req.body);
-    if (priceFieldError) {
-      return res.status(400).json({ error: priceFieldError });
-    }
-
     const {
       name,
       category,
       size,
       unit,
+      price,
       description,
       specifications,
       status,
@@ -142,15 +119,18 @@ exports.createProduct = async (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Product name is required' });
     }
-    if (!category || !category.trim()) {
-      return res.status(400).json({ error: 'Product category is required' });
+    const productCategory = (category && category.trim()) ? category.trim() : 'General';
+    const productSize = (size && size.trim()) ? size.trim() : '-';
+    const productUnit = (unit && unit.trim()) ? unit.trim() : 'Ton';
+
+    if (price === undefined || price === null || price === '') {
+      return res.status(400).json({ error: 'Product price is required' });
     }
-    if (!size || !size.trim()) {
-      return res.status(400).json({ error: 'Product size / diameter is required' });
+    const parsedPrice = parseFloat(price);
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+      return res.status(400).json({ error: 'Product price must be a valid non-negative number' });
     }
-    if (!unit || !unit.trim()) {
-      return res.status(400).json({ error: 'Unit of measurement is required' });
-    }
+
     if (status && !['ACTIVE', 'INACTIVE'].includes(status.toUpperCase())) {
       return res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
     }
@@ -163,28 +143,27 @@ exports.createProduct = async (req, res) => {
         : specifications.trim();
     }
 
-    // Check duplicate in same organization (name + category + size)
+    // Check duplicate in same organization (by name)
     const existingProduct = await Product.findOne({
       where: {
         organizationId: targetOrgId,
-        name: name.trim(),
-        category: category.trim(),
-        size: size.trim()
+        name: name.trim()
       }
     });
 
     if (existingProduct) {
       return res.status(409).json({
-        error: `A product '${name.trim()}' (${category.trim()} - ${size.trim()}) already exists in this organization.`
+        error: `A product '${name.trim()}' already exists in this organization.`
       });
     }
 
     const newProduct = await Product.create({
       organizationId: targetOrgId,
       name: name.trim(),
-      category: category.trim(),
-      size: size.trim(),
-      unit: unit.trim(),
+      category: productCategory,
+      size: productSize,
+      unit: productUnit,
+      price: parsedPrice,
       description: description ? description.trim() : null,
       specifications: formattedSpecs,
       status: status ? status.toUpperCase() : 'ACTIVE'
@@ -215,18 +194,13 @@ exports.createProduct = async (req, res) => {
 // PUT /api/products/:id
 exports.updateProduct = async (req, res) => {
   try {
-    // Strictly reject selling price fields
-    const priceFieldError = checkForPriceFields(req.body);
-    if (priceFieldError) {
-      return res.status(400).json({ error: priceFieldError });
-    }
-
     const { id } = req.params;
     const {
       name,
       category,
       size,
       unit,
+      price,
       description,
       specifications,
       status
@@ -244,12 +218,6 @@ exports.updateProduct = async (req, res) => {
     if (name !== undefined && !name.trim()) {
       return res.status(400).json({ error: 'Product name cannot be empty' });
     }
-    if (category !== undefined && !category.trim()) {
-      return res.status(400).json({ error: 'Product category cannot be empty' });
-    }
-    if (size !== undefined && !size.trim()) {
-      return res.status(400).json({ error: 'Product size / diameter cannot be empty' });
-    }
     if (unit !== undefined && !unit.trim()) {
       return res.status(400).json({ error: 'Unit of measurement cannot be empty' });
     }
@@ -257,29 +225,32 @@ exports.updateProduct = async (req, res) => {
       return res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
     }
 
-    const targetName = name !== undefined ? name.trim() : product.name;
-    const targetCategory = category !== undefined ? category.trim() : product.category;
-    const targetSize = size !== undefined ? size.trim() : product.size;
+    let targetPrice = product.price;
+    if (price !== undefined) {
+      const parsedPrice = parseFloat(price);
+      if (isNaN(parsedPrice) || parsedPrice < 0) {
+        return res.status(400).json({ error: 'Product price must be a valid non-negative number' });
+      }
+      targetPrice = parsedPrice;
+    }
 
-    // Check duplicate in same organization if name, category, or size changed
-    if (
-      targetName !== product.name ||
-      targetCategory !== product.category ||
-      targetSize !== product.size
-    ) {
+    const targetName = name !== undefined ? name.trim() : product.name;
+    const targetCategory = category !== undefined ? (category.trim() || 'General') : product.category;
+    const targetSize = size !== undefined ? (size.trim() || '-') : product.size;
+
+    // Check duplicate in same organization if name changed
+    if (targetName.toLowerCase() !== product.name.toLowerCase()) {
       const duplicateProduct = await Product.findOne({
         where: {
           organizationId: product.organizationId,
           name: targetName,
-          category: targetCategory,
-          size: targetSize,
           id: { [Op.ne]: id }
         }
       });
 
       if (duplicateProduct) {
         return res.status(409).json({
-          error: `Another product '${targetName}' (${targetCategory} - ${targetSize}) already exists in this organization.`
+          error: `Another product '${targetName}' already exists in this organization.`
         });
       }
     }
@@ -300,6 +271,7 @@ exports.updateProduct = async (req, res) => {
       category: targetCategory,
       size: targetSize,
       unit: unit !== undefined ? unit.trim() : product.unit,
+      price: targetPrice,
       description: description !== undefined ? (description ? description.trim() : null) : product.description,
       specifications: formattedSpecs,
       status: status !== undefined ? status.toUpperCase() : product.status
@@ -372,5 +344,46 @@ exports.updateProductStatus = async (req, res) => {
     }
     console.error('Error updating product status:', error);
     res.status(500).json({ error: 'Internal server error while updating product status' });
+  }
+};
+
+// DELETE /api/products/:id
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const product = await Product.findByPk(id);
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    // Ownership check
+    await verifyRecordOwnership(product, req.user);
+
+    // Check if referenced in historical transactions
+    const [billItemCount, estimateItemCount, purchaseItemCount] = await Promise.all([
+      BillItem.count({ where: { productId: id } }),
+      EstimateItem.count({ where: { productId: id } }),
+      PurchaseItem.count({ where: { productId: id } })
+    ]);
+
+    if (billItemCount > 0 || estimateItemCount > 0 || purchaseItemCount > 0) {
+      return res.status(400).json({
+        error: `Cannot delete product "${product.name}" because it is referenced in existing transactions (${billItemCount} bills, ${estimateItemCount} estimates, ${purchaseItemCount} purchases). You can deactivate it instead.`
+      });
+    }
+
+    await product.destroy();
+
+    res.status(200).json({
+      message: `Product "${product.name}" deleted successfully`,
+      id: parseInt(id, 10)
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error deleting product:', error);
+    res.status(500).json({ error: 'Internal server error while deleting product' });
   }
 };

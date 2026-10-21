@@ -169,6 +169,13 @@ const BillsList = () => {
 
         <div className="flex items-center gap-3">
           <Link
+            to="/bills/transaction"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
+          >
+            <Receipt className="w-4 h-4" />
+            Sale Voucher (K) Workspace
+          </Link>
+          <Link
             to="/bills/new"
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
           >
