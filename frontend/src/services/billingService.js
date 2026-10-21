@@ -35,8 +35,9 @@ export const getNextBill = async (currentId, organizationId) => {
   return res.data;
 };
 
-export const getNextBillNumber = async () => {
-  const res = await api.get('/bills/next-number');
+export const getNextBillNumber = async (organizationId) => {
+  const query = organizationId ? `?organizationId=${organizationId}` : '';
+  const res = await api.get(`/bills/next-number${query}`);
   return res.data;
 };
 

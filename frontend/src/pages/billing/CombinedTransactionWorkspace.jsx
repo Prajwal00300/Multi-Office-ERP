@@ -266,7 +266,9 @@ export default function CombinedTransactionWorkspace() {
   };
 
   // Reset state to fresh ADD mode
-  const resetToAddMode = async () => {
+  const resetToAddMode = async (targetOrgId) => {
+    const orgId = targetOrgId || effectiveOrgId;
+
     setCurrentBill(null);
     setSelectedCustomerId('');
     setSelectedCustomer(null);
@@ -291,11 +293,11 @@ export default function CombinedTransactionWorkspace() {
     setSuccessMsg('');
     setMode('ADD');
 
-    // Fetch next upcoming bill and estimate number previews (e.g. 1, 2, 3...)
+    // Fetch next upcoming bill and estimate number previews scoped to this office
     try {
       const [billRes, estRes] = await Promise.allSettled([
-        getNextBillNumber(),
-        api.get('/estimates/next-number')
+        getNextBillNumber(orgId),
+        api.get(`/estimates/next-number${orgId ? `?organizationId=${orgId}` : ''}`)
       ]);
       if (billRes.status === 'fulfilled' && billRes.value?.nextBillNumber) {
         setBillNumber(billRes.value.nextBillNumber);

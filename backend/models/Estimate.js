@@ -13,7 +13,6 @@ const Estimate = sequelize.define('Estimate', {
   estimateNumber: {
     type: DataTypes.STRING,
     allowNull: false,
-    unique: true,
     validate: {
       notEmpty: true,
     }
@@ -113,7 +112,7 @@ const Estimate = sequelize.define('Estimate', {
   indexes: [
     {
       unique: true,
-      fields: ['estimateNumber']
+      fields: ['organizationId', 'estimateNumber']
     },
     {
       unique: false,

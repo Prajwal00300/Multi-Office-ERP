@@ -215,11 +215,14 @@ exports.getEstimateByNumber = async (req, res) => {
 };
 
 /**
- * GET /api/estimates/next-number - Retrieve next upcoming estimate number preview
+ * GET /api/estimates/next-number - Retrieve next upcoming estimate number preview scoped to office
  */
 exports.getNextEstimateNumber = async (req, res) => {
   try {
-    const nextEstimateNumber = await generateUniqueEstimateNumber();
+    const { organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : req.user.organizationId;
+    const nextEstimateNumber = await generateUniqueEstimateNumber(effectiveOrgId);
     res.status(200).json({ nextEstimateNumber });
   } catch (error) {
     console.error('Error generating next estimate number preview:', error);
@@ -345,8 +348,8 @@ exports.createEstimate = async (req, res) => {
       grandTotal
     } = calculateEstimateTotals(preparedItems, others);
 
-    // 5. Generate persistent unique estimate number
-    const estimateNumber = await generateUniqueEstimateNumber(t);
+    // 5. Generate persistent unique estimate number scoped to this office
+    const estimateNumber = await generateUniqueEstimateNumber(targetOrgId, t);
 
     const isGenerated = status === 'GENERATED';
 

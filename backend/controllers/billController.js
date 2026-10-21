@@ -285,11 +285,14 @@ exports.getNextBill = async (req, res) => {
 };
 
 /**
- * GET /api/bills/next-number - Retrieve next upcoming bill number preview
+ * GET /api/bills/next-number - Retrieve next upcoming bill number preview scoped to office
  */
 exports.getNextBillNumber = async (req, res) => {
   try {
-    const nextBillNumber = await generateUniqueBillNumber();
+    const { organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : req.user.organizationId;
+    const nextBillNumber = await generateUniqueBillNumber(effectiveOrgId);
     res.status(200).json({ nextBillNumber });
   } catch (error) {
     console.error('Error generating next bill number preview:', error);
@@ -504,8 +507,8 @@ exports.createBill = async (req, res) => {
     // Authoritative calculation
     const calculated = calculateBillTotals(enrichedItems, gstPercentage, transportCost);
 
-    // Generate unique sequential bill number
-    const billNumber = await generateUniqueBillNumber(transaction);
+    // Generate unique sequential bill number scoped to this office
+    const billNumber = await generateUniqueBillNumber(targetOrgId, transaction);
 
     // Create Bill
     const newBill = await Bill.create({

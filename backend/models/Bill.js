@@ -14,7 +14,6 @@ const Bill = sequelize.define('Bill', {
   billNumber: {
     type: DataTypes.STRING,
     allowNull: false,
-    unique: true,
     validate: {
       notEmpty: true,
     }
@@ -146,6 +145,10 @@ const Bill = sequelize.define('Bill', {
     {
       unique: false,
       fields: ['billDate']
+    },
+    {
+      unique: true,
+      fields: ['organizationId', 'billNumber']
     }
   ]
 });

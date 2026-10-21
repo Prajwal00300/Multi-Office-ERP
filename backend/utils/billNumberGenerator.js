@@ -2,17 +2,31 @@ const sequelize = require('../config/database');
 const Bill = require('../models/Bill');
 
 /**
- * Generates a persistent, sequential, unique bill number.
- * Format: simple sequential integer string (1, 2, 3, 4, 5...)
+ * Generates a persistent, sequential, unique bill number for a specific office.
+ * Format: simple sequential integer string (1, 2, 3, 4, 5...) isolated per organizationId.
  *
+ * @param {number|string} [organizationId] - Office ID to scope the bill number sequence
  * @param {Object} [transaction] - Sequelize transaction for concurrency row lock
  * @returns {Promise<string>}
  */
-const generateUniqueBillNumber = async (transaction) => {
-  // Query for the maximum numeric bill number currently existing in the database
-  const query = "SELECT MAX(CAST(billNumber AS UNSIGNED)) AS maxNum FROM bills WHERE billNumber REGEXP '^[0-9]+$'";
+const generateUniqueBillNumber = async (organizationId, transaction) => {
+  // If only 1 argument passed and it's a transaction object
+  if (organizationId && typeof organizationId === 'object' && organizationId.commit) {
+    transaction = organizationId;
+    organizationId = null;
+  }
 
-  const options = {};
+  let query;
+  let replacements = [];
+
+  if (organizationId) {
+    query = "SELECT MAX(CAST(billNumber AS UNSIGNED)) AS maxNum FROM bills WHERE organizationId = ? AND billNumber REGEXP '^[0-9]+$'";
+    replacements = [parseInt(organizationId, 10)];
+  } else {
+    query = "SELECT MAX(CAST(billNumber AS UNSIGNED)) AS maxNum FROM bills WHERE billNumber REGEXP '^[0-9]+$'";
+  }
+
+  const options = { replacements };
   if (transaction) {
     options.transaction = transaction;
     if (transaction.LOCK && transaction.LOCK.UPDATE) {
@@ -30,11 +44,15 @@ const generateUniqueBillNumber = async (transaction) => {
     }
   }
 
-  // Safety check: ensure string sequence doesn't collide
+  // Safety check: ensure string sequence doesn't collide within this organization
   while (true) {
     const candidate = String(nextSequence);
+    const where = { billNumber: candidate };
+    if (organizationId) {
+      where.organizationId = parseInt(organizationId, 10);
+    }
     const existing = await Bill.findOne({
-      where: { billNumber: candidate },
+      where,
       transaction
     });
     if (!existing) {
