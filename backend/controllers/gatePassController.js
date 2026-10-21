@@ -116,6 +116,9 @@ exports.getGatePasses = async (req, res) => {
 
     res.status(200).json(enriched);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching gate passes:', error);
     res.status(500).json({ error: 'Internal server error while fetching gate passes.' });
   }
@@ -194,6 +197,9 @@ exports.getGatePassById = async (req, res) => {
 
     res.status(200).json(plain);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching gate pass details:', error);
     res.status(500).json({ error: 'Internal server error while fetching gate pass details.' });
   }

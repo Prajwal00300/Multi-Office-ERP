@@ -92,6 +92,9 @@ exports.getEstimates = async (req, res) => {
 
     res.status(200).json(estimates);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching estimates:', error);
     res.status(500).json({ error: 'Internal server error while fetching estimates' });
   }
@@ -203,6 +206,9 @@ exports.getEstimateByNumber = async (req, res) => {
 
     res.status(200).json(estimate);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error looking up estimate by number:', error);
     res.status(500).json({ error: 'Internal server error while looking up estimate' });
   }
@@ -929,6 +935,9 @@ exports.getEstimateAudit = async (req, res) => {
 
     res.status(200).json(audits);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching estimate audit:', error);
     res.status(500).json({ error: 'Internal server error while fetching audit trail' });
   }

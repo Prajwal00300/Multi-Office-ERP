@@ -90,6 +90,9 @@ exports.getPurchases = async (req, res) => {
 
     res.status(200).json(purchases);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching purchases:', error);
     res.status(500).json({ error: 'Internal server error while fetching purchases' });
   }
@@ -885,6 +888,9 @@ exports.getPurchaseAudits = async (req, res) => {
 
     res.status(200).json(audits);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching purchase audits:', error);
     res.status(500).json({ error: 'Internal server error while fetching purchase audit logs' });
   }

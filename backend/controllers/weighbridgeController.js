@@ -51,7 +51,7 @@ exports.searchTransactions = async (req, res) => {
     let customerIds = [];
     if (searchTerm) {
       const matchingCustomers = await Customer.findAll({
-        where: { name: { [Op.like]: `%${searchTerm}%` } },
+        where: buildOfficeWhereClause(targetOfficeIds, { name: { [Op.like]: `%${searchTerm}%` } }),
         attributes: ['id']
       });
       customerIds = matchingCustomers.map(c => c.id);
@@ -208,6 +208,9 @@ exports.searchTransactions = async (req, res) => {
 
     res.status(200).json(results);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error searching transactions for weighbridge:', error);
     res.status(500).json({ error: 'Internal server error while searching eligible transactions.' });
   }
@@ -276,6 +279,9 @@ exports.getWeighingRecords = async (req, res) => {
 
     res.status(200).json(records);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching weighing records:', error);
     res.status(500).json({ error: 'Internal server error while fetching weighing history.' });
   }
@@ -326,6 +332,9 @@ exports.getWeighingRecordById = async (req, res) => {
 
     res.status(200).json(record);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching weighing record details:', error);
     res.status(500).json({ error: 'Internal server error while fetching weighing record.' });
   }

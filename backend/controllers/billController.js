@@ -99,6 +99,9 @@ exports.getBills = async (req, res) => {
 
     res.status(200).json(bills);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching bills:', error);
     res.status(500).json({ error: 'Internal server error while fetching bills' });
   }
@@ -921,6 +924,9 @@ exports.getBillAudits = async (req, res) => {
 
     res.status(200).json(audits);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching bill audits:', error);
     res.status(500).json({ error: 'Internal server error while fetching bill audit logs' });
   }
