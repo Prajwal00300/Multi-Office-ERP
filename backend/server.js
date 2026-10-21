@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const express = require('express');
 const sequelize = require('./config/database');
 const organizationRoutes = require('./routes/organizationRoutes');
@@ -12,6 +13,9 @@ const purchaseRoutes = require('./routes/purchaseRoutes');
 const weighbridgeRoutes = require('./routes/weighbridgeRoutes');
 const gatePassRoutes = require('./routes/gatePassRoutes');
 const dutyAssignmentRoutes = require('./routes/dutyAssignmentRoutes');
+const superAdminRoutes = require('./routes/superAdminRoutes');
+const ceoRoutes = require('./routes/ceoRoutes');
+const runSafeHierarchyMigration = require('./migrations/safeMigration');
 const cors = require('cors');
 
 const app = express();
@@ -52,6 +56,8 @@ app.use('/api/purchases', purchaseRoutes);
 app.use('/api/weighbridge', weighbridgeRoutes);
 app.use('/api/gate-passes', gatePassRoutes);
 app.use('/api/duty-assignments', dutyAssignmentRoutes);
+app.use('/api/super-admin', superAdminRoutes);
+app.use('/api/ceo', ceoRoutes);
 
 // Basic health check route
 app.get('/api/health', (req, res) => {
@@ -69,11 +75,12 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log('✅ Connection to the MySQL database has been established successfully.');
 
-    // Sync database models
-    // Using { alter: false } or just sync() to follow a clean approach. 
-    // In production, migrations should be used instead of sync.
-    await sequelize.sync();
-    console.log('✅ Database models synchronized successfully.');
+    // Run safe non-destructive migration for CEO -> Office hierarchy
+    try {
+      await runSafeHierarchyMigration();
+    } catch (migErr) {
+      console.warn('⚠️ Hierarchy migration notice:', migErr.message);
+    }
 
     // Start Express server
     app.listen(PORT, () => {
@@ -91,7 +98,10 @@ if (!process.env.VERCEL) {
 } else {
   // In Vercel serverless environment, authenticate DB connection asynchronously
   sequelize.authenticate()
-    .then(() => console.log('✅ Connected to Aiven MySQL (Vercel Serverless)'))
+    .then(async () => {
+      console.log('✅ Connected to Aiven MySQL (Vercel Serverless)');
+      await runSafeHierarchyMigration();
+    })
     .catch(err => console.error('❌ Vercel DB connection error:', err));
 }
 

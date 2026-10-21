@@ -35,15 +35,23 @@ exports.getModules = async (req, res) => {
  * GET /api/duty-assignments/organizations
  * Return all organizations (Super Admin only).
  */
+/**
+ * GET /api/duty-assignments/organizations
+ * Return organizations (Super Admin sees all, CEO sees own offices).
+ */
 exports.getOrganizations = async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
-      return res.status(403).json({ error: 'Access denied: Super Admin only.' });
+    const whereClause = {};
+    if (req.user.role === 'CEO') {
+      whereClause.ceoId = req.user.userId;
+    } else if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Access denied: Super Admin or CEO only.' });
     }
 
     const organizations = await Organization.findAll({
+      where: whereClause,
       order: [['name', 'ASC']],
-      attributes: ['id', 'name', 'phone', 'address', 'status']
+      attributes: ['id', 'name', 'phone', 'address', 'status', 'ceoId']
     });
 
     res.status(200).json(organizations);
@@ -55,14 +63,10 @@ exports.getOrganizations = async (req, res) => {
 
 /**
  * GET /api/duty-assignments/admins/:organizationId
- * Return all users with role 'ADMIN' belonging to the specified organization.
+ * Return all users belonging to the specified organization.
  */
 exports.getAdminsByOrganization = async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
-      return res.status(403).json({ error: 'Access denied: Super Admin only.' });
-    }
-
     const orgId = parseInt(req.params.organizationId, 10);
     if (isNaN(orgId)) {
       return res.status(400).json({ error: 'Valid Organization ID is required.' });
@@ -74,10 +78,17 @@ exports.getAdminsByOrganization = async (req, res) => {
       return res.status(404).json({ error: 'Organization not found.' });
     }
 
+    // CEO authorization check
+    if (req.user.role === 'CEO' && organization.ceoId !== req.user.userId) {
+      return res.status(403).json({ error: 'Access denied: You do not own this office.' });
+    } else if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'CEO') {
+      return res.status(403).json({ error: 'Access denied: Super Admin or CEO only.' });
+    }
+
     const admins = await User.findAll({
       where: {
         organizationId: orgId,
-        role: 'ADMIN'
+        role: { [Op.in]: ['ADMIN', 'OPERATIONS_BILLING', 'WEIGHBRIDGE_CONTROLLER', 'PAYMENT_COLLECTOR'] }
       },
       attributes: ['id', 'username', 'role', 'organizationId', 'createdAt'],
       order: [['username', 'ASC']]
@@ -109,15 +120,24 @@ exports.getAdminPermissions = async (req, res) => {
       return res.status(400).json({ error: 'Valid User ID is required.' });
     }
 
-    // Authorization: Super Admin, or user inspecting their own permissions
-    if (req.user.role !== 'SUPER_ADMIN' && req.user.userId !== targetUserId) {
-      return res.status(403).json({ error: 'Access denied: You cannot view permissions for another user.' });
-    }
-
     // Find target user
     const targetUser = await User.findByPk(targetUserId, {
       attributes: ['id', 'username', 'role', 'organizationId']
     });
+
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    // Authorization: Super Admin, CEO owning the office, or user inspecting their own permissions
+    if (req.user.role === 'CEO') {
+      const office = await Organization.findByPk(targetUser.organizationId);
+      if (!office || office.ceoId !== req.user.userId) {
+        return res.status(403).json({ error: 'Access denied: You do not own this employee\'s office.' });
+      }
+    } else if (req.user.role !== 'SUPER_ADMIN' && req.user.userId !== targetUserId) {
+      return res.status(403).json({ error: 'Access denied: You cannot view permissions for another user.' });
+    }
 
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found.' });
@@ -174,9 +194,9 @@ exports.getAdminPermissions = async (req, res) => {
 exports.saveAdminPermissions = async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'CEO') {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: Only Super Admin can modify duty assignments.' });
+      return res.status(403).json({ error: 'Access denied: Only Super Admin or CEO can modify duty assignments.' });
     }
 
     const { organizationId, userId, permissions } = req.body;
@@ -198,24 +218,23 @@ exports.saveAdminPermissions = async (req, res) => {
       return res.status(404).json({ error: 'Organization not found.' });
     }
 
+    // Verify CEO ownership
+    if (req.user.role === 'CEO' && organization.ceoId !== req.user.userId) {
+      await transaction.rollback();
+      return res.status(403).json({ error: 'Access denied: You do not own this office.' });
+    }
+
     // Verify User exists and belongs to this organization
     const targetUser = await User.findByPk(targetUserId, { transaction });
     if (!targetUser) {
       await transaction.rollback();
-      return res.status(404).json({ error: 'Admin user not found.' });
+      return res.status(404).json({ error: 'User not found.' });
     }
 
     if (targetUser.organizationId !== orgId) {
       await transaction.rollback();
       return res.status(400).json({ 
         error: `Cross-organization assignment rejected: User "${targetUser.username}" does not belong to organization "${organization.name}".` 
-      });
-    }
-
-    if (targetUser.role !== 'ADMIN') {
-      await transaction.rollback();
-      return res.status(400).json({ 
-        error: `Invalid role: User "${targetUser.username}" is a ${targetUser.role}. Duty assignments can only be configured for ADMIN role accounts.` 
       });
     }
 
@@ -288,16 +307,16 @@ exports.getMyPermissions = async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    // Super Admin has unrestricted access to all implemented modules
-    if (req.user.role === 'SUPER_ADMIN') {
-      const superAdminPerms = {};
+    // Super Admin and CEO have unrestricted access to all implemented modules in their scope
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'CEO') {
+      const execPerms = {};
       IMPLEMENTED_MODULE_IDS.forEach(m => {
-        superAdminPerms[m] = true;
+        execPerms[m] = true;
       });
       return res.status(200).json({
-        role: 'SUPER_ADMIN',
-        organizationId: null,
-        permissions: superAdminPerms
+        role: req.user.role,
+        organizationId: req.user.organizationId || null,
+        permissions: execPerms
       });
     }
 

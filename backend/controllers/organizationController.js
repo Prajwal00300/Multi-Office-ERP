@@ -1,9 +1,10 @@
 const Organization = require('../models/Organization');
+const User = require('../models/User');
 
 // POST /api/organizations
 const createOrganization = async (req, res) => {
   try {
-    const { name, address, phone, status } = req.body;
+    const { name, address, phone, status, ceoId } = req.body;
 
     // Validation
     if (!name || name.trim() === '') return res.status(400).json({ error: 'Name is required' });
@@ -13,11 +14,21 @@ const createOrganization = async (req, res) => {
       return res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
     }
 
+    let assignedCeoId = null;
+    if (req.user) {
+      if (req.user.role === 'CEO') {
+        assignedCeoId = req.user.userId;
+      } else if (req.user.role === 'SUPER_ADMIN' && ceoId) {
+        assignedCeoId = ceoId;
+      }
+    }
+
     const organization = await Organization.create({
       name: name.trim(),
       address: address.trim(),
       phone: phone.trim(),
       status: status || 'ACTIVE',
+      ceoId: assignedCeoId
     });
 
     res.status(201).json(organization);
@@ -30,7 +41,29 @@ const createOrganization = async (req, res) => {
 // GET /api/organizations
 const getAllOrganizations = async (req, res) => {
   try {
-    const organizations = await Organization.findAll();
+    const whereClause = {};
+
+    // Scope based on user role if authenticated
+    if (req.user) {
+      if (req.user.role === 'CEO') {
+        whereClause.ceoId = req.user.userId;
+      } else if (req.user.role !== 'SUPER_ADMIN' && req.user.organizationId) {
+        whereClause.id = req.user.organizationId;
+      }
+    }
+
+    const organizations = await Organization.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: User,
+          as: 'ceo',
+          attributes: ['id', 'username', 'fullName', 'phone']
+        }
+      ],
+      order: [['name', 'ASC']]
+    });
+
     res.status(200).json(organizations);
   } catch (error) {
     console.error('Error fetching organizations:', error);
@@ -42,10 +75,28 @@ const getAllOrganizations = async (req, res) => {
 const getOrganizationById = async (req, res) => {
   try {
     const { id } = req.params;
-    const organization = await Organization.findByPk(id);
+    const organization = await Organization.findByPk(id, {
+      include: [
+        {
+          model: User,
+          as: 'ceo',
+          attributes: ['id', 'username', 'fullName', 'phone']
+        }
+      ]
+    });
 
     if (!organization) {
       return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Role check
+    if (req.user) {
+      if (req.user.role === 'CEO' && organization.ceoId !== req.user.userId) {
+        return res.status(403).json({ error: 'Access denied: You do not own this organization/office.' });
+      }
+      if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'CEO' && req.user.organizationId !== organization.id) {
+        return res.status(403).json({ error: 'Access denied: Not your assigned organization/office.' });
+      }
     }
 
     res.status(200).json(organization);
@@ -59,11 +110,21 @@ const getOrganizationById = async (req, res) => {
 const updateOrganization = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, address, phone, status } = req.body;
+    const { name, address, phone, status, ceoId } = req.body;
 
     const organization = await Organization.findByPk(id);
     if (!organization) {
       return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Role check
+    if (req.user) {
+      if (req.user.role === 'CEO' && organization.ceoId !== req.user.userId) {
+        return res.status(403).json({ error: 'Access denied: You do not own this organization/office.' });
+      }
+      if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'CEO') {
+        return res.status(403).json({ error: 'Access denied: Only Super Admin and CEO can update organizations.' });
+      }
     }
 
     // Validation
@@ -79,6 +140,9 @@ const updateOrganization = async (req, res) => {
     if (address) organization.address = address.trim();
     if (phone) organization.phone = phone.trim();
     if (status) organization.status = status;
+    if (req.user && req.user.role === 'SUPER_ADMIN' && ceoId !== undefined) {
+      organization.ceoId = ceoId || null;
+    }
 
     await organization.save();
 
@@ -93,6 +157,10 @@ const updateOrganization = async (req, res) => {
 const deleteOrganization = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (req.user && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Access denied: Super Admin only can delete organizations.' });
+    }
 
     const organization = await Organization.findByPk(id);
     if (!organization) {

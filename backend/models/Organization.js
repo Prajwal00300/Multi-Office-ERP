@@ -32,10 +32,32 @@ const Organization = sequelize.define('Organization', {
     type: DataTypes.ENUM('ACTIVE', 'INACTIVE'),
     allowNull: false,
     defaultValue: 'ACTIVE',
+  },
+  ceoId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'users',
+      key: 'id'
+    },
+    comment: 'Owning CEO user ID'
   }
 }, {
   tableName: 'organizations',
   timestamps: true, // Automatically manages createdAt and updatedAt
+  indexes: [
+    {
+      fields: ['ceoId']
+    }
+  ]
 });
+
+// Associations
+const User = require('./User');
+Organization.belongsTo(User, { foreignKey: 'ceoId', as: 'ceo' });
+User.hasMany(Organization, { foreignKey: 'ceoId', as: 'offices' });
+
+Organization.hasMany(User, { foreignKey: 'organizationId', as: 'employees' });
+User.belongsTo(Organization, { foreignKey: 'organizationId', as: 'office' });
 
 module.exports = Organization;

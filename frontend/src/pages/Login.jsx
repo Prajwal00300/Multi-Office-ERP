@@ -34,8 +34,18 @@ const Login = () => {
       // Redirect based on role
       if (user.role === 'SUPER_ADMIN') {
         navigate('/super-admin/dashboard');
+      } else if (user.role === 'CEO') {
+        navigate('/ceo/dashboard');
+      } else if (user.role === 'ADMIN') {
+        navigate('/admin/dashboard');
+      } else if (user.role === 'OPERATIONS_BILLING') {
+        navigate('/bills');
+      } else if (user.role === 'WEIGHBRIDGE_CONTROLLER') {
+        navigate('/weighbridge');
+      } else if (user.role === 'PAYMENT_COLLECTOR') {
+        navigate('/bills');
       } else {
-        navigate('/unauthorized'); // Placeholder for USER role
+        navigate('/');
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Invalid credentials');

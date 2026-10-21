@@ -8,6 +8,12 @@ const Organization = require('../models/Organization');
 const User = require('../models/User');
 const { calculatePurchaseTotals } = require('../services/purchaseCalculationService');
 const { generateUniquePurchaseNumber } = require('../utils/purchaseNumberGenerator');
+const {
+  getAuthorizedOfficeScope,
+  getAuthorizedTargetOfficeForCreation,
+  verifyRecordOwnership,
+  buildOfficeWhereClause
+} = require('../utils/scopeFilter');
 
 /**
  * GET /api/purchases - List purchases with filters and organization isolation
@@ -22,19 +28,8 @@ exports.getPurchases = async (req, res) => {
       organizationId
     } = req.query;
 
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      targetOrgId = organizationId ? parseInt(organizationId, 10) : null;
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
-
-    const whereClause = {};
-    if (targetOrgId) {
-      whereClause.organizationId = targetOrgId;
-    }
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
 
     if (status && status.trim() !== '' && status !== 'ALL') {
       whereClause.status = status.trim().toUpperCase();
@@ -163,13 +158,14 @@ exports.getPurchaseById = async (req, res) => {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
 
-    // Role-based organization isolation
-    if (req.user.role !== 'SUPER_ADMIN' && purchase.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied: You do not have permission to view purchases for this organization.' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(purchase, req.user);
 
     res.status(200).json(purchase);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching purchase details:', error);
     res.status(500).json({ error: 'Internal server error while fetching purchase details' });
   }
@@ -191,19 +187,13 @@ exports.createPurchase = async (req, res) => {
       organizationId: customOrgId
     } = req.body;
 
-    // Determine target organization
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (customOrgId) {
-        targetOrgId = parseInt(customOrgId, 10);
-      } else {
-        targetOrgId = req.user.organizationId;
-      }
-    }
-
-    if (!targetOrgId) {
+    // Determine target office
+    let targetOrgId;
+    try {
+      targetOrgId = await getAuthorizedTargetOfficeForCreation(req.user, customOrgId);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(400).json({ error: 'Organization ID is required to create a purchase record.' });
+      return res.status(scopeErr.statusCode || 400).json({ error: scopeErr.message });
     }
 
     // Process line items if provided
@@ -351,10 +341,12 @@ exports.updatePurchase = async (req, res) => {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
 
-    // Role check
-    if (req.user.role !== 'SUPER_ADMIN' && purchase.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(purchase, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot modify purchases for another organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     // Block standard update if approved
@@ -505,9 +497,12 @@ exports.submitPurchase = async (req, res) => {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && purchase.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(purchase, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot submit purchases for another organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     if (purchase.status === 'APPROVED') {
@@ -557,8 +552,8 @@ exports.approvePurchase = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // RBAC: Only Super Admin and Admin can approve
-    if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    // RBAC: Only Super Admin, CEO, and Admin can approve
+    if (!['SUPER_ADMIN', 'CEO', 'ADMIN'].includes(req.user.role)) {
       await transaction.rollback();
       return res.status(403).json({ error: 'Permission denied: Only CEO / Admin or Super Admin can approve purchase records.' });
     }
@@ -569,9 +564,12 @@ exports.approvePurchase = async (req, res) => {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
 
-    if (req.user.role === 'ADMIN' && purchase.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(purchase, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You can only approve purchases within your assigned organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     if (purchase.status === 'APPROVED') {
@@ -631,7 +629,7 @@ exports.rejectPurchase = async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
 
-    if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    if (!['SUPER_ADMIN', 'CEO', 'ADMIN'].includes(req.user.role)) {
       await transaction.rollback();
       return res.status(403).json({ error: 'Permission denied: Only CEO / Admin or Super Admin can reject purchase records.' });
     }
@@ -647,9 +645,12 @@ exports.rejectPurchase = async (req, res) => {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
 
-    if (req.user.role === 'ADMIN' && purchase.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(purchase, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You can only reject purchases within your assigned organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     const previousStatus = purchase.status;
@@ -697,9 +698,9 @@ exports.overridePurchase = async (req, res) => {
       totalAmount: manualAmount
     } = req.body;
 
-    if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    if (!['SUPER_ADMIN', 'CEO', 'ADMIN'].includes(req.user.role)) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Permission denied: Only Admin or Super Admin can modify an approved purchase.' });
+      return res.status(403).json({ error: 'Permission denied: Only Admin, CEO, or Super Admin can modify an approved purchase.' });
     }
 
     if (!reason || !reason.trim()) {
@@ -717,9 +718,12 @@ exports.overridePurchase = async (req, res) => {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
 
-    if (req.user.role === 'ADMIN' && purchase.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(purchase, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You can only modify purchases within your assigned organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     const enrichedItems = [];
@@ -864,9 +868,8 @@ exports.getPurchaseAudits = async (req, res) => {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && purchase.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied: You cannot view audit logs for another organization.' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(purchase, req.user);
 
     const audits = await PurchaseAudit.findAll({
       where: { purchaseId: id },

@@ -19,6 +19,12 @@ const {
   evaluateGatePassEligibility 
 } = require('../services/weighbridge/GatePassEligibilityService');
 const { generateUniqueGatePassNumber } = require('../utils/gatePassNumberGenerator');
+const {
+  getAuthorizedOfficeScope,
+  getAuthorizedTargetOfficeForCreation,
+  verifyRecordOwnership,
+  buildOfficeWhereClause
+} = require('../utils/scopeFilter');
 
 /**
  * GET /api/gate-passes
@@ -35,23 +41,11 @@ exports.getGatePasses = async (req, res) => {
       transactionType 
     } = req.query;
 
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (organizationId && organizationId !== 'ALL' && organizationId !== '') {
-        targetOrgId = parseInt(organizationId, 10);
-      } else {
-        targetOrgId = null;
-      }
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
 
-    const where = {};
-    if (targetOrgId) {
-      where.organizationId = targetOrgId;
-    }
+    let where = {};
+    where = buildOfficeWhereClause(targetOfficeIds, where);
+
     if (status && status !== 'ALL') {
       where.status = status;
     }
@@ -180,9 +174,7 @@ exports.getGatePassById = async (req, res) => {
       return res.status(404).json({ error: 'Gate pass record not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && gatePass.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied: You do not have permission to view this gate pass.' });
-    }
+    await verifyRecordOwnership(gatePass, req.user);
 
     const plain = gatePass.toJSON();
     const now = new Date().getTime();
@@ -244,10 +236,12 @@ exports.createGatePass = async (req, res) => {
       return res.status(400).json({ error: 'This weighing record has been superseded by a reweighing. Please select the latest weighing record.' });
     }
 
-    // Role check
-    if (req.user.role !== 'SUPER_ADMIN' && weighingRecord.organizationId !== req.user.organizationId) {
+    // Role & Ownership check
+    try {
+      await verifyRecordOwnership(weighingRecord, req.user);
+    } catch (authErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot create gate passes for another office.' });
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
 
     // Determine target document & initial validity start time
@@ -355,9 +349,11 @@ exports.issueGatePass = async (req, res) => {
       return res.status(404).json({ error: 'Gate pass not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && gatePass.organizationId !== req.user.organizationId) {
+    try {
+      await verifyRecordOwnership(gatePass, req.user);
+    } catch (authErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot issue gate passes for another office.' });
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
 
     // Check validity
@@ -443,9 +439,11 @@ exports.confirmDispatch = async (req, res) => {
       return res.status(404).json({ error: 'Gate pass not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && gatePass.organizationId !== req.user.organizationId) {
+    try {
+      await verifyRecordOwnership(gatePass, req.user);
+    } catch (authErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot confirm dispatch for another office.' });
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
 
     if (gatePass.status === 'DISPATCHED') {
@@ -546,9 +544,11 @@ exports.cancelGatePass = async (req, res) => {
       return res.status(404).json({ error: 'Gate pass not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && gatePass.organizationId !== req.user.organizationId) {
+    try {
+      await verifyRecordOwnership(gatePass, req.user);
+    } catch (authErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot cancel gate passes for another office.' });
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
 
     if (gatePass.status === 'DISPATCHED') {
@@ -607,9 +607,11 @@ exports.requestReweigh = async (req, res) => {
       return res.status(404).json({ error: 'Gate pass not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && gatePass.organizationId !== req.user.organizationId) {
+    try {
+      await verifyRecordOwnership(gatePass, req.user);
+    } catch (authErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot request reweighing for another office.' });
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
 
     if (gatePass.status === 'DISPATCHED') {

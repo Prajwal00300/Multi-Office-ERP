@@ -1,6 +1,12 @@
 const { Op } = require('sequelize');
 const Product = require('../models/Product');
 const Organization = require('../models/Organization');
+const {
+  getAuthorizedOfficeScope,
+  getAuthorizedTargetOfficeForCreation,
+  verifyRecordOwnership,
+  buildOfficeWhereClause
+} = require('../utils/scopeFilter');
 
 const FORBIDDEN_PRICE_FIELDS = [
   'price',
@@ -29,24 +35,9 @@ const checkForPriceFields = (body) => {
 exports.getProducts = async (req, res) => {
   try {
     const { search, category, status, organizationId } = req.query;
-    let targetOrgId = req.user.organizationId;
 
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (organizationId && organizationId !== 'ALL' && organizationId !== '') {
-        targetOrgId = parseInt(organizationId, 10);
-      } else {
-        targetOrgId = null; // Can view all organizations
-      }
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
-
-    const whereClause = {};
-    if (targetOrgId) {
-      whereClause.organizationId = targetOrgId;
-    }
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
 
     // Category filter
     if (category && category.trim() !== '' && category !== 'ALL') {
@@ -61,13 +52,16 @@ exports.getProducts = async (req, res) => {
     // Search query
     if (search && search.trim() !== '') {
       const searchTerm = `%${search.trim()}%`;
-      whereClause[Op.or] = [
-        { name: { [Op.like]: searchTerm } },
-        { category: { [Op.like]: searchTerm } },
-        { size: { [Op.like]: searchTerm } },
-        { description: { [Op.like]: searchTerm } },
-        { specifications: { [Op.like]: searchTerm } }
-      ];
+      whereClause = {
+        ...whereClause,
+        [Op.or]: [
+          { name: { [Op.like]: searchTerm } },
+          { category: { [Op.like]: searchTerm } },
+          { size: { [Op.like]: searchTerm } },
+          { description: { [Op.like]: searchTerm } },
+          { specifications: { [Op.like]: searchTerm } }
+        ]
+      };
     }
 
     const products = await Product.findAll({
@@ -83,6 +77,9 @@ exports.getProducts = async (req, res) => {
 
     res.status(200).json(products);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching products:', error);
     res.status(500).json({ error: 'Internal server error while fetching products' });
   }
@@ -106,13 +103,14 @@ exports.getProductById = async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    // Organization authorization check
-    if (req.user.role !== 'SUPER_ADMIN' && product.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(product, req.user);
 
     res.status(200).json(product);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching product details:', error);
     res.status(500).json({ error: 'Internal server error while fetching product details' });
   }
@@ -138,18 +136,7 @@ exports.createProduct = async (req, res) => {
       organizationId
     } = req.body;
 
-    // Determine target organization
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (!organizationId) {
-        return res.status(400).json({ error: 'Super Admin must specify an organizationId when creating a product.' });
-      }
-      targetOrgId = organizationId;
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
+    const targetOrgId = await getAuthorizedTargetOfficeForCreation(req.user, organizationId);
 
     // Validation
     if (!name || !name.trim()) {
@@ -203,7 +190,6 @@ exports.createProduct = async (req, res) => {
       status: status ? status.toUpperCase() : 'ACTIVE'
     });
 
-    // Fetch with organization details
     const createdProductWithOrg = await Product.findByPk(newProduct.id, {
       include: [
         {
@@ -218,6 +204,9 @@ exports.createProduct = async (req, res) => {
       product: createdProductWithOrg
     });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error creating product:', error);
     res.status(500).json({ error: 'Internal server error while creating product' });
   }
@@ -248,10 +237,8 @@ exports.updateProduct = async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    // Organization authorization check
-    if (req.user.role !== 'SUPER_ADMIN' && product.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(product, req.user);
 
     // Validate required fields if updated
     if (name !== undefined && !name.trim()) {
@@ -332,6 +319,9 @@ exports.updateProduct = async (req, res) => {
       product: updatedProduct
     });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error updating product:', error);
     res.status(500).json({ error: 'Internal server error while updating product' });
   }
@@ -348,10 +338,8 @@ exports.updateProductStatus = async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    // Organization authorization check
-    if (req.user.role !== 'SUPER_ADMIN' && product.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(product, req.user);
 
     let targetStatus;
     if (status) {
@@ -360,7 +348,6 @@ exports.updateProductStatus = async (req, res) => {
         return res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
       }
     } else {
-      // Toggle
       targetStatus = product.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     }
 
@@ -380,6 +367,9 @@ exports.updateProductStatus = async (req, res) => {
       product: updatedProduct
     });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error updating product status:', error);
     res.status(500).json({ error: 'Internal server error while updating product status' });
   }

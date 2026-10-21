@@ -1,6 +1,7 @@
+const path = require('path');
 const { Sequelize } = require('sequelize');
 const mysql2 = require('mysql2');
-require('dotenv').config();
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 // Extract database configuration from environment variables
 const {

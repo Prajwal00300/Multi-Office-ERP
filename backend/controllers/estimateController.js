@@ -9,6 +9,12 @@ const Organization = require('../models/Organization');
 const User = require('../models/User');
 const { calculateEstimateTotals } = require('../services/estimateCalculationService');
 const { generateUniqueEstimateNumber } = require('../utils/estimateNumberGenerator');
+const {
+  getAuthorizedOfficeScope,
+  getAuthorizedTargetOfficeForCreation,
+  verifyRecordOwnership,
+  buildOfficeWhereClause
+} = require('../utils/scopeFilter');
 
 // GET /api/estimates - List estimates with filters
 exports.getEstimates = async (req, res) => {
@@ -21,23 +27,8 @@ exports.getEstimates = async (req, res) => {
       organizationId 
     } = req.query;
 
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (organizationId) {
-        targetOrgId = organizationId;
-      } else {
-        targetOrgId = null; // Can view all
-      }
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
-
-    const whereClause = {};
-    if (targetOrgId) {
-      whereClause.organizationId = targetOrgId;
-    }
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
 
     // Status filter
     if (status && status.trim() !== '' && status !== 'ALL') {
@@ -167,13 +158,14 @@ exports.getEstimateById = async (req, res) => {
       return res.status(404).json({ error: 'Estimate not found' });
     }
 
-    // Organization access check
-    if (req.user.role !== 'SUPER_ADMIN' && estimate.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied to estimates from another organization' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(estimate, req.user);
 
     res.status(200).json(estimate);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching estimate details:', error);
     res.status(500).json({ error: 'Internal server error while fetching estimate details' });
   }
@@ -206,10 +198,8 @@ exports.getEstimateByNumber = async (req, res) => {
       return res.status(404).json({ error: `Estimate '${estimateNumber}' not found` });
     }
 
-    // Organization access check
-    if (req.user.role !== 'SUPER_ADMIN' && estimate.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(estimate, req.user);
 
     res.status(200).json(estimate);
   } catch (error) {
@@ -233,19 +223,13 @@ exports.createEstimate = async (req, res) => {
       status // 'DRAFT' or 'GENERATED'
     } = req.body;
 
-    // 1. Resolve Organization ID securely
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (!organizationId) {
-        await t.rollback();
-        return res.status(400).json({ error: 'Super Admin must select an organization for this estimate.' });
-      }
-      targetOrgId = organizationId;
-    } else {
-      if (!targetOrgId) {
-        await t.rollback();
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
+    // 1. Resolve Office ID securely
+    let targetOrgId;
+    try {
+      targetOrgId = await getAuthorizedTargetOfficeForCreation(req.user, organizationId);
+    } catch (scopeErr) {
+      await t.rollback();
+      return res.status(scopeErr.statusCode || 400).json({ error: scopeErr.message });
     }
 
     // 2. Validate Customer exists and belongs to target organization
@@ -441,10 +425,12 @@ exports.updateEstimate = async (req, res) => {
       return res.status(404).json({ error: 'Estimate not found' });
     }
 
-    // Organization check
-    if (req.user.role !== 'SUPER_ADMIN' && estimate.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(estimate, req.user);
+    } catch (scopeErr) {
       await t.rollback();
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     // MANDATORY LOCK CHECK
@@ -625,10 +611,12 @@ exports.generateEstimate = async (req, res) => {
       return res.status(404).json({ error: 'Estimate not found' });
     }
 
-    // Organization check
-    if (req.user.role !== 'SUPER_ADMIN' && estimate.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(estimate, req.user);
+    } catch (scopeErr) {
       await t.rollback();
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     if (estimate.status !== 'DRAFT') {
@@ -693,12 +681,12 @@ exports.overrideEstimate = async (req, res) => {
       notes
     } = req.body;
 
-    // MANDATORY ROLE CHECK: Only SUPER_ADMIN and ADMIN can override
-    const allowedOverrideRoles = ['SUPER_ADMIN', 'ADMIN'];
+    // MANDATORY ROLE CHECK: Only SUPER_ADMIN, CEO, and ADMIN can override
+    const allowedOverrideRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN'];
     if (!allowedOverrideRoles.includes(req.user.role)) {
       await t.rollback();
       return res.status(403).json({
-        error: 'Access denied. Only Super Admin or Admin / CEO are authorized to override locked estimates.'
+        error: 'Access denied. Only Super Admin, CEO, or Admin are authorized to override locked estimates.'
       });
     }
 
@@ -720,10 +708,12 @@ exports.overrideEstimate = async (req, res) => {
       return res.status(404).json({ error: 'Estimate not found' });
     }
 
-    // Organization check
-    if (req.user.role !== 'SUPER_ADMIN' && estimate.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(estimate, req.user);
+    } catch (scopeErr) {
       await t.rollback();
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     const targetOrgId = estimate.organizationId;
@@ -922,9 +912,8 @@ exports.getEstimateAudit = async (req, res) => {
       return res.status(404).json({ error: 'Estimate not found' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && estimate.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(estimate, req.user);
 
     const audits = await EstimateAudit.findAll({
       where: { estimateId: id },

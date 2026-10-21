@@ -20,6 +20,7 @@ const User = sequelize.define('User', {
   role: {
     type: DataTypes.ENUM(
       'SUPER_ADMIN', 
+      'CEO',
       'ADMIN', 
       'WEIGHBRIDGE_CONTROLLER', 
       'OPERATIONS_BILLING', 
@@ -28,6 +29,23 @@ const User = sequelize.define('User', {
     ),
     allowNull: false,
     defaultValue: 'USER',
+  },
+  status: {
+    type: DataTypes.ENUM('ACTIVE', 'INACTIVE'),
+    allowNull: false,
+    defaultValue: 'ACTIVE',
+  },
+  fullName: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  phone: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  email: {
+    type: DataTypes.STRING,
+    allowNull: true,
   },
   organizationId: {
     type: DataTypes.INTEGER,

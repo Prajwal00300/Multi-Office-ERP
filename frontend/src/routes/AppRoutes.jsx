@@ -11,6 +11,10 @@ import OrganizationsList from '../pages/super-admin/OrganizationsList';
 import OrganizationForm from '../pages/super-admin/OrganizationForm';
 import OrganizationUsers from '../pages/super-admin/OrganizationUsers';
 import DutyAssignment from '../pages/super-admin/DutyAssignment';
+import CeoDetails from '../pages/super-admin/CeoDetails';
+import CeoDashboard from '../pages/ceo/CeoDashboard';
+import CeoOffices from '../pages/ceo/CeoOffices';
+import CeoEmployees from '../pages/ceo/CeoEmployees';
 import AdminDashboard from '../pages/admin/AdminDashboard';
 import CustomersList from '../pages/customers/CustomersList';
 import ProductsList from '../pages/products/ProductsList';
@@ -70,11 +74,28 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN']} />}>
         <Route element={<Layout />}>
           <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
+          <Route path="/super-admin/ceos/:id" element={<CeoDetails />} />
           <Route path="/super-admin/organizations" element={<OrganizationsList />} />
           <Route path="/super-admin/organizations/new" element={<OrganizationForm />} />
           <Route path="/super-admin/organizations/:id/edit" element={<OrganizationForm />} />
           <Route path="/super-admin/organizations/:id/users" element={<OrganizationUsers />} />
+        </Route>
+      </Route>
+
+      {/* Duty Assignment (Super Admin and CEO) */}
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO']} />}>
+        <Route element={<Layout />}>
           <Route path="/super-admin/duty-assignment" element={<DutyAssignment />} />
+          <Route path="/ceo/duty-assignment" element={<DutyAssignment />} />
+        </Route>
+      </Route>
+
+      {/* Protected CEO Console Routes */}
+      <Route element={<ProtectedRoute allowedRoles={['CEO']} />}>
+        <Route element={<Layout />}>
+          <Route path="/ceo/dashboard" element={<CeoDashboard />} />
+          <Route path="/ceo/offices" element={<CeoOffices />} />
+          <Route path="/ceo/employees" element={<CeoEmployees />} />
         </Route>
       </Route>
 
@@ -86,21 +107,21 @@ const AppRoutes = () => {
       </Route>
 
       {/* Customer Master Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} requiredModule="CUSTOMER_MASTER" />}>
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN']} requiredModule="CUSTOMER_MASTER" />}>
         <Route element={<Layout />}>
           <Route path="/customers" element={<CustomersList />} />
         </Route>
       </Route>
 
       {/* Product Master Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} requiredModule="PRODUCT_MASTER" />}>
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN']} requiredModule="PRODUCT_MASTER" />}>
         <Route element={<Layout />}>
           <Route path="/products" element={<ProductsList />} />
         </Route>
       </Route>
 
       {/* Estimate Management Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="ESTIMATES" />}>
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="ESTIMATES" />}>
         <Route element={<Layout />}>
           <Route path="/estimates" element={<EstimatesList />} />
           <Route path="/estimates/new" element={<EstimateForm />} />
@@ -111,7 +132,7 @@ const AppRoutes = () => {
       </Route>
 
       {/* Billing / Sale Voucher Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="BILLING" />}>
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="BILLING" />}>
         <Route element={<Layout />}>
           <Route path="/bills" element={<BillsList />} />
           <Route path="/bills/new" element={<BillForm />} />
@@ -122,7 +143,7 @@ const AppRoutes = () => {
       </Route>
 
       {/* Purchase Management Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="PURCHASES" />}>
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="PURCHASES" />}>
         <Route element={<Layout />}>
           <Route path="/purchases" element={<PurchasesList />} />
           <Route path="/purchases/new" element={<PurchaseForm />} />
@@ -132,7 +153,7 @@ const AppRoutes = () => {
       </Route>
 
       {/* Weighbridge Management Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING']} requiredModule="WEIGHBRIDGE" />}>
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING']} requiredModule="WEIGHBRIDGE" />}>
         <Route element={<Layout />}>
           <Route path="/weighbridge" element={<WeighbridgeList />} />
           <Route path="/weighbridge/new" element={<WeighbridgeForm />} />
@@ -141,7 +162,7 @@ const AppRoutes = () => {
       </Route>
 
       {/* Gate Pass Management Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING']} requiredModule="GATE_PASS" />}>
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING']} requiredModule="GATE_PASS" />}>
         <Route element={<Layout />}>
           <Route path="/gate-passes" element={<GatePassesList />} />
           <Route path="/gate-passes/new" element={<GatePassForm />} />
@@ -158,6 +179,8 @@ const AppRoutes = () => {
             <Navigate to="/login" replace />
           ) : user?.role === 'SUPER_ADMIN' ? (
             <Navigate to="/super-admin/dashboard" replace />
+          ) : user?.role === 'CEO' ? (
+            <Navigate to="/ceo/dashboard" replace />
           ) : user?.role === 'ADMIN' ? (
             <Navigate to="/admin/dashboard" replace />
           ) : user?.role === 'OPERATIONS_BILLING' ? (

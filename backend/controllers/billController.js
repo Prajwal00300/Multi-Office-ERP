@@ -10,6 +10,12 @@ const Organization = require('../models/Organization');
 const User = require('../models/User');
 const { calculateBillTotals } = require('../services/billingCalculationService');
 const { generateUniqueBillNumber } = require('../utils/billNumberGenerator');
+const {
+  getAuthorizedOfficeScope,
+  getAuthorizedTargetOfficeForCreation,
+  verifyRecordOwnership,
+  buildOfficeWhereClause
+} = require('../utils/scopeFilter');
 
 /**
  * GET /api/bills - List bills with filters and org isolation
@@ -25,19 +31,8 @@ exports.getBills = async (req, res) => {
       customerId
     } = req.query;
 
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      targetOrgId = organizationId ? parseInt(organizationId, 10) : null;
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
-
-    const whereClause = {};
-    if (targetOrgId) {
-      whereClause.organizationId = targetOrgId;
-    }
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
 
     if (customerId) {
       whereClause.customerId = parseInt(customerId, 10);
@@ -175,13 +170,14 @@ exports.getBillById = async (req, res) => {
       return res.status(404).json({ error: 'Bill not found' });
     }
 
-    // Role-based organization isolation
-    if (req.user.role !== 'SUPER_ADMIN' && bill.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied: You do not have permission to view bills for this organization.' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(bill, req.user);
 
     res.status(200).json(bill);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching bill details:', error);
     res.status(500).json({ error: 'Internal server error while fetching bill details' });
   }
@@ -204,19 +200,13 @@ exports.createBill = async (req, res) => {
       organizationId: customOrgId
     } = req.body;
 
-    // Determine target organization
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (customOrgId) {
-        targetOrgId = parseInt(customOrgId, 10);
-      } else {
-        targetOrgId = req.user.organizationId;
-      }
-    }
-
-    if (!targetOrgId) {
+    // Determine target office
+    let targetOrgId;
+    try {
+      targetOrgId = await getAuthorizedTargetOfficeForCreation(req.user, customOrgId);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(400).json({ error: 'Organization ID is required to create a bill.' });
+      return res.status(scopeErr.statusCode || 400).json({ error: scopeErr.message });
     }
 
     // Customer validation
@@ -412,10 +402,12 @@ exports.updateBill = async (req, res) => {
       return res.status(404).json({ error: 'Bill not found' });
     }
 
-    // Role-based access check
-    if (req.user.role !== 'SUPER_ADMIN' && bill.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(bill, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot modify bills for another organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     // Only DRAFT bills can be updated via this endpoint
@@ -611,9 +603,12 @@ exports.finalizeBill = async (req, res) => {
       return res.status(404).json({ error: 'Bill not found' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && bill.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(bill, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You cannot finalize bills for another organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     if (bill.status === 'FINALIZED') {
@@ -692,10 +687,10 @@ exports.overrideBill = async (req, res) => {
       notes
     } = req.body;
 
-    // RBAC: Only SUPER_ADMIN and ADMIN are allowed to perform overrides
-    if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    // RBAC: Only SUPER_ADMIN, CEO, and ADMIN are allowed to perform overrides
+    if (!['SUPER_ADMIN', 'CEO', 'ADMIN'].includes(req.user.role)) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Permission denied: Only Admin or Super Admin can override a finalized bill.' });
+      return res.status(403).json({ error: 'Permission denied: Only Admin, CEO, or Super Admin can override a finalized bill.' });
     }
 
     if (!reason || !reason.trim()) {
@@ -713,9 +708,12 @@ exports.overrideBill = async (req, res) => {
       return res.status(404).json({ error: 'Bill not found' });
     }
 
-    if (req.user.role === 'ADMIN' && bill.organizationId !== req.user.organizationId) {
+    // Ownership check
+    try {
+      await verifyRecordOwnership(bill, req.user);
+    } catch (scopeErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You can only override bills within your assigned organization.' });
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
     // Customer validation
@@ -906,9 +904,8 @@ exports.getBillAudits = async (req, res) => {
       return res.status(404).json({ error: 'Bill not found' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && bill.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied: You cannot view audit logs for another organization.' });
-    }
+    // Ownership check
+    await verifyRecordOwnership(bill, req.user);
 
     const audits = await BillAudit.findAll({
       where: { billId: id },

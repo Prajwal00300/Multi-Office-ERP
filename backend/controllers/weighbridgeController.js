@@ -28,6 +28,12 @@ const {
 const { generateUniqueWeighingNumber } = require('../utils/weighingNumberGenerator');
 
 const manualProvider = new ManualWeighbridgeProvider();
+const {
+  getAuthorizedOfficeScope,
+  getAuthorizedTargetOfficeForCreation,
+  verifyRecordOwnership,
+  buildOfficeWhereClause
+} = require('../utils/scopeFilter');
 
 /**
  * GET /api/weighbridge/transactions
@@ -38,18 +44,7 @@ exports.searchTransactions = async (req, res) => {
     const { search, q, type, organizationId } = req.query;
     const queryTerm = search || q || '';
 
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (organizationId && organizationId !== 'ALL' && organizationId !== '') {
-        targetOrgId = parseInt(organizationId, 10);
-      } else {
-        targetOrgId = null;
-      }
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
 
     const searchTerm = queryTerm ? queryTerm.trim() : '';
 
@@ -67,12 +62,11 @@ exports.searchTransactions = async (req, res) => {
 
     // Search Bills if type is 'ALL' or 'BILL'
     if (!type || type === 'ALL' || type === 'BILL') {
-      const billWhere = {
+      let billWhere = {
         status: { [Op.in]: ['FINALIZED', 'OVERRIDDEN'] }
       };
-      if (targetOrgId) {
-        billWhere.organizationId = targetOrgId;
-      }
+      billWhere = buildOfficeWhereClause(targetOfficeIds, billWhere);
+
       if (searchTerm) {
         const orConditions = [{ billNumber: { [Op.like]: `%${searchTerm}%` } }];
         if (customerIds.length > 0) {
@@ -111,12 +105,11 @@ exports.searchTransactions = async (req, res) => {
 
     // Search Estimates if type is 'ALL' or 'ESTIMATE'
     if (!type || type === 'ALL' || type === 'ESTIMATE') {
-      const estWhere = {
+      let estWhere = {
         status: { [Op.in]: ['GENERATED', 'OVERRIDDEN'] }
       };
-      if (targetOrgId) {
-        estWhere.organizationId = targetOrgId;
-      }
+      estWhere = buildOfficeWhereClause(targetOfficeIds, estWhere);
+
       if (searchTerm) {
         const orConditions = [{ estimateNumber: { [Op.like]: `%${searchTerm}%` } }];
         if (customerIds.length > 0) {
@@ -235,23 +228,11 @@ exports.getWeighingRecords = async (req, res) => {
       endDate 
     } = req.query;
 
-    let targetOrgId = req.user.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (organizationId && organizationId !== 'ALL' && organizationId !== '') {
-        targetOrgId = parseInt(organizationId, 10);
-      } else {
-        targetOrgId = null;
-      }
-    } else {
-      if (!targetOrgId) {
-        return res.status(403).json({ error: 'Your account is not assigned to an organization.' });
-      }
-    }
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
 
-    const where = {};
-    if (targetOrgId) {
-      where.organizationId = targetOrgId;
-    }
+    let where = {};
+    where = buildOfficeWhereClause(targetOfficeIds, where);
+
     if (status && status !== 'ALL') {
       where.status = status;
     }
@@ -341,9 +322,7 @@ exports.getWeighingRecordById = async (req, res) => {
       return res.status(404).json({ error: 'Weighing record not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && record.organizationId !== req.user.organizationId) {
-      return res.status(403).json({ error: 'Access denied: You do not have permission to view records for this office.' });
-    }
+    await verifyRecordOwnership(record, req.user);
 
     res.status(200).json(record);
   } catch (error) {
@@ -442,18 +421,14 @@ exports.createWeighingRecord = async (req, res) => {
       items = targetDoc.items || [];
     }
 
-    // Determine target organization context
-    let targetOrgId = targetDoc.organizationId;
-    if (req.user.role === 'SUPER_ADMIN') {
-      if (customOrgId) {
-        targetOrgId = parseInt(customOrgId, 10);
-      }
-    } else {
-      if (req.user.organizationId !== targetDoc.organizationId) {
-        await transaction.rollback();
-        return res.status(403).json({ error: 'Access denied: You do not have permission to record weights for another office.' });
-      }
+    // Determine target organization context & verify ownership
+    try {
+      await verifyRecordOwnership(targetDoc, req.user);
+    } catch (authErr) {
+      await transaction.rollback();
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
+    const targetOrgId = targetDoc.organizationId;
 
     // Calculate Net Weight
     const netWeight = calculateNetWeight(reading.grossWeight, reading.tareWeight);
@@ -549,9 +524,11 @@ exports.reweighTransaction = async (req, res) => {
       return res.status(404).json({ error: 'Previous weighing record not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && previousRecord.organizationId !== req.user.organizationId) {
+    try {
+      await verifyRecordOwnership(previousRecord, req.user);
+    } catch (authErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You do not have permission to reweigh records for this office.' });
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
 
     // Process new weights
@@ -713,9 +690,9 @@ exports.approveDiscrepancy = async (req, res) => {
     const { id } = req.params;
     const { approvalReason } = req.body;
 
-    if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    if (!['SUPER_ADMIN', 'CEO', 'ADMIN'].includes(req.user.role)) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Permission denied: Only Admin or Super Admin can approve weight discrepancies.' });
+      return res.status(403).json({ error: 'Permission denied: Only Admin, CEO, or Super Admin can approve weight discrepancies.' });
     }
 
     if (!approvalReason || !approvalReason.trim()) {
@@ -729,9 +706,11 @@ exports.approveDiscrepancy = async (req, res) => {
       return res.status(404).json({ error: 'Weighing record not found.' });
     }
 
-    if (req.user.role !== 'SUPER_ADMIN' && record.organizationId !== req.user.organizationId) {
+    try {
+      await verifyRecordOwnership(record, req.user);
+    } catch (authErr) {
       await transaction.rollback();
-      return res.status(403).json({ error: 'Access denied: You do not have permission to approve records for another office.' });
+      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
     }
 
     if (record.status !== 'DISCREPANCY_FLAGGED') {

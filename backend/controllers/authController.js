@@ -73,12 +73,21 @@ const login = async (req, res) => {
       return res.status(401).json({ error: 'Invalid login credentials' });
     }
 
+    // Check if user is active
+    if (user.status === 'INACTIVE') {
+      return res.status(403).json({ error: 'Your account has been deactivated. Please contact your administrator.' });
+    }
+
     // Fetch organization info if assigned
     let org = null;
     if (user.organizationId) {
       org = await Organization.findByPk(user.organizationId, {
-        attributes: ['id', 'name', 'address', 'phone', 'status']
+        attributes: ['id', 'name', 'address', 'phone', 'status', 'ceoId']
       });
+
+      if (org && org.status === 'INACTIVE') {
+        return res.status(403).json({ error: 'Your assigned office is currently inactive. Please contact your CEO.' });
+      }
     }
 
     // Generate JWT
@@ -100,6 +109,7 @@ const login = async (req, res) => {
         userId: user.id,
         username: user.username,
         role: user.role,
+        status: user.status,
         organizationId: user.organizationId,
         organization: org
       }
@@ -114,13 +124,17 @@ const login = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.userId, {
-      attributes: ['id', 'username', 'role', 'organizationId']
+      attributes: ['id', 'username', 'role', 'status', 'organizationId']
     });
+
+    if (!user || user.status === 'INACTIVE') {
+      return res.status(403).json({ error: 'Account is inactive or not found' });
+    }
 
     let org = null;
     if (user && user.organizationId) {
       org = await Organization.findByPk(user.organizationId, {
-        attributes: ['id', 'name', 'address', 'phone', 'status']
+        attributes: ['id', 'name', 'address', 'phone', 'status', 'ceoId']
       });
     }
 
@@ -129,8 +143,9 @@ const getMe = async (req, res) => {
         id: req.user.userId,
         userId: req.user.userId,
         username: user?.username || '',
-        role: req.user.role,
-        organizationId: req.user.organizationId,
+        role: user.role,
+        status: user.status,
+        organizationId: user.organizationId,
         organization: org
       }
     });
