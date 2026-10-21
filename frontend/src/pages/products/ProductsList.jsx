@@ -24,14 +24,6 @@ const CATEGORIES = [
   'Other'
 ];
 
-const STANDARD_UNITS = [
-  'Ton',
-  'Kg',
-  'Piece',
-  'Meter',
-  'Bundle',
-  'Length'
-];
 
 const ProductsList = () => {
   const { user } = useContext(AuthContext);
@@ -254,7 +246,7 @@ const ProductsList = () => {
       // Payload with price and unit in tons (category & size handled with safe defaults by backend)
       const payload = {
         name: formData.name.trim(),
-        unit: formData.unit.trim() || 'Ton',
+        unit: 'Ton',
         price: parseFloat(formData.price) || 0,
         description: formData.description?.trim() || null,
         specifications: formData.specifications?.trim() || null,
@@ -371,6 +363,55 @@ const ProductsList = () => {
         </div>
       )}
 
+      {/* Quick Stock Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center space-x-3">
+          <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
+            <Package size={20} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Products</p>
+            <p className="text-xl font-bold text-gray-900">{products.length}</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center space-x-3">
+          <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-lg">
+            <CheckCircle size={20} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">In Stock</p>
+            <p className="text-xl font-bold text-emerald-700">
+              {products.filter(p => parseFloat(p.currentStock || 0) > 0).length}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center space-x-3">
+          <div className="p-2.5 bg-amber-50 text-amber-600 rounded-lg">
+            <AlertCircle size={20} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Zero / Out of Stock</p>
+            <p className="text-xl font-bold text-amber-700">
+              {products.filter(p => parseFloat(p.currentStock || 0) <= 0).length}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center space-x-3">
+          <div className="p-2.5 bg-teal-50 text-teal-600 rounded-lg">
+            <Layers size={20} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Stock Left</p>
+            <p className="text-xl font-bold text-teal-700">
+              {products.reduce((acc, p) => acc + (parseFloat(p.currentStock || 0)), 0).toFixed(2)} Tons
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
         {/* Search */}
@@ -443,6 +484,7 @@ const ProductsList = () => {
                 <th className="px-6 py-4">Category</th>
                 <th className="px-6 py-4">Size / Diameter</th>
                 <th className="px-6 py-4">Unit</th>
+                <th className="px-6 py-4 text-right">Stock Left</th>
                 <th className="px-6 py-4">Price / Rate</th>
                 <th className="px-6 py-4">Specifications & Details</th>
                 <th className="px-6 py-4">Status</th>
@@ -452,7 +494,7 @@ const ProductsList = () => {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan="9" className="px-6 py-12 text-center text-gray-500">
                     <div className="flex justify-center items-center space-x-2">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                       <span className="text-sm font-medium">Loading catalogue...</span>
@@ -461,7 +503,7 @@ const ProductsList = () => {
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-6 py-14 text-center">
+                  <td colSpan="9" className="px-6 py-14 text-center">
                     <div className="flex flex-col items-center justify-center space-y-3">
                       <div className="bg-blue-50 text-blue-600 p-3.5 rounded-full">
                         <Package className="h-7 w-7" />
@@ -540,6 +582,22 @@ const ProductsList = () => {
                       <span className="bg-gray-100 px-2 py-0.5 rounded text-xs font-medium text-gray-700">
                         {product.unit}
                       </span>
+                    </td>
+
+                    {/* Stock Left */}
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex flex-col items-end">
+                        <span className={`text-sm font-bold font-mono ${
+                          parseFloat(product.currentStock || 0) > 0 
+                            ? 'text-emerald-700' 
+                            : 'text-amber-600'
+                        }`}>
+                          {parseFloat(product.currentStock || 0).toFixed(3)}
+                        </span>
+                        <span className="text-[11px] text-gray-400 font-medium">
+                          {product.unit || 'Ton'}
+                        </span>
+                      </div>
                     </td>
 
                     {/* Price */}
@@ -702,26 +760,17 @@ const ProductsList = () => {
                       required
                     />
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Per {formData.unit || 'Ton'}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Per Ton</p>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                    Unit of Weight <span className="text-red-500">*</span>
+                    Unit of Measurement
                   </label>
-                  <select
-                    value={formData.unit}
-                    onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    {STANDARD_UNITS.map((u) => (
-                      <option key={u} value={u}>
-                        {u} {u === 'Ton' ? '(Default)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Default weight: Ton</p>
+                  <div className="flex items-center px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-sm font-semibold text-gray-800">
+                    <span>Ton</span>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Quantity is standard in Tons</p>
                 </div>
 
                 <div>

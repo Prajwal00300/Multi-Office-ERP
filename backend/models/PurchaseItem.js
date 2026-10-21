@@ -47,11 +47,24 @@ const PurchaseItem = sequelize.define('PurchaseItem', {
     type: DataTypes.DECIMAL(15, 3),
     allowNull: false,
     defaultValue: 0,
+    comment: 'Ordered quantity'
+  },
+  carbonType: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'Low Carbon',
+    comment: 'Low Carbon or High Carbon'
+  },
+  receivedQuantity: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Cumulative received quantity in Tons'
   },
   unit: {
     type: DataTypes.STRING,
     allowNull: false,
-    defaultValue: 'Kg'
+    defaultValue: 'Ton'
   },
   rate: {
     type: DataTypes.DECIMAL(15, 2),

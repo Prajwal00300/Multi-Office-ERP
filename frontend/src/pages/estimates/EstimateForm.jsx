@@ -114,11 +114,7 @@ const EstimateForm = () => {
         const res = await api.get(`/estimates/${id}`);
         const est = res.data;
 
-        if (est.status !== 'DRAFT') {
-          setError(`Estimate ${est.estimateNumber} is already ${est.status} and locked against direct edits. Redirecting to details view...`);
-          setTimeout(() => navigate(`/estimates/${id}`), 3000);
-          return;
-        }
+        // Load existing estimate data into form
 
         setFormData({
           organizationId: est.organizationId,
@@ -244,12 +240,6 @@ const EstimateForm = () => {
       }
     }
 
-    if (submitStatus === 'GENERATED') {
-      if (!window.confirm('Generating an estimate will lock it against ordinary edits. Do you wish to generate and lock this estimate now?')) {
-        return;
-      }
-    }
-
     try {
       setLoading(true);
       setError('');
@@ -261,7 +251,6 @@ const EstimateForm = () => {
         basic: formData.basic ? formData.basic.trim() : null,
         others: othersVal,
         notes: formData.notes ? formData.notes.trim() : null,
-        status: submitStatus,
         items: items.map(it => ({
           productId: it.productId ? Number(it.productId) : null,
           productNameSnapshot: it.productNameSnapshot.trim(),
@@ -277,9 +266,6 @@ const EstimateForm = () => {
 
       if (isEditing) {
         await api.put(`/estimates/${id}`, payload);
-        if (submitStatus === 'GENERATED') {
-          await api.post(`/estimates/${id}/generate`);
-        }
         navigate(`/estimates/${id}`);
       } else {
         const res = await api.post('/estimates', payload);
@@ -315,7 +301,7 @@ const EstimateForm = () => {
           </Link>
           <div>
             <h2 className="text-2xl font-bold text-gray-800">
-              {isEditing ? 'Edit Draft Estimate' : 'Create New Estimate (K)'}
+              {isEditing ? 'Edit Estimate' : 'Estimate Details'}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
               Enter negotiated prices and goods details matching the client estimate format.
@@ -326,22 +312,12 @@ const EstimateForm = () => {
         <div className="flex items-center space-x-3">
           <button
             type="button"
-            onClick={() => handleSubmit('DRAFT')}
+            onClick={handleSubmit}
             disabled={loading}
-            className="px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition-colors flex items-center shadow-xs disabled:opacity-50"
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center shadow-xs disabled:opacity-50"
           >
-            <Save size={16} className="mr-1.5 text-gray-500" />
-            {loading ? 'Saving...' : 'Save as Draft'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleSubmit('GENERATED')}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center shadow-xs disabled:opacity-50"
-          >
-            <Lock size={16} className="mr-1.5" />
-            {loading ? 'Generating...' : 'Generate & Lock'}
+            <Save size={16} className="mr-1.5" />
+            {loading ? 'Saving...' : 'Save Estimate'}
           </button>
         </div>
       </div>

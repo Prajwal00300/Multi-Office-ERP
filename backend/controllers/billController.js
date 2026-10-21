@@ -2,13 +2,13 @@ const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const Bill = require('../models/Bill');
 const BillItem = require('../models/BillItem');
-const BillAudit = require('../models/BillAudit');
 const Customer = require('../models/Customer');
 const Product = require('../models/Product');
 const Estimate = require('../models/Estimate');
 const EstimateItem = require('../models/EstimateItem');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
+const InventoryMovement = require('../models/InventoryMovement');
 const { calculateBillTotals } = require('../services/billingCalculationService');
 const { generateUniqueBillNumber } = require('../utils/billNumberGenerator');
 const {
@@ -357,19 +357,6 @@ exports.getBillById = async (req, res) => {
               attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
             }
           ]
-        },
-        {
-          model: BillAudit,
-          as: 'audits',
-          include: [
-            {
-              model: User,
-              as: 'performer',
-              attributes: ['id', 'username', 'role']
-            }
-          ],
-          separate: true,
-          order: [['createdAt', 'DESC']]
         }
       ]
     });
@@ -544,27 +531,6 @@ exports.createBill = async (req, res) => {
 
     await BillItem.bulkCreate(itemsToCreate, { transaction });
 
-    // Record Audit Log
-    await BillAudit.create({
-      billId: newBill.id,
-      billNumber: newBill.billNumber,
-      userId: req.user.userId,
-      action: 'CREATE_DRAFT',
-      reason: 'Draft bill created',
-      newValues: JSON.stringify({
-        billNumber: newBill.billNumber,
-        customerId: newBill.customerId,
-        estimateId: newBill.estimateId,
-        productSubtotal: newBill.productSubtotal,
-        gstPercentage: newBill.gstPercentage,
-        gstAmount: newBill.gstAmount,
-        transportCost: newBill.transportCost,
-        finalAmount: newBill.finalAmount,
-        itemCount: itemsToCreate.length
-      }),
-      ipAddress: req.ip || req.connection.remoteAddress
-    }, { transaction });
-
     await transaction.commit();
 
     const createdBill = await Bill.findByPk(newBill.id, {
@@ -618,14 +584,6 @@ exports.updateBill = async (req, res) => {
     } catch (scopeErr) {
       await transaction.rollback();
       return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
-    }
-
-    // Only DRAFT bills can be updated via this endpoint
-    if (bill.status !== 'DRAFT') {
-      await transaction.rollback();
-      return res.status(400).json({
-        error: `Cannot edit bill because it is ${bill.status}. Finalized bills require an authorized override.`
-      });
     }
 
     // Customer validation if updated
@@ -756,27 +714,6 @@ exports.updateBill = async (req, res) => {
 
     await BillItem.bulkCreate(itemsToCreate, { transaction });
 
-    // Record audit
-    await BillAudit.create({
-      billId: bill.id,
-      billNumber: bill.billNumber,
-      userId: req.user.userId,
-      action: 'UPDATE_DRAFT',
-      reason: 'Draft bill updated',
-      previousValues: JSON.stringify(previousSnapshot),
-      newValues: JSON.stringify({
-        customerId: targetCustomerId,
-        estimateId: targetEstimateId,
-        productSubtotal: calculated.productSubtotal,
-        gstPercentage: calculated.gstPercentage,
-        gstAmount: calculated.gstAmount,
-        transportCost: calculated.transportCost,
-        finalAmount: calculated.finalAmount,
-        itemCount: itemsToCreate.length
-      }),
-      ipAddress: req.ip || req.connection.remoteAddress
-    }, { transaction });
-
     await transaction.commit();
 
     const updatedBill = await Bill.findByPk(bill.id, {
@@ -844,21 +781,34 @@ exports.finalizeBill = async (req, res) => {
       finalizedBy: req.user.userId
     }, { transaction });
 
-    await BillAudit.create({
-      billId: bill.id,
-      billNumber: bill.billNumber,
-      userId: req.user.userId,
-      action: 'FINALIZE',
-      reason: 'Bill finalized and locked against standard editing',
-      previousValues: JSON.stringify(previousSnapshot),
-      newValues: JSON.stringify({
-        status: 'FINALIZED',
-        finalizedAt: bill.finalizedAt,
-        finalizedBy: req.user.userId,
-        finalAmount: bill.finalAmount
-      }),
-      ipAddress: req.ip || req.connection.remoteAddress
-    }, { transaction });
+    // Deduct stock for all line items that have a productId, safely within transaction
+    for (const item of bill.items) {
+      if (item.productId) {
+        const product = await Product.findByPk(item.productId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+        if (product && product.organizationId === bill.organizationId) {
+          const deductQty = parseFloat(item.quantity) || 0;
+          if (deductQty > 0) {
+            const currentStock = parseFloat(product.currentStock) || 0;
+            const newStock = Math.max(0, currentStock - deductQty);
+            await product.update({ currentStock: newStock }, { transaction });
+
+            await InventoryMovement.create({
+              organizationId: bill.organizationId,
+              productId: product.id,
+              movementType: 'OUT',
+              quantity: deductQty,
+              referenceType: 'BILL',
+              referenceId: bill.id,
+              notes: `Bill finalized #${bill.billNumber}`,
+              performedBy: req.user.userId
+            }, { transaction });
+          }
+        }
+      }
+    }
 
     await transaction.commit();
 
@@ -1060,30 +1010,6 @@ exports.overrideBill = async (req, res) => {
 
     await BillItem.bulkCreate(itemsToCreate, { transaction });
 
-    // Write audit record
-    await BillAudit.create({
-      billId: bill.id,
-      billNumber: bill.billNumber,
-      userId: req.user.userId,
-      action: 'OVERRIDE',
-      reason: reason.trim(),
-      previousValues: JSON.stringify(previousSnapshot),
-      newValues: JSON.stringify({
-        status: 'OVERRIDDEN',
-        lastOverriddenBy: req.user.userId,
-        lastOverriddenAt: bill.lastOverriddenAt,
-        customerId: targetCustomerId,
-        estimateId: targetEstimateId,
-        productSubtotal: calculated.productSubtotal,
-        gstPercentage: calculated.gstPercentage,
-        gstAmount: calculated.gstAmount,
-        transportCost: calculated.transportCost,
-        finalAmount: calculated.finalAmount,
-        itemCount: itemsToCreate.length
-      }),
-      ipAddress: req.ip || req.connection.remoteAddress
-    }, { transaction });
-
     await transaction.commit();
 
     const overriddenBill = await Bill.findByPk(bill.id, {
@@ -1103,42 +1029,5 @@ exports.overrideBill = async (req, res) => {
     await transaction.rollback();
     console.error('Error overriding bill:', error);
     res.status(500).json({ error: error.message || 'Internal server error while overriding bill' });
-  }
-};
-
-/**
- * GET /api/bills/:id/audit - Retrieve audit history
- */
-exports.getBillAudits = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const bill = await Bill.findByPk(id);
-    if (!bill) {
-      return res.status(404).json({ error: 'Bill not found' });
-    }
-
-    // Ownership check
-    await verifyRecordOwnership(bill, req.user);
-
-    const audits = await BillAudit.findAll({
-      where: { billId: id },
-      include: [
-        {
-          model: User,
-          as: 'performer',
-          attributes: ['id', 'username', 'role']
-        }
-      ],
-      order: [['createdAt', 'DESC']]
-    });
-
-    res.status(200).json(audits);
-  } catch (error) {
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-    console.error('Error fetching bill audits:', error);
-    res.status(500).json({ error: 'Internal server error while fetching bill audit logs' });
   }
 };

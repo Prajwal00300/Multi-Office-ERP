@@ -29,6 +29,7 @@ import BillPrint from '../pages/billing/BillPrint';
 import CombinedTransactionWorkspace from '../pages/billing/CombinedTransactionWorkspace';
 import PurchasesList from '../pages/purchases/PurchasesList';
 import PurchaseForm from '../pages/purchases/PurchaseForm';
+import OrderReceived from '../pages/purchases/OrderReceived';
 import PurchaseDetail from '../pages/purchases/PurchaseDetail';
 import WeighbridgeList from '../pages/weighbridge/WeighbridgeList';
 import WeighbridgeForm from '../pages/weighbridge/WeighbridgeForm';
@@ -137,7 +138,8 @@ const AppRoutes = () => {
         <Route element={<Layout />}>
           <Route path="/bills" element={<BillsList />} />
           <Route path="/bills/new" element={<BillForm />} />
-          <Route path="/bills/transaction" element={<CombinedTransactionWorkspace />} />
+          <Route path="/sale-voucher" element={<CombinedTransactionWorkspace />} />
+          <Route path="/bills/transaction" element={<Navigate to="/sale-voucher" replace />} />
           <Route path="/bills/:id" element={<BillDetail />} />
           <Route path="/bills/:id/edit" element={<BillForm />} />
           <Route path="/bills/:id/print" element={<BillPrint />} />
@@ -149,6 +151,7 @@ const AppRoutes = () => {
         <Route element={<Layout />}>
           <Route path="/purchases" element={<PurchasesList />} />
           <Route path="/purchases/new" element={<PurchaseForm />} />
+          <Route path="/purchases/receive" element={<OrderReceived />} />
           <Route path="/purchases/:id" element={<PurchaseDetail />} />
           <Route path="/purchases/:id/edit" element={<PurchaseForm />} />
         </Route>

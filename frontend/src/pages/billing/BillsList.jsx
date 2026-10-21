@@ -1,27 +1,22 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
-  Plus, 
   Search, 
   Receipt, 
   Printer, 
   Eye, 
   Edit3, 
-  Lock, 
-  Unlock, 
-  ShieldAlert, 
   Calendar, 
   Building, 
   User, 
   CheckCircle, 
-  Clock, 
   AlertCircle,
   TrendingUp,
   FileText
 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
-import { getBills, finalizeBill } from '../../services/billingService';
+import { getBills } from '../../services/billingService';
 
 const BillsList = () => {
   const navigate = useNavigate();
@@ -32,11 +27,9 @@ const BillsList = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [actionLoading, setActionLoading] = useState(null);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
@@ -64,7 +57,6 @@ const BillsList = () => {
 
       const params = {};
       if (searchTerm.trim()) params.search = searchTerm.trim();
-      if (statusFilter !== 'ALL') params.status = statusFilter;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
 
@@ -83,7 +75,7 @@ const BillsList = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, statusFilter, startDate, endDate, selectedOrgId, user]);
+  }, [searchTerm, startDate, endDate, selectedOrgId, user]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -93,61 +85,9 @@ const BillsList = () => {
     return () => clearTimeout(delayDebounceFn);
   }, [fetchBillsData]);
 
-  // Finalize Bill handler
-  const handleFinalize = async (billId, billNumber) => {
-    if (!window.confirm(`Are you sure you want to finalize and lock Bill "${billNumber}"? Once finalized, ordinary modifications will be restricted.`)) {
-      return;
-    }
-
-    try {
-      setActionLoading(billId);
-      setError('');
-      await finalizeBill(billId);
-      setSuccessMsg(`Bill ${billNumber} finalized and locked successfully.`);
-      fetchBillsData();
-      setTimeout(() => setSuccessMsg(''), 5000);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to finalize bill.');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  // Status Badge Component
-  const renderStatusBadge = (status) => {
-    switch (status) {
-      case 'FINALIZED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-            <Lock className="w-3.5 h-3.5" />
-            FINALIZED
-          </span>
-        );
-      case 'OVERRIDDEN':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            OVERRIDDEN
-          </span>
-        );
-      case 'DRAFT':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-            <Clock className="w-3.5 h-3.5" />
-            DRAFT
-          </span>
-        );
-    }
-  };
-
   // Quick Stats
   const totalBillsCount = bills.length;
-  const draftCount = bills.filter(b => b.status === 'DRAFT').length;
-  const finalizedCount = bills.filter(b => b.status === 'FINALIZED' || b.status === 'OVERRIDDEN').length;
   const totalRevenue = bills.reduce((acc, curr) => acc + (parseFloat(curr.finalAmount) || 0), 0);
-
-  const canOverride = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
 
   return (
     <div className="space-y-6">
@@ -169,18 +109,11 @@ const BillsList = () => {
 
         <div className="flex items-center gap-3">
           <Link
-            to="/bills/transaction"
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
-          >
-            <Receipt className="w-4 h-4" />
-            Sale Voucher (K) Workspace
-          </Link>
-          <Link
-            to="/bills/new"
+            to="/sale-voucher"
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
           >
-            <Plus className="w-4 h-4" />
-            Create New Bill
+            <Receipt className="w-4 h-4" />
+            Sale Voucher Workspace
           </Link>
         </div>
       </div>
@@ -201,7 +134,7 @@ const BillsList = () => {
       )}
 
       {/* Stats Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
           <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
             <Receipt className="w-5 h-5" />
@@ -209,26 +142,6 @@ const BillsList = () => {
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Bills</p>
             <p className="text-2xl font-bold text-gray-900">{totalBillsCount}</p>
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
-            <Clock className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Draft Vouchers</p>
-            <p className="text-2xl font-bold text-amber-700">{draftCount}</p>
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
-            <Lock className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Finalized Bills</p>
-            <p className="text-2xl font-bold text-emerald-700">{finalizedCount}</p>
           </div>
         </div>
 
@@ -247,7 +160,7 @@ const BillsList = () => {
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Search Input */}
           <div className="relative lg:col-span-2">
             <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
@@ -258,20 +171,6 @@ const BillsList = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="FINALIZED">Finalized</option>
-              <option value="OVERRIDDEN">Overridden</option>
-            </select>
           </div>
 
           {/* Super Admin Org Filter */}
@@ -315,12 +214,11 @@ const BillsList = () => {
           </div>
         </div>
 
-        {(searchTerm || statusFilter !== 'ALL' || startDate || endDate || selectedOrgId) && (
+        {(searchTerm || startDate || endDate || selectedOrgId) && (
           <div className="flex justify-end pt-2 border-t border-gray-100">
             <button
               onClick={() => {
                 setSearchTerm('');
-                setStatusFilter('ALL');
                 setStartDate('');
                 setEndDate('');
                 setSelectedOrgId('');
@@ -349,14 +247,14 @@ const BillsList = () => {
             <p className="text-sm text-gray-500 max-w-sm mx-auto">
               {searchTerm || statusFilter !== 'ALL' || startDate || endDate
                 ? 'No bills match your current filters. Try resetting your search parameters.'
-                : 'Get started by creating your first sales bill / voucher.'}
+                : 'No bills have been created for this office yet.'}
             </p>
             <Link
-              to="/bills/new"
+              to="/sale-voucher"
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
             >
-              <Plus className="w-4 h-4" />
-              Create First Bill
+              <Receipt className="w-4 h-4" />
+              Open Sale Voucher Workspace
             </Link>
           </div>
         ) : (
@@ -371,7 +269,6 @@ const BillsList = () => {
                   <th className="py-3.5 px-4 text-right">GST</th>
                   <th className="py-3.5 px-4 text-right">Transport</th>
                   <th className="py-3.5 px-4 text-right">Final Amount</th>
-                  <th className="py-3.5 px-4 text-center">Status</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -452,11 +349,6 @@ const BillsList = () => {
                         ₹{finalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
 
-                      {/* Status */}
-                      <td className="py-3 px-4 text-center">
-                        {renderStatusBadge(bill.status)}
-                      </td>
-
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -478,38 +370,14 @@ const BillsList = () => {
                             <Printer className="w-4 h-4" />
                           </Link>
 
-                          {/* Edit Draft */}
-                          {bill.status === 'DRAFT' && (
-                            <>
-                              <Link
-                                to={`/bills/${bill.id}/edit`}
-                                className="p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors"
-                                title="Edit Draft"
-                              >
-                                <Edit3 className="w-4 h-4" />
-                              </Link>
-
-                              <button
-                                onClick={() => handleFinalize(bill.id, bill.billNumber)}
-                                disabled={actionLoading === bill.id}
-                                className="p-1.5 text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors disabled:opacity-50"
-                                title="Finalize Bill"
-                              >
-                                <Lock className="w-4 h-4" />
-                              </button>
-                            </>
-                          )}
-
-                          {/* Authorized Override */}
-                          {bill.status !== 'DRAFT' && canOverride && (
-                            <Link
-                              to={`/bills/${bill.id}/edit?mode=override`}
-                              className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-md transition-colors"
-                              title="Authorized Override"
-                            >
-                              <ShieldAlert className="w-4 h-4" />
-                            </Link>
-                          )}
+                          {/* Edit Bill */}
+                          <Link
+                            to={`/sale-voucher?billId=${bill.id}&mode=edit`}
+                            className="p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors"
+                            title="Edit Bill"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </Link>
                         </div>
                       </td>
                     </tr>

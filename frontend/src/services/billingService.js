@@ -41,10 +41,6 @@ export const getNextBillNumber = async (organizationId) => {
   return res.data;
 };
 
-export const getBillAudits = async (id) => {
-  const res = await api.get(`/bills/${id}/audit`);
-  return res.data;
-};
 
 export const createBill = async (data) => {
   const res = await api.post('/bills', data);
@@ -72,7 +68,6 @@ export default {
   getPreviousBill,
   getNextBill,
   getNextBillNumber,
-  getBillAudits,
   createBill,
   updateBill,
   finalizeBill,

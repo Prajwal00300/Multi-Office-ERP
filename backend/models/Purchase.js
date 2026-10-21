@@ -52,9 +52,10 @@ const Purchase = sequelize.define('Purchase', {
     comment: 'Total purchase amount'
   },
   status: {
-    type: DataTypes.ENUM('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'OVERRIDDEN'),
+    type: DataTypes.STRING,
     allowNull: false,
-    defaultValue: 'DRAFT',
+    defaultValue: 'Pending',
+    comment: 'Pending, Partially Received, Fully Received, DRAFT, APPROVED, CANCELLED'
   },
   createdBy: {
     type: DataTypes.INTEGER,

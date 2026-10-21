@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Receipt,
+  Eye,
   FileText,
   Plus,
   Trash2,
@@ -29,8 +30,7 @@ import {
   getNextBillNumber,
   getBillById,
   createBill,
-  updateBill,
-  overrideBill
+  updateBill
 } from '../../services/billingService';
 
 const BLANK_TRANSACTION_ROW = {
@@ -54,8 +54,6 @@ export default function CombinedTransactionWorkspace() {
   // Finite State Machine: 'VIEW' | 'ADD' | 'EDIT' | 'SAVING'
   const [mode, setMode] = useState('VIEW');
   const [isDirty, setIsDirty] = useState(false);
-  const [isOverride, setIsOverride] = useState(false);
-  const [overrideReason, setOverrideReason] = useState('');
 
   // Office context
   const [organizations, setOrganizations] = useState([]);
@@ -194,7 +192,12 @@ export default function CombinedTransactionWorkspace() {
 
         if (billData) {
           populateBillIntoState(billData);
-          setMode('VIEW');
+          if (searchParams.get('mode') === 'edit') {
+            setMode('EDIT');
+            setSuccessMsg(`Loaded Sale Voucher #${billData.billNumber} in Edit mode.`);
+          } else {
+            setMode('VIEW');
+          }
         } else {
           await resetToAddMode();
         }
@@ -213,7 +216,6 @@ export default function CombinedTransactionWorkspace() {
   const populateBillIntoState = (bill) => {
     setCurrentBill(bill);
     setIsDirty(false);
-    setIsOverride(false);
 
     setBillDate(bill.billDate || new Date().toISOString().split('T')[0]);
     setBillNumber(bill.billNumber || '');
@@ -287,8 +289,6 @@ export default function CombinedTransactionWorkspace() {
     setBillRemark('');
 
     setIsDirty(false);
-    setIsOverride(false);
-    setOverrideReason('');
     setErrorMsg('');
     setSuccessMsg('');
     setMode('ADD');
@@ -553,21 +553,8 @@ export default function CombinedTransactionWorkspace() {
       setErrorMsg('No saved sale voucher is currently loaded to edit.');
       return;
     }
-
-    if (currentBill.status === 'FINALIZED') {
-      const canOverride = ['SUPER_ADMIN', 'ADMIN', 'CEO'].includes(user?.role);
-      if (!canOverride) {
-        setErrorMsg('This bill is Finalized and locked. Only an Admin or CEO can edit it.');
-        return;
-      }
-      setIsOverride(true);
-      setMode('EDIT');
-      setSuccessMsg('Voucher is Finalized. Entering Authorized Override Edit mode.');
-    } else {
-      setIsOverride(false);
-      setMode('EDIT');
-      setSuccessMsg('Edit mode active. You may now modify the voucher details.');
-    }
+    setMode('EDIT');
+    setSuccessMsg('Edit mode active. You may now modify the voucher details.');
   };
 
   // BUTTON 4: SAVE
@@ -596,11 +583,6 @@ export default function CombinedTransactionWorkspace() {
         setErrorMsg(`Row #${i + 1}: Final rate cannot be negative.`);
         return;
       }
-    }
-
-    if (isOverride && !overrideReason.trim()) {
-      setErrorMsg('An override audit reason is required to update a finalized bill.');
-      return;
     }
 
     setActionLoading(true);
@@ -675,16 +657,8 @@ export default function CombinedTransactionWorkspace() {
 
       let savedRecord = null;
       if (currentBill?.id) {
-        if (isOverride) {
-          const res = await overrideBill(currentBill.id, {
-            ...billPayload,
-            reason: overrideReason.trim()
-          });
-          savedRecord = res.bill || res;
-        } else {
-          const res = await updateBill(currentBill.id, billPayload);
-          savedRecord = res.bill || res;
-        }
+        const res = await updateBill(currentBill.id, billPayload);
+        savedRecord = res.bill || res;
         setSuccessMsg(`Sale Voucher #${savedRecord.billNumber || currentBill.billNumber} successfully updated.`);
       } else {
         const res = await createBill(billPayload);
@@ -748,24 +722,12 @@ export default function CombinedTransactionWorkspace() {
               ? 'bg-amber-600 text-white'
               : 'bg-indigo-600 text-white'
           }`}>
-            {mode === 'VIEW' && <Lock className="w-3 h-3" />}
+            {mode === 'VIEW' && <Eye className="w-3 h-3" />}
             {mode === 'ADD' && <Plus className="w-3 h-3" />}
             {mode === 'EDIT' && <Edit3 className="w-3 h-3" />}
             {mode === 'SAVING' && <Loader2 className="w-3 h-3 animate-spin" />}
             {mode} MODE
           </span>
-
-          {currentBill?.status === 'FINALIZED' && (
-            <span className="px-1.5 py-0.5 bg-red-800 text-white rounded text-[10px] font-bold">
-              FINALIZED / LOCKED
-            </span>
-          )}
-
-          {isOverride && (
-            <span className="px-1.5 py-0.5 bg-purple-700 text-white rounded text-[10px] font-bold flex items-center gap-1">
-              <ShieldAlert className="w-3 h-3" /> OVERRIDE ACTIVE
-            </span>
-          )}
         </div>
 
         {/* Office Selection */}
@@ -814,21 +776,6 @@ export default function CombinedTransactionWorkspace() {
             <span>{successMsg}</span>
           </div>
           <button onClick={() => setSuccessMsg('')} className="text-emerald-800 font-bold hover:text-emerald-900 text-xs">✕</button>
-        </div>
-      )}
-
-      {/* Override Reason Prompt */}
-      {isOverride && mode === 'EDIT' && (
-        <div className="bg-purple-50 border border-purple-300 p-2 mx-2 mt-1 rounded text-purple-900 flex items-center space-x-2">
-          <ShieldAlert className="w-4 h-4 text-purple-600 shrink-0" />
-          <span className="font-semibold text-xs">Override Audit Reason:</span>
-          <input
-            type="text"
-            value={overrideReason}
-            onChange={(e) => setOverrideReason(e.target.value)}
-            placeholder="State authoritative reason for amending finalized bill..."
-            className="flex-1 bg-white border border-purple-300 rounded px-2 py-1 text-xs text-purple-900 focus:outline-none"
-          />
         </div>
       )}
 

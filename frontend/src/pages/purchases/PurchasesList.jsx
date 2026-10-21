@@ -16,11 +16,14 @@ import {
   DollarSign, 
   AlertCircle,
   TrendingUp,
-  UserCheck
+  Inbox,
+  Package,
+  Layers,
+  ArrowRight
 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
-import { getPurchases, submitPurchase, approvePurchase } from '../../services/purchaseService';
+import { getPurchases } from '../../services/purchaseService';
 
 const PurchasesList = () => {
   const navigate = useNavigate();
@@ -31,7 +34,6 @@ const PurchasesList = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [actionLoading, setActionLoading] = useState(null);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,17 +42,22 @@ const PurchasesList = () => {
   const [endDate, setEndDate] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
 
-  // Fetch Organizations for Super Admin dropdown
+  // Fetch Organizations for Super Admin / CEO
   useEffect(() => {
-    if (user?.role === 'SUPER_ADMIN') {
-      const fetchOrgs = async () => {
-        try {
+    const fetchOrgs = async () => {
+      try {
+        if (user?.role === 'SUPER_ADMIN') {
           const res = await api.get('/organizations');
           setOrganizations(res.data || []);
-        } catch (err) {
-          console.error('Failed to load organizations:', err);
+        } else if (user?.role === 'CEO') {
+          const res = await api.get('/ceo/offices');
+          setOrganizations(res.data || []);
         }
-      };
+      } catch (err) {
+        console.error('Failed to load organizations:', err);
+      }
+    };
+    if (user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') {
       fetchOrgs();
     }
   }, [user]);
@@ -67,7 +74,7 @@ const PurchasesList = () => {
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
 
-      if (user?.role === 'SUPER_ADMIN') {
+      if (user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') {
         if (selectedOrgId) params.organizationId = selectedOrgId;
       } else if (user?.organizationId) {
         params.organizationId = user.organizationId;
@@ -92,83 +99,39 @@ const PurchasesList = () => {
     return () => clearTimeout(delayDebounceFn);
   }, [fetchPurchasesData]);
 
-  // Submit for approval handler
-  const handleSubmitForApproval = async (purchaseId, purchaseNumber) => {
-    if (!window.confirm(`Submit Purchase "${purchaseNumber}" for review and approval?`)) {
-      return;
-    }
-
-    try {
-      setActionLoading(purchaseId);
-      setError('');
-      await submitPurchase(purchaseId);
-      setSuccessMsg(`Purchase ${purchaseNumber} submitted for approval successfully.`);
-      fetchPurchasesData();
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to submit purchase.');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  // Quick Approve handler (Admins only)
-  const handleApprove = async (purchaseId, purchaseNumber) => {
-    if (!window.confirm(`Approve Purchase "${purchaseNumber}" as authorized executive?`)) {
-      return;
-    }
-
-    try {
-      setActionLoading(purchaseId);
-      setError('');
-      await approvePurchase(purchaseId);
-      setSuccessMsg(`Purchase ${purchaseNumber} approved successfully.`);
-      fetchPurchasesData();
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to approve purchase.');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   // Status Badge Component
   const renderStatusBadge = (status) => {
     switch (status) {
+      case 'Fully Received':
       case 'APPROVED':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
             <CheckCircle className="w-3.5 h-3.5" />
-            APPROVED
+            Fully Received
           </span>
         );
-      case 'PENDING_APPROVAL':
+      case 'Partially Received':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
-            <UserCheck className="w-3.5 h-3.5" />
-            PENDING APPROVAL
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 border border-indigo-200">
+            <Clock className="w-3.5 h-3.5" />
+            Partially Received
           </span>
         );
-      case 'REJECTED':
+      case 'CANCELLED':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">
             <XCircle className="w-3.5 h-3.5" />
-            REJECTED
+            Cancelled
           </span>
         );
-      case 'OVERRIDDEN':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            OVERRIDDEN
-          </span>
-        );
+      case 'Pending':
       case 'DRAFT':
+      case 'PENDING_APPROVAL':
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
             <Clock className="w-3.5 h-3.5" />
-            DRAFT
+            Pending
           </span>
         );
     }
@@ -176,15 +139,13 @@ const PurchasesList = () => {
 
   // Quick Stats
   const totalCount = purchases.length;
-  const draftCount = purchases.filter(p => p.status === 'DRAFT').length;
-  const pendingCount = purchases.filter(p => p.status === 'PENDING_APPROVAL').length;
-  const approvedCount = purchases.filter(p => p.status === 'APPROVED' || p.status === 'OVERRIDDEN').length;
-  const totalSpend = purchases.reduce((acc, curr) => acc + (parseFloat(curr.totalAmount) || 0), 0);
-
-  const canApprove = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
+  const pendingCount = purchases.filter(p => p.status === 'Pending' || p.status === 'DRAFT' || p.status === 'PENDING_APPROVAL').length;
+  const partialCount = purchases.filter(p => p.status === 'Partially Received').length;
+  const fullyReceivedCount = purchases.filter(p => p.status === 'Fully Received' || p.status === 'APPROVED').length;
+  const totalOrderedTons = purchases.reduce((acc, curr) => acc + (parseFloat(curr.totalOrderedQuantity) || parseFloat(curr.totalQuantity) || 0), 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
         <div className="flex items-center gap-3">
@@ -194,18 +155,28 @@ const PurchasesList = () => {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Purchase Management</h1>
             <p className="text-sm text-gray-500">
-              Record purchases, manage approvals, track line items, and audit transaction changes
+              Place multi-product purchase orders and record incoming goods receipts into inventory.
             </p>
           </div>
         </div>
 
-        <div>
+        <div className="flex items-center gap-3">
+          {/* Order Received Button */}
+          <Link
+            to="/purchases/receive"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
+          >
+            <Inbox className="w-4 h-4" />
+            Order Received
+          </Link>
+
+          {/* Place Order Button */}
           <Link
             to="/purchases/new"
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            Create Purchase
+            Place Order
           </Link>
         </div>
       </div>
@@ -232,7 +203,7 @@ const PurchasesList = () => {
             <ShoppingCart className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total</p>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Orders</p>
             <p className="text-xl font-bold text-gray-900">{totalCount}</p>
           </div>
         </div>
@@ -242,18 +213,18 @@ const PurchasesList = () => {
             <Clock className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Drafts</p>
-            <p className="text-xl font-bold text-amber-700">{draftCount}</p>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Pending</p>
+            <p className="text-xl font-bold text-amber-700">{pendingCount}</p>
           </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
-          <div className="p-2.5 bg-blue-50 text-blue-700 rounded-lg">
-            <UserCheck className="w-5 h-5" />
+          <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg">
+            <Layers className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Pending</p>
-            <p className="text-xl font-bold text-blue-700">{pendingCount}</p>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Partially Received</p>
+            <p className="text-xl font-bold text-indigo-700">{partialCount}</p>
           </div>
         </div>
 
@@ -262,19 +233,19 @@ const PurchasesList = () => {
             <CheckCircle className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Approved</p>
-            <p className="text-xl font-bold text-emerald-700">{approvedCount}</p>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Fully Received</p>
+            <p className="text-xl font-bold text-emerald-700">{fullyReceivedCount}</p>
           </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-lg">
-            <TrendingUp className="w-5 h-5" />
+          <div className="p-2.5 bg-slate-50 text-slate-700 rounded-lg">
+            <Package className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Spend</p>
-            <p className="text-lg font-bold text-indigo-900">
-              ₹{totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Ordered</p>
+            <p className="text-lg font-bold text-slate-800">
+              {totalOrderedTons.toFixed(2)} Tons
             </p>
           </div>
         </div>
@@ -288,7 +259,7 @@ const PurchasesList = () => {
             <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by Purchase No., Vendor, Details..."
+              placeholder="Search by Order ID, Party Name, Product..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -303,23 +274,22 @@ const PurchasesList = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="ALL">All Statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="PENDING_APPROVAL">Pending Approval</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
-              <option value="OVERRIDDEN">Overridden</option>
+              <option value="Pending">Pending</option>
+              <option value="Partially Received">Partially Received</option>
+              <option value="Fully Received">Fully Received</option>
+              <option value="CANCELLED">Cancelled</option>
             </select>
           </div>
 
-          {/* Super Admin Org Filter */}
-          {user?.role === 'SUPER_ADMIN' && (
+          {/* Org Filter (Super Admin or CEO) */}
+          {(user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') && (
             <div>
               <select
                 value={selectedOrgId}
                 onChange={(e) => setSelectedOrgId(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">All Organizations</option>
+                <option value="">All Offices</option>
                 {organizations.map((org) => (
                   <option key={org.id} value={org.id}>
                     {org.name}
@@ -375,66 +345,77 @@ const PurchasesList = () => {
         {loading ? (
           <div className="p-12 text-center">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
-            <p className="mt-3 text-sm text-gray-500">Loading purchase records...</p>
+            <p className="mt-3 text-sm text-gray-500">Loading purchase orders...</p>
           </div>
         ) : purchases.length === 0 ? (
           <div className="p-12 text-center space-y-3">
             <div className="w-12 h-12 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center mx-auto">
               <ShoppingCart className="w-6 h-6" />
             </div>
-            <h3 className="text-base font-semibold text-gray-900">No purchases found</h3>
+            <h3 className="text-base font-semibold text-gray-900">No purchase orders found</h3>
             <p className="text-sm text-gray-500 max-w-sm mx-auto">
               {searchTerm || statusFilter !== 'ALL' || startDate || endDate
-                ? 'No purchases match your current filters. Try resetting search parameters.'
-                : 'Create your first purchase record to track acquisitions and approvals.'}
+                ? 'No orders match your current filters. Try resetting search parameters.'
+                : 'Place your first purchase order to track products, carbon types, and goods receipts.'}
             </p>
-            <Link
-              to="/purchases/new"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Create Purchase
-            </Link>
+            <div className="flex justify-center gap-3 pt-2">
+              <Link
+                to="/purchases/new"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Place Order
+              </Link>
+              <Link
+                to="/purchases/receive"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+              >
+                <Inbox className="w-4 h-4" />
+                Order Received
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  <th className="py-3.5 px-4">Purchase No.</th>
-                  <th className="py-3.5 px-4">Vendor / Party</th>
-                  <th className="py-3.5 px-4">Description / Details</th>
-                  <th className="py-3.5 px-4 text-right">Items / Qty</th>
-                  <th className="py-3.5 px-4 text-right">Total Amount</th>
-                  {user?.role === 'SUPER_ADMIN' && <th className="py-3.5 px-4">Organization</th>}
+                  <th className="py-3.5 px-4">Order ID & Date</th>
+                  <th className="py-3.5 px-4">Party / Supplier</th>
+                  <th className="py-3.5 px-4 min-w-[220px]">Products & Carbon Types</th>
+                  <th className="py-3.5 px-4 text-right">Ordered</th>
+                  <th className="py-3.5 px-4 text-right">Received</th>
+                  <th className="py-3.5 px-4 text-right">Pending</th>
+                  {user?.role === 'SUPER_ADMIN' && <th className="py-3.5 px-4">Office</th>}
                   <th className="py-3.5 px-4 text-center">Status</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 text-sm">
                 {purchases.map((purchase) => {
-                  const totalAmt = parseFloat(purchase.totalAmount) || 0;
-                  const totalQty = parseFloat(purchase.totalQuantity) || 0;
-                  const itemCount = purchase.items?.length || 0;
+                  const totalOrd = parseFloat(purchase.totalOrderedQuantity) || parseFloat(purchase.totalQuantity) || 0;
+                  const totalRec = parseFloat(purchase.totalReceivedQuantity) || 0;
+                  const totalPen = Math.max(0, totalOrd - totalRec);
+                  const itemsList = purchase.items || [];
 
                   return (
                     <tr key={purchase.id} className="hover:bg-gray-50/75 transition-colors">
-                      {/* Purchase No & Date */}
+                      {/* Order ID & Date */}
                       <td className="py-3 px-4">
                         <Link 
                           to={`/purchases/${purchase.id}`} 
-                          className="font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1.5"
+                          className="font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline"
                         >
                           {purchase.purchaseNumber}
                         </Link>
                         <div className="text-xs text-gray-500 mt-0.5">
-                          Date: {purchase.purchaseDate}
+                          {purchase.purchaseDate}
                         </div>
                       </td>
 
-                      {/* Vendor Name */}
+                      {/* Party Name */}
                       <td className="py-3 px-4">
-                        <div className="font-medium text-gray-900">
+                        <div className="font-semibold text-gray-900">
                           {purchase.vendorName || <span className="text-gray-400 italic">Unspecified</span>}
                         </div>
                         <div className="text-xs text-gray-500">
@@ -442,23 +423,55 @@ const PurchasesList = () => {
                         </div>
                       </td>
 
-                      {/* Details */}
-                      <td className="py-3 px-4 text-gray-700 max-w-xs truncate">
-                        {purchase.purchaseDetails || '—'}
+                      {/* Products Summary */}
+                      <td className="py-3 px-4">
+                        <div className="flex flex-wrap gap-1.5 max-w-sm">
+                          {itemsList.slice(0, 3).map((it, idx) => (
+                            <span 
+                              key={idx} 
+                              className="inline-flex items-center gap-1 text-[11px] bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-200"
+                            >
+                              <span className="font-medium">{it.productNameSnapshot || 'Product'}:</span>
+                              <span>{parseFloat(it.quantity).toFixed(1)}T</span>
+                              <span className={`text-[10px] px-1 rounded ${
+                                it.carbonType === 'High Carbon' ? 'bg-purple-100 text-purple-700' : 'bg-teal-100 text-teal-700'
+                              }`}>
+                                {it.carbonType === 'High Carbon' ? 'HC' : 'LC'}
+                              </span>
+                            </span>
+                          ))}
+                          {itemsList.length > 3 && (
+                            <span className="text-[11px] text-gray-500 self-center">
+                              +{itemsList.length - 3} more
+                            </span>
+                          )}
+                        </div>
                       </td>
 
-                      {/* Items / Quantity */}
-                      <td className="py-3 px-4 text-right font-mono text-xs">
-                        <div className="font-medium text-gray-900">{totalQty.toFixed(3)}</div>
-                        <div className="text-gray-400">{itemCount} row(s)</div>
+                      {/* Ordered Qty */}
+                      <td className="py-3 px-4 text-right font-semibold text-gray-900 text-sm">
+                        {totalOrd.toFixed(3)} <span className="text-xs font-normal text-gray-500">T</span>
                       </td>
 
-                      {/* Total Amount */}
-                      <td className="py-3 px-4 text-right font-bold text-gray-900 text-base">
-                        ₹{totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {/* Received Qty */}
+                      <td className="py-3 px-4 text-right font-medium text-emerald-700 text-sm">
+                        {totalRec.toFixed(3)} <span className="text-xs font-normal text-gray-400">T</span>
                       </td>
 
-                      {/* Organization (Super Admin) */}
+                      {/* Pending Qty */}
+                      <td className="py-3 px-4 text-right text-sm">
+                        {totalPen <= 0 ? (
+                          <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                            0.000 T
+                          </span>
+                        ) : (
+                          <span className="font-bold text-amber-600">
+                            {totalPen.toFixed(3)} <span className="text-xs font-normal text-gray-400">T</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Office (Super Admin) */}
                       {user?.role === 'SUPER_ADMIN' && (
                         <td className="py-3 px-4 text-xs text-gray-600">
                           {purchase.Organization?.name || `Office #${purchase.organizationId}`}
@@ -473,58 +486,35 @@ const PurchasesList = () => {
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {/* Quick Receive Goods Button */}
+                          {totalPen > 0 && purchase.status !== 'CANCELLED' && (
+                            <Link
+                              to={`/purchases/receive?orderId=${encodeURIComponent(purchase.purchaseNumber)}`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-xs font-medium transition-colors"
+                              title="Receive Goods against this Order"
+                            >
+                              <Inbox className="w-3.5 h-3.5" />
+                              Receive
+                            </Link>
+                          )}
+
                           {/* View Detail */}
                           <Link
                             to={`/purchases/${purchase.id}`}
                             className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                            title="View Details & Audit"
+                            title="View Order Details & Receipts"
                           >
                             <Eye className="w-4 h-4" />
                           </Link>
 
-                          {/* Edit (Draft or Pending) */}
-                          {['DRAFT', 'REJECTED', 'PENDING_APPROVAL'].includes(purchase.status) && (
+                          {/* Edit (if no receipts yet) */}
+                          {totalRec === 0 && purchase.status !== 'CANCELLED' && (
                             <Link
                               to={`/purchases/${purchase.id}/edit`}
                               className="p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors"
-                              title="Edit Purchase"
+                              title="Edit Purchase Order"
                             >
                               <Edit3 className="w-4 h-4" />
-                            </Link>
-                          )}
-
-                          {/* Submit for Approval (Draft) */}
-                          {['DRAFT', 'REJECTED'].includes(purchase.status) && (
-                            <button
-                              onClick={() => handleSubmitForApproval(purchase.id, purchase.purchaseNumber)}
-                              disabled={actionLoading === purchase.id}
-                              className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
-                              title="Submit for Approval"
-                            >
-                              <Send className="w-4 h-4" />
-                            </button>
-                          )}
-
-                          {/* Quick Approve (Admin on Pending) */}
-                          {purchase.status === 'PENDING_APPROVAL' && canApprove && (
-                            <button
-                              onClick={() => handleApprove(purchase.id, purchase.purchaseNumber)}
-                              disabled={actionLoading === purchase.id}
-                              className="p-1.5 text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors disabled:opacity-50"
-                              title="Approve Purchase"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                            </button>
-                          )}
-
-                          {/* Authorized Override (Approved & Admin) */}
-                          {purchase.status === 'APPROVED' && canApprove && (
-                            <Link
-                              to={`/purchases/${purchase.id}/edit?mode=override`}
-                              className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-md transition-colors"
-                              title="Authorized Override"
-                            >
-                              <ShieldAlert className="w-4 h-4" />
                             </Link>
                           )}
                         </div>

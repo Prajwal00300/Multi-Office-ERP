@@ -1,20 +1,15 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
-  Plus, 
   Search, 
   FileText, 
   Printer, 
   Eye, 
   Edit3, 
-  Lock, 
-  Unlock, 
-  ShieldAlert, 
   Calendar, 
   Building, 
   User, 
   CheckCircle, 
-  Clock, 
   AlertCircle 
 } from 'lucide-react';
 import api from '../../services/api';
@@ -32,7 +27,6 @@ const EstimatesList = () => {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
@@ -60,7 +54,6 @@ const EstimatesList = () => {
 
       const params = new URLSearchParams();
       if (searchTerm.trim()) params.append('search', searchTerm.trim());
-      if (statusFilter !== 'ALL') params.append('status', statusFilter);
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
 
@@ -81,7 +74,7 @@ const EstimatesList = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, statusFilter, startDate, endDate, selectedOrgId, user]);
+  }, [searchTerm, startDate, endDate, selectedOrgId, user]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -99,34 +92,6 @@ const EstimatesList = () => {
     }).format(val || 0);
   };
 
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'DRAFT':
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-            <Clock size={12} className="mr-1 text-amber-600" />
-            Draft
-          </span>
-        );
-      case 'GENERATED':
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-            <Lock size={12} className="mr-1 text-emerald-600" />
-            Generated / Locked
-          </span>
-        );
-      case 'OVERRIDDEN':
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
-            <ShieldAlert size={12} className="mr-1 text-purple-600" />
-            Overridden & Locked
-          </span>
-        );
-      default:
-        return <span className="text-xs text-gray-500">{status}</span>;
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -134,16 +99,9 @@ const EstimatesList = () => {
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Estimate Management</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Prepare customer estimates, generate print-ready slips (Estimate K), and manage locked records.
+            View customer estimates, generate print-ready slips (Estimate K), and manage records.
           </p>
         </div>
-        <Link
-          to="/estimates/new"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium flex items-center shadow-sm transition-all text-sm shrink-0"
-        >
-          <Plus size={18} className="mr-2" />
-          Create New Estimate
-        </Link>
       </div>
 
       {/* Error Banner */}
@@ -178,20 +136,6 @@ const EstimatesList = () => {
           />
         </div>
 
-        {/* Status Filter */}
-        <div className="md:col-span-2">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="block w-full py-2 px-3 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="ALL">All Statuses</option>
-            <option value="DRAFT">Draft Only</option>
-            <option value="GENERATED">Generated / Locked</option>
-            <option value="OVERRIDDEN">Overridden</option>
-          </select>
-        </div>
-
         {/* Start Date */}
         <div className="md:col-span-2">
           <input
@@ -216,7 +160,7 @@ const EstimatesList = () => {
 
         {/* Super Admin Organization Filter */}
         {user?.role === 'SUPER_ADMIN' ? (
-          <div className="md:col-span-2">
+          <div className="md:col-span-4">
             <select
               value={selectedOrgId}
               onChange={(e) => setSelectedOrgId(e.target.value)}
@@ -231,9 +175,9 @@ const EstimatesList = () => {
             </select>
           </div>
         ) : (
-          <div className="md:col-span-2 flex justify-end">
+          <div className="md:col-span-4 flex justify-end items-center">
             <button
-              onClick={() => { setSearchTerm(''); setStatusFilter('ALL'); setStartDate(''); setEndDate(''); }}
+              onClick={() => { setSearchTerm(''); setStartDate(''); setEndDate(''); }}
               className="text-xs text-gray-500 hover:text-gray-700 underline"
             >
               Reset Filters
@@ -254,7 +198,6 @@ const EstimatesList = () => {
                 <th className="px-6 py-4">Basic</th>
                 <th className="px-6 py-4">Total Qty</th>
                 <th className="px-6 py-4">Grand Total</th>
-                <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -279,15 +222,8 @@ const EstimatesList = () => {
                       <p className="text-gray-400 text-sm max-w-sm">
                         {searchTerm || statusFilter !== 'ALL' || startDate || endDate
                           ? 'Try adjusting your search criteria or date filter.'
-                          : 'Create your first customer estimate for reinforcing bars or pipes.'}
+                          : 'No estimates have been created for this office yet.'}
                       </p>
-                      <Link
-                        to="/estimates/new"
-                        className="mt-2 text-blue-600 hover:text-blue-800 font-medium text-sm flex items-center space-x-1"
-                      >
-                        <Plus size={16} />
-                        <span>Create New Estimate</span>
-                      </Link>
                     </div>
                   </td>
                 </tr>
@@ -348,11 +284,6 @@ const EstimatesList = () => {
                       {formatCurrency(est.grandTotal)}
                     </td>
 
-                    {/* Status */}
-                    <td className="px-6 py-4 text-sm">
-                      {getStatusBadge(est.status)}
-                    </td>
-
                     {/* Actions */}
                     <td className="px-6 py-4 text-sm font-medium text-right space-x-2 whitespace-nowrap">
                       {/* View */}
@@ -373,27 +304,14 @@ const EstimatesList = () => {
                         <Printer size={17} />
                       </Link>
 
-                      {/* Edit Draft */}
-                      {est.status === 'DRAFT' && (
-                        <Link
-                          to={`/estimates/${est.id}/edit`}
-                          className="text-amber-600 hover:text-amber-800 p-1.5 rounded hover:bg-amber-50 inline-block transition-colors"
-                          title="Edit Draft Estimate"
-                        >
-                          <Edit3 size={17} />
-                        </Link>
-                      )}
-
-                      {/* Override Button (for ADMIN or SUPER_ADMIN on locked estimates) */}
-                      {est.status !== 'DRAFT' && ['SUPER_ADMIN', 'ADMIN'].includes(user?.role) && (
-                        <Link
-                          to={`/estimates/${est.id}?action=override`}
-                          className="text-purple-600 hover:text-purple-800 p-1.5 rounded hover:bg-purple-50 inline-block transition-colors"
-                          title="Authorized Override"
-                        >
-                          <ShieldAlert size={17} />
-                        </Link>
-                      )}
+                      {/* Edit */}
+                      <Link
+                        to={`/estimates/${est.id}/edit`}
+                        className="text-amber-600 hover:text-amber-800 p-1.5 rounded hover:bg-amber-50 inline-block transition-colors"
+                        title="Edit Estimate"
+                      >
+                        <Edit3 size={17} />
+                      </Link>
                     </td>
                   </tr>
                 ))

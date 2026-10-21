@@ -4,8 +4,6 @@ import {
   ArrowLeft, 
   Printer, 
   Edit3, 
-  Lock, 
-  ShieldAlert, 
   Calendar, 
   Building2, 
   User, 
@@ -13,14 +11,12 @@ import {
   FileText, 
   CheckCircle, 
   AlertCircle, 
-  Clock, 
-  History,
   Truck,
   Percent,
   DollarSign
 } from 'lucide-react';
 import { AuthContext } from '../../context/AuthContext';
-import { getBillById, finalizeBill } from '../../services/billingService';
+import { getBillById } from '../../services/billingService';
 
 const BillDetail = () => {
   const { id } = useParams();
@@ -31,7 +27,6 @@ const BillDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchBill = async () => {
     try {
@@ -50,52 +45,6 @@ const BillDetail = () => {
   useEffect(() => {
     fetchBill();
   }, [id]);
-
-  const handleFinalize = async () => {
-    if (!window.confirm(`Are you sure you want to finalize Bill "${bill?.billNumber}"? Once finalized, ordinary editing will be locked.`)) {
-      return;
-    }
-
-    try {
-      setActionLoading(true);
-      setError('');
-      await finalizeBill(id);
-      setSuccessMsg('Bill finalized and locked successfully.');
-      fetchBill();
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to finalize bill.');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const renderStatusBadge = (status) => {
-    switch (status) {
-      case 'FINALIZED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-            <Lock className="w-3.5 h-3.5" />
-            FINALIZED & LOCKED
-          </span>
-        );
-      case 'OVERRIDDEN':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            SUPERVISOR OVERRIDDEN
-          </span>
-        );
-      case 'DRAFT':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-            <Clock className="w-3.5 h-3.5" />
-            DRAFT (EDITABLE)
-          </span>
-        );
-    }
-  };
 
   if (loading) {
     return (
@@ -123,7 +72,6 @@ const BillDetail = () => {
   const transport = parseFloat(bill.transportCost) || 0;
   const finalAmt = parseFloat(bill.finalAmount) || 0;
 
-  const canOverride = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
@@ -139,7 +87,6 @@ const BillDetail = () => {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">{bill.billNumber}</h1>
-              {renderStatusBadge(bill.status)}
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
               Created on {new Date(bill.createdAt).toLocaleString()} by {bill.creator?.username || 'User'}
@@ -158,39 +105,14 @@ const BillDetail = () => {
             Print / PDF
           </Link>
 
-          {/* Edit Draft */}
-          {bill.status === 'DRAFT' && (
-            <>
-              <Link
-                to={`/bills/${bill.id}/edit`}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-              >
-                <Edit3 className="w-4 h-4" />
-                Edit Draft
-              </Link>
-
-              <button
-                type="button"
-                onClick={handleFinalize}
-                disabled={actionLoading}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-50"
-              >
-                <Lock className="w-4 h-4" />
-                {actionLoading ? 'Finalizing...' : 'Finalize & Lock'}
-              </button>
-            </>
-          )}
-
-          {/* Authorized Override */}
-          {bill.status !== 'DRAFT' && canOverride && (
-            <Link
-              to={`/bills/${bill.id}/edit?mode=override`}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
-            >
-              <ShieldAlert className="w-4 h-4" />
-              Authorized Override
-            </Link>
-          )}
+          {/* Edit Bill */}
+          <Link
+            to={`/sale-voucher?billId=${bill.id}&mode=edit`}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+          >
+            <Edit3 className="w-4 h-4" />
+            Edit Bill
+          </Link>
         </div>
       </div>
 
@@ -402,68 +324,6 @@ const BillDetail = () => {
         </div>
       </div>
 
-      {/* Section: Audit Trail History */}
-      {bill.audits && bill.audits.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-            <History className="w-5 h-5 text-gray-600" />
-            <h2 className="text-base font-bold text-gray-900">Audit Trail & Change History</h2>
-          </div>
-
-          <div className="space-y-4">
-            {bill.audits.map((audit) => {
-              let parsedPrev = null;
-              let parsedNew = null;
-              try {
-                if (audit.previousValues) parsedPrev = JSON.parse(audit.previousValues);
-                if (audit.newValues) parsedNew = JSON.parse(audit.newValues);
-              } catch (e) {
-                // Ignore parse errors
-              }
-
-              return (
-                <div key={audit.id} className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-xs space-y-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
-                        audit.action === 'OVERRIDE'
-                          ? 'bg-purple-100 text-purple-800'
-                          : audit.action === 'FINALIZE'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {audit.action}
-                      </span>
-                      <span className="font-semibold text-gray-900">
-                        {audit.performer?.username || 'User'} ({audit.performer?.role || 'N/A'})
-                      </span>
-                    </div>
-                    <span className="text-gray-500">
-                      {new Date(audit.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-
-                  {audit.reason && (
-                    <div className="p-2 bg-white rounded border border-gray-200 text-gray-800 font-medium">
-                      <span className="text-gray-500 font-semibold mr-1">Reason:</span>
-                      {audit.reason}
-                    </div>
-                  )}
-
-                  {parsedNew && (
-                    <div className="text-[11px] text-gray-600 grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
-                      <div>Subtotal: ₹{parseFloat(parsedNew.productSubtotal || 0).toFixed(2)}</div>
-                      <div>GST: ₹{parseFloat(parsedNew.gstAmount || 0).toFixed(2)} ({parsedNew.gstPercentage}%)</div>
-                      <div>Transport: ₹{parseFloat(parsedNew.transportCost || 0).toFixed(2)}</div>
-                      <div className="font-bold text-gray-900">Final: ₹{parseFloat(parsedNew.finalAmount || 0).toFixed(2)}</div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

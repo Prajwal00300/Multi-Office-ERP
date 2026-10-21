@@ -58,6 +58,12 @@ const Product = sequelize.define('Product', {
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  currentStock: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Current physical inventory stock in Tons for this office'
+  },
   status: {
     type: DataTypes.ENUM('ACTIVE', 'INACTIVE'),
     allowNull: false,

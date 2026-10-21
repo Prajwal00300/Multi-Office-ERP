@@ -136,6 +136,125 @@ async function runSafeHierarchyMigration() {
       console.warn("   ⚠️ Note altering products category/size:", colErr.message);
     }
 
+    // 3b. Ensure products.currentStock exists
+    if (!productColumnNames.includes('currentstock')) {
+      console.log("   -> Adding 'currentStock' column to products...");
+      await sequelize.query(`
+        ALTER TABLE products 
+        ADD COLUMN currentStock DECIMAL(15, 3) NOT NULL DEFAULT 0.000
+      `);
+      console.log("   ✅ products.currentStock added.");
+    }
+
+    // 4. Remove bill_audits and estimate_audits tables as requested
+    try {
+      await sequelize.query('DROP TABLE IF EXISTS bill_audits');
+      await sequelize.query('DROP TABLE IF EXISTS estimate_audits');
+      console.log('   ✅ bill_audits and estimate_audits tables dropped successfully.');
+    } catch (dropErr) {
+      console.warn('   ⚠️ Note dropping audit tables:', dropErr.message);
+    }
+
+    // 5. Update purchases.status column to VARCHAR(50)
+    try {
+      await sequelize.query(`
+        ALTER TABLE purchases 
+        MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'Pending'
+      `);
+      console.log("   ✅ purchases.status updated to VARCHAR(50).");
+    } catch (purErr) {
+      console.warn("   ⚠️ Note altering purchases status:", purErr.message);
+    }
+
+    // 6. Inspect 'purchase_items' columns for carbonType and receivedQuantity
+    const [purchaseItemColumns] = await sequelize.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchase_items'
+    `);
+    const purchaseItemColumnNames = purchaseItemColumns.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+
+    if (!purchaseItemColumnNames.includes('carbontype')) {
+      console.log("   -> Adding 'carbonType' column to purchase_items...");
+      await sequelize.query(`
+        ALTER TABLE purchase_items 
+        ADD COLUMN carbonType VARCHAR(50) NOT NULL DEFAULT 'Low Carbon'
+      `);
+      console.log("   ✅ purchase_items.carbonType added.");
+    }
+
+    if (!purchaseItemColumnNames.includes('receivedquantity')) {
+      console.log("   -> Adding 'receivedQuantity' column to purchase_items...");
+      await sequelize.query(`
+        ALTER TABLE purchase_items 
+        ADD COLUMN receivedQuantity DECIMAL(15, 3) NOT NULL DEFAULT 0.000
+      `);
+      console.log("   ✅ purchase_items.receivedQuantity added.");
+    }
+
+    // 7. Create goods_receipts table if not exists
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS goods_receipts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        receiptNumber VARCHAR(255) NOT NULL UNIQUE,
+        purchaseId INT NOT NULL,
+        purchaseNumber VARCHAR(255) NOT NULL,
+        organizationId INT NOT NULL,
+        receiptDate DATE NOT NULL,
+        receivedBy INT NOT NULL,
+        remarks TEXT NULL,
+        idempotencyKey VARCHAR(255) NULL UNIQUE,
+        createdAt DATETIME NOT NULL,
+        updatedAt DATETIME NOT NULL,
+        INDEX idx_goods_receipts_purchaseId (purchaseId),
+        INDEX idx_goods_receipts_orgId (organizationId),
+        INDEX idx_goods_receipts_date (receiptDate)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    console.log("   ✅ goods_receipts table verified/created.");
+
+    // 8. Create goods_receipt_items table if not exists
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS goods_receipt_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        goodsReceiptId INT NOT NULL,
+        purchaseItemId INT NOT NULL,
+        productId INT NULL,
+        productNameSnapshot VARCHAR(255) NOT NULL,
+        carbonType VARCHAR(50) NOT NULL DEFAULT 'Low Carbon',
+        quantityReceived DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+        createdAt DATETIME NOT NULL,
+        updatedAt DATETIME NOT NULL,
+        INDEX idx_gri_receiptId (goodsReceiptId),
+        INDEX idx_gri_purchaseItemId (purchaseItemId),
+        INDEX idx_gri_productId (productId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    console.log("   ✅ goods_receipt_items table verified/created.");
+
+    // 9. Create inventory_movements table if not exists
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS inventory_movements (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        organizationId INT NOT NULL,
+        productId INT NOT NULL,
+        movementType ENUM('IN', 'OUT') NOT NULL,
+        quantity DECIMAL(15, 3) NOT NULL,
+        referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL') NOT NULL,
+        referenceId INT NULL,
+        referenceNumber VARCHAR(255) NULL,
+        purchaseItemId INT NULL,
+        performedBy INT NULL,
+        notes TEXT NULL,
+        createdAt DATETIME NOT NULL,
+        updatedAt DATETIME NOT NULL,
+        INDEX idx_inv_orgId (organizationId),
+        INDEX idx_inv_productId (productId),
+        INDEX idx_inv_ref (referenceType, referenceId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    console.log("   ✅ inventory_movements table verified/created.");
+
     console.log('✅ Safe hierarchy migration completed successfully.');
   } catch (error) {
     console.error('⚠️ Safe migration note (can be ignored if columns already up-to-date):', error.message);

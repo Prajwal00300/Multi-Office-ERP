@@ -26,7 +26,6 @@ router.get('/', estimateController.getEstimates);
 router.get('/by-number/:estimateNumber', estimateController.getEstimateByNumber);
 router.get('/next-number', estimateController.getNextEstimateNumber);
 router.get('/:id', estimateController.getEstimateById);
-router.get('/:id/audit', estimateController.getEstimateAudit);
 router.post('/', estimateController.createEstimate);
 router.put('/:id', estimateController.updateEstimate);
 router.post('/:id/generate', estimateController.generateEstimate);

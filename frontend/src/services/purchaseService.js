@@ -12,6 +12,16 @@ export const getPurchases = async (params = {}) => {
   return res.data;
 };
 
+export const getNextPurchaseNumber = async (params = {}) => {
+  const res = await api.get('/purchases/next-number', { params });
+  return res.data;
+};
+
+export const lookupPurchaseByNumber = async (orderId, params = {}) => {
+  const res = await api.get(`/purchases/lookup/${encodeURIComponent(orderId)}`, { params });
+  return res.data;
+};
+
 export const getPurchaseById = async (id) => {
   const res = await api.get(`/purchases/${id}`);
   return res.data;
@@ -27,8 +37,18 @@ export const createPurchase = async (data) => {
   return res.data;
 };
 
+export const receiveGoods = async (data) => {
+  const res = await api.post('/purchases/receive', data);
+  return res.data;
+};
+
 export const updatePurchase = async (id, data) => {
   const res = await api.put(`/purchases/${id}`, data);
+  return res.data;
+};
+
+export const cancelPurchase = async (id, reason) => {
+  const res = await api.post(`/purchases/${id}/cancel`, { reason });
   return res.data;
 };
 
@@ -54,10 +74,14 @@ export const overridePurchase = async (id, data) => {
 
 export default {
   getPurchases,
+  getNextPurchaseNumber,
+  lookupPurchaseByNumber,
   getPurchaseById,
   getPurchaseAudits,
   createPurchase,
+  receiveGoods,
   updatePurchase,
+  cancelPurchase,
   submitPurchase,
   approvePurchase,
   rejectPurchase,

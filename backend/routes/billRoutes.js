@@ -27,7 +27,6 @@ router.get('/navigation/previous', billController.getPreviousBill);
 router.get('/navigation/next', billController.getNextBill);
 router.get('/next-number', billController.getNextBillNumber);
 router.get('/:id', billController.getBillById);
-router.get('/:id/audit', billController.getBillAudits);
 router.post('/', billController.createBill);
 router.put('/:id', billController.updateBill);
 router.post('/:id/finalize', billController.finalizeBill);

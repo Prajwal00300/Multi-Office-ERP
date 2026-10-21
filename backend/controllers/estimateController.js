@@ -2,7 +2,6 @@ const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const Estimate = require('../models/Estimate');
 const EstimateItem = require('../models/EstimateItem');
-const EstimateAudit = require('../models/EstimateAudit');
 const Customer = require('../models/Customer');
 const Product = require('../models/Product');
 const Organization = require('../models/Organization');
@@ -139,21 +138,7 @@ exports.getEstimateById = async (req, res) => {
               attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
             }
           ]
-        },
-        {
-          model: EstimateAudit,
-          as: 'audits',
-          include: [
-            {
-              model: User,
-              as: 'performer',
-              attributes: ['id', 'username']
-            }
-          ]
         }
-      ],
-      order: [
-        [{ model: EstimateAudit, as: 'audits' }, 'createdAt', 'DESC']
       ]
     });
 
@@ -388,25 +373,6 @@ exports.createEstimate = async (req, res) => {
       }, { transaction: t });
     }
 
-    // 8. Create Audit Entry
-    await EstimateAudit.create({
-      estimateId: newEstimate.id,
-      estimateNumber,
-      userId: req.user.userId,
-      action: isGenerated ? 'GENERATE' : 'CREATE_DRAFT',
-      reason: isGenerated ? 'Initial generation and lock' : 'Draft estimate created',
-      newValues: JSON.stringify({
-        estimateNumber,
-        customerId,
-        totalQuantity,
-        total,
-        others: validatedOthers,
-        grandTotal,
-        itemsCount: calculatedItems.length
-      }),
-      ipAddress: req.ip
-    }, { transaction: t });
-
     await t.commit();
 
     // Fetch complete estimate to return
@@ -456,14 +422,6 @@ exports.updateEstimate = async (req, res) => {
     } catch (scopeErr) {
       await t.rollback();
       return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
-    }
-
-    // MANDATORY LOCK CHECK
-    if (estimate.status !== 'DRAFT') {
-      await t.rollback();
-      return res.status(400).json({
-        error: `Estimate ${estimate.estimateNumber} is locked (${estimate.status}). Ordinary edits are prohibited; an authorized override is required.`
-      });
     }
 
     const targetOrgId = estimate.organizationId;
@@ -584,23 +542,6 @@ exports.updateEstimate = async (req, res) => {
       }, { transaction: t });
     }
 
-    // Audit log
-    await EstimateAudit.create({
-      estimateId: estimate.id,
-      estimateNumber: estimate.estimateNumber,
-      userId: req.user.userId,
-      action: 'UPDATE_DRAFT',
-      reason: 'Draft estimate updated',
-      newValues: JSON.stringify({
-        totalQuantity,
-        total,
-        others: validatedOthers,
-        grandTotal,
-        itemsCount: calculatedItems.length
-      }),
-      ipAddress: req.ip
-    }, { transaction: t });
-
     await t.commit();
 
     const updatedEstimate = await Estimate.findByPk(estimate.id, {
@@ -660,15 +601,6 @@ exports.generateEstimate = async (req, res) => {
       status: 'GENERATED',
       lockedAt: new Date(),
       lockedBy: req.user.userId
-    }, { transaction: t });
-
-    await EstimateAudit.create({
-      estimateId: estimate.id,
-      estimateNumber: estimate.estimateNumber,
-      userId: req.user.userId,
-      action: 'GENERATE',
-      reason: 'Draft finalized into generated and locked estimate',
-      ipAddress: req.ip
     }, { transaction: t });
 
     await t.commit();
@@ -897,18 +829,6 @@ exports.overrideEstimate = async (req, res) => {
       overriddenBy: req.user.userId
     };
 
-    // Record authoritative audit trail
-    await EstimateAudit.create({
-      estimateId: estimate.id,
-      estimateNumber: estimate.estimateNumber,
-      userId: req.user.userId,
-      action: 'OVERRIDE',
-      reason: reason.trim(),
-      previousValues: JSON.stringify(previousValuesSnapshot),
-      newValues: JSON.stringify(newValuesSnapshot),
-      ipAddress: req.ip
-    }, { transaction: t });
-
     await t.commit();
 
     const overriddenEstimate = await Estimate.findByPk(estimate.id, {
@@ -928,40 +848,5 @@ exports.overrideEstimate = async (req, res) => {
     await t.rollback();
     console.error('Error overriding estimate:', error);
     res.status(500).json({ error: 'Internal server error while overriding estimate' });
-  }
-};
-
-// GET /api/estimates/:id/audit - Retrieve estimate audit log
-exports.getEstimateAudit = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const estimate = await Estimate.findByPk(id);
-    if (!estimate) {
-      return res.status(404).json({ error: 'Estimate not found' });
-    }
-
-    // Ownership check
-    await verifyRecordOwnership(estimate, req.user);
-
-    const audits = await EstimateAudit.findAll({
-      where: { estimateId: id },
-      include: [
-        {
-          model: User,
-          as: 'performer',
-          attributes: ['id', 'username', 'role']
-        }
-      ],
-      order: [['createdAt', 'DESC']]
-    });
-
-    res.status(200).json(audits);
-  } catch (error) {
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-    console.error('Error fetching estimate audit:', error);
-    res.status(500).json({ error: 'Internal server error while fetching audit trail' });
   }
 };

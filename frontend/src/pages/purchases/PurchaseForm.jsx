@@ -3,16 +3,17 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { 
   ArrowLeft, 
   Save, 
-  Send, 
   Plus, 
   Trash2, 
   ShoppingCart, 
   Building2, 
   AlertCircle, 
   CheckCircle, 
-  ShieldAlert, 
   Calendar, 
-  DollarSign
+  Package,
+  Layers,
+  Sparkles,
+  Inbox
 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
@@ -20,59 +21,39 @@ import {
   getPurchaseById, 
   createPurchase, 
   updatePurchase, 
-  submitPurchase, 
-  overridePurchase 
+  getNextPurchaseNumber 
 } from '../../services/purchaseService';
-
-const STANDARD_UNITS = [
-  'Kg',
-  'Ton',
-  'Piece',
-  'Meter',
-  'Bundle',
-  'Length',
-  'Box',
-  'Nos',
-  'Quintal',
-  'Feet',
-  'Sq.Ft'
-];
 
 const PurchaseForm = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const isOverrideMode = searchParams.get('mode') === 'override';
   const isEditMode = Boolean(id);
 
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
 
-  // Form State
+  // Order-level fields
   const [purchaseNumber, setPurchaseNumber] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedOrgId, setSelectedOrgId] = useState('');
-  const [vendorName, setVendorName] = useState('');
-  const [purchaseDetails, setPurchaseDetails] = useState('');
+  const [partyName, setPartyName] = useState('');
   const [remarks, setRemarks] = useState('');
-  const [overrideReason, setOverrideReason] = useState('');
-  const [manualAmount, setManualAmount] = useState('');
 
-  // Line items (purely manual entry - no product catalog)
+  // Product-level lines
   const [items, setItems] = useState([
     {
-      productNameSnapshot: '',
-      productCategorySnapshot: '',
-      productSizeSnapshot: '',
-      productSpecificationsSnapshot: '',
-      quantity: 1,
-      unit: 'Kg',
-      rate: '',
-      amount: 0
+      productId: '',
+      productName: '',
+      quantity: '',
+      carbonType: 'Low Carbon',
+      unit: 'Ton',
+      rate: ''
     }
   ]);
 
   // Master lists
   const [organizations, setOrganizations] = useState([]);
+  const [products, setProducts] = useState([]);
 
   // UI state
   const [loading, setLoading] = useState(isEditMode);
@@ -81,31 +62,72 @@ const PurchaseForm = () => {
   const [successMsg, setSuccessMsg] = useState('');
 
   const effectiveOrgId = useMemo(() => {
-    if (user?.role === 'SUPER_ADMIN') {
-      return selectedOrgId || '';
+    if (user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') {
+      return selectedOrgId || user?.organizationId || '';
     }
     return user?.organizationId || '';
   }, [user, selectedOrgId]);
 
-  // Load organizations for Super Admin
+  // 1. Load organizations for Super Admin or CEO
   useEffect(() => {
-    if (user?.role === 'SUPER_ADMIN') {
-      const fetchOrgs = async () => {
-        try {
+    const fetchOrgs = async () => {
+      try {
+        if (user?.role === 'SUPER_ADMIN') {
           const res = await api.get('/organizations');
           setOrganizations(res.data || []);
           if (!selectedOrgId && res.data?.length > 0) {
             setSelectedOrgId(res.data[0].id);
           }
-        } catch (err) {
-          console.error('Failed to load organizations:', err);
+        } else if (user?.role === 'CEO') {
+          const res = await api.get('/ceo/offices');
+          setOrganizations(res.data || []);
+          if (!selectedOrgId && res.data?.length > 0) {
+            setSelectedOrgId(res.data[0].id);
+          }
         }
-      };
+      } catch (err) {
+        console.error('Failed to load organizations:', err);
+      }
+    };
+    if (user) {
       fetchOrgs();
     }
   }, [user]);
 
-  // Load existing purchase if edit or override
+  // 2. Fetch Next Order ID preview if creating new
+  useEffect(() => {
+    if (isEditMode) return;
+    const fetchNextNumber = async () => {
+      try {
+        const data = await getNextPurchaseNumber();
+        if (data?.nextPurchaseNumber && !purchaseNumber) {
+          setPurchaseNumber(data.nextPurchaseNumber);
+        }
+      } catch (err) {
+        console.error('Failed to fetch next purchase number:', err);
+      }
+    };
+    fetchNextNumber();
+  }, [isEditMode]);
+
+  // 3. Load Products for effective office
+  useEffect(() => {
+    const loadMasters = async () => {
+      try {
+        const params = effectiveOrgId ? { organizationId: effectiveOrgId } : {};
+        const prodRes = await api.get('/products', { params });
+        setProducts(prodRes.data || []);
+      } catch (err) {
+        console.error('Failed to load products:', err);
+      }
+    };
+
+    if (effectiveOrgId || user?.role !== 'SUPER_ADMIN') {
+      loadMasters();
+    }
+  }, [effectiveOrgId, user]);
+
+  // 4. Load existing purchase if edit mode
   useEffect(() => {
     if (!id) return;
 
@@ -114,32 +136,22 @@ const PurchaseForm = () => {
         setLoading(true);
         const data = await getPurchaseById(id);
 
-        if (data.status === 'APPROVED' && !isOverrideMode) {
-          setError('This purchase is approved and locked. Switch to Authorized Modification mode to update.');
-        }
-
         setPurchaseNumber(data.purchaseNumber || '');
         setPurchaseDate(data.purchaseDate || new Date().toISOString().split('T')[0]);
         setSelectedOrgId(data.organizationId || '');
-        setVendorName(data.vendorName || '');
-        setPurchaseDetails(data.purchaseDetails || '');
+        setPartyName(data.vendorName || '');
         setRemarks(data.remarks || '');
-        setManualAmount(data.totalAmount ? String(data.totalAmount) : '');
 
         if (data.items && data.items.length > 0) {
           setItems(data.items.map(i => ({
             id: i.id,
-            productNameSnapshot: i.productNameSnapshot || '',
-            productCategorySnapshot: i.productCategorySnapshot || '',
-            productSizeSnapshot: i.productSizeSnapshot || '',
-            productSpecificationsSnapshot: i.productSpecificationsSnapshot || '',
-            quantity: parseFloat(i.quantity) || 0,
-            unit: i.unit || 'Kg',
-            rate: parseFloat(i.rate) || 0,
-            amount: parseFloat(i.amount) || 0
+            productId: i.productId ? String(i.productId) : '',
+            productName: i.productNameSnapshot || '',
+            quantity: i.quantity ? String(i.quantity) : '',
+            carbonType: i.carbonType || 'Low Carbon',
+            unit: i.unit || 'Ton',
+            rate: i.rate ? String(i.rate) : ''
           })));
-        } else {
-          setItems([]);
         }
       } catch (err) {
         console.error(err);
@@ -150,149 +162,128 @@ const PurchaseForm = () => {
     };
 
     fetchPurchase();
-  }, [id, isOverrideMode]);
+  }, [id]);
 
-  // Reactive calculations
-  const calculatedTotals = useMemo(() => {
-    if (!items || items.length === 0) {
-      const parsed = parseFloat(manualAmount) || 0;
-      return {
-        totalQuantity: 0,
-        totalAmount: Math.round((parsed + Number.EPSILON) * 100) / 100
-      };
-    }
-
-    let qty = 0;
-    let amt = 0;
-
-    items.forEach(item => {
-      const q = parseFloat(item.quantity) || 0;
-      const r = parseFloat(item.rate) || 0;
-      const lineAmt = Math.round((q * r + Number.EPSILON) * 100) / 100;
-      qty += q;
-      amt += lineAmt;
-    });
-
-    return {
-      totalQuantity: Math.round((qty + Number.EPSILON) * 1000) / 1000,
-      totalAmount: Math.round((amt + Number.EPSILON) * 100) / 100
-    };
-  }, [items, manualAmount]);
-
-  // Handle Item change
+  // Line item change handlers
   const handleItemChange = (index, field, value) => {
     const updated = [...items];
     updated[index][field] = value;
+
+    // If selecting a product from dropdown, auto-fill product details
+    if (field === 'productId') {
+      const selected = products.find(p => String(p.id) === String(value));
+      if (selected) {
+        updated[index].productName = selected.name;
+        updated[index].unit = selected.unit || 'Ton';
+      }
+    }
+
     setItems(updated);
   };
 
-  // Add Item Row (Manual entry)
   const handleAddItem = () => {
     setItems([
       ...items,
       {
-        productNameSnapshot: '',
-        productCategorySnapshot: '',
-        productSizeSnapshot: '',
-        productSpecificationsSnapshot: '',
-        quantity: 1,
-        unit: 'Kg',
-        rate: '',
-        amount: 0
+        productId: '',
+        productName: '',
+        quantity: '',
+        carbonType: 'Low Carbon',
+        unit: 'Ton',
+        rate: ''
       }
     ]);
   };
 
   const handleRemoveItem = (index) => {
-    setItems(items.filter((_, idx) => idx !== index));
+    if (items.length <= 1) {
+      setError('At least one product line is required.');
+      return;
+    }
+    setItems(items.filter((_, i) => i !== index));
+  };
+
+
+  // Validation
+  const validateForm = () => {
+    if (!purchaseDate) {
+      setError('Date is required.');
+      return false;
+    }
+
+    if (!partyName || !partyName.trim()) {
+      setError('Party Name is required.');
+      return false;
+    }
+
+    if (!items || items.length === 0) {
+      setError('At least one valid product line must exist.');
+      return false;
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const line = items[i];
+      if (!line.productId && !line.productName?.trim()) {
+        setError(`Row #${i + 1}: Please select a Product from the Product Master.`);
+        return false;
+      }
+
+      const q = parseFloat(line.quantity);
+      if (isNaN(q) || q <= 0) {
+        setError(`Row #${i + 1}: Quantity must be a valid positive number (> 0).`);
+        return false;
+      }
+
+      if (!['Low Carbon', 'High Carbon'].includes(line.carbonType)) {
+        setError(`Row #${i + 1}: Carbon Type must be either "Low Carbon" or "High Carbon".`);
+        return false;
+      }
+    }
+
+    return true;
   };
 
   // Submit Handler
-  const handleSubmit = async (shouldSubmitForApproval = false) => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     setError('');
     setSuccessMsg('');
 
-    if (!vendorName || !vendorName.trim()) {
-      setError('Please provide a Vendor / Supplier name.');
-      return;
-    }
-
-    if (items.length > 0) {
-      for (let i = 0; i < items.length; i++) {
-        const itm = items[i];
-        if (!itm.productNameSnapshot || !itm.productNameSnapshot.trim()) {
-          setError(`Item Row #${i + 1}: Product / Item description is required.`);
-          return;
-        }
-        const q = parseFloat(itm.quantity);
-        if (isNaN(q) || q <= 0) {
-          setError(`Item Row #${i + 1}: Quantity must be greater than 0.`);
-          return;
-        }
-        const r = parseFloat(itm.rate);
-        if (isNaN(r) || r < 0) {
-          setError(`Item Row #${i + 1}: Purchase rate must be a valid positive number.`);
-          return;
-        }
-      }
-    } else {
-      const amt = parseFloat(manualAmount);
-      if (isNaN(amt) || amt <= 0) {
-        setError('Please either add product line items or specify a valid Total Purchase Amount.');
-        return;
-      }
-    }
-
-    if (isOverrideMode && (!overrideReason || !overrideReason.trim())) {
-      setError('A mandatory reason is required for an authorized modification of an approved purchase.');
-      return;
-    }
+    if (!validateForm()) return;
 
     try {
       setSubmitting(true);
 
       const payload = {
-        organizationId: effectiveOrgId,
-        vendorName: vendorName.trim(),
+        purchaseNumber: purchaseNumber.trim() || undefined,
         purchaseDate,
-        purchaseDetails: purchaseDetails.trim(),
-        remarks: remarks.trim(),
-        totalAmount: calculatedTotals.totalAmount,
-        items: items.map(itm => ({
-          productId: null, // Pure manual entry
-          productNameSnapshot: itm.productNameSnapshot.trim(),
-          productCategorySnapshot: itm.productCategorySnapshot ? itm.productCategorySnapshot.trim() : null,
-          productSizeSnapshot: itm.productSizeSnapshot ? itm.productSizeSnapshot.trim() : null,
-          productSpecificationsSnapshot: itm.productSpecificationsSnapshot ? itm.productSpecificationsSnapshot.trim() : null,
-          quantity: parseFloat(itm.quantity),
-          unit: itm.unit || 'Kg',
-          rate: parseFloat(itm.rate)
+        partyName: partyName.trim(),
+        vendorName: partyName.trim(),
+        organizationId: effectiveOrgId ? parseInt(effectiveOrgId, 10) : undefined,
+        remarks: remarks.trim() || undefined,
+        items: items.map(line => ({
+          productId: line.productId ? parseInt(line.productId, 10) : null,
+          productNameSnapshot: line.productName || 'Unspecified Product',
+          quantity: parseFloat(line.quantity),
+          carbonType: line.carbonType,
+          unit: 'Ton',
+          rate: parseFloat(line.rate) || 0
         }))
       };
 
-      if (isOverrideMode) {
-        payload.reason = overrideReason.trim();
-        await overridePurchase(id, payload);
-        setSuccessMsg('Purchase modified and logged in audit trail successfully.');
-        setTimeout(() => navigate(`/purchases/${id}`), 1200);
-      } else if (isEditMode) {
-        const updated = await updatePurchase(id, payload);
-        if (shouldSubmitForApproval) {
-          await submitPurchase(updated.id);
-        }
-        setSuccessMsg('Purchase record updated successfully.');
-        setTimeout(() => navigate(`/purchases/${id}`), 1200);
+      if (isEditMode) {
+        await updatePurchase(id, payload);
+        setSuccessMsg('Purchase Order updated successfully.');
+        setTimeout(() => navigate(`/purchases/${id}`), 1000);
       } else {
-        const created = await createPurchase(payload);
-        if (shouldSubmitForApproval) {
-          await submitPurchase(created.id);
-        }
-        setSuccessMsg('Purchase created successfully.');
-        setTimeout(() => navigate(`/purchases/${created.id}`), 1200);
+        const res = await createPurchase(payload);
+        const createdNumber = res.purchase?.purchaseNumber || purchaseNumber;
+        setSuccessMsg(`Purchase Order "${createdNumber}" placed successfully!`);
+        setTimeout(() => navigate('/purchases'), 1200);
       }
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.error || 'Failed to save purchase record.');
+      setError(err.response?.data?.error || 'Failed to place purchase order.');
     } finally {
       setSubmitting(false);
     }
@@ -300,102 +291,50 @@ const PurchaseForm = () => {
 
   if (loading) {
     return (
-      <div className="p-12 text-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
-        <p className="text-sm text-gray-500">Loading purchase record...</p>
+      <div className="flex justify-center items-center py-24">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="max-w-6xl mx-auto space-y-6 pb-12">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+        <div className="flex items-center gap-4">
           <Link
-            to={isEditMode ? `/purchases/${id}` : '/purchases'}
-            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-            title="Back"
+            to="/purchases"
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-gray-900">
-                {isOverrideMode
-                  ? 'Authorized Purchase Modification'
-                  : isEditMode
-                  ? `Edit Purchase (${purchaseNumber || 'Draft'})`
-                  : 'Record New Purchase'}
-              </h1>
-              {isOverrideMode && (
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
-                  Override Mode
-                </span>
-              )}
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                PART 1: PLACE ORDER
+              </span>
             </div>
+            <h1 className="text-2xl font-bold text-gray-900 mt-1">
+              {isEditMode ? `Edit Purchase Order #${purchaseNumber}` : 'Place Purchase Order'}
+            </h1>
             <p className="text-sm text-gray-500">
-              {isOverrideMode
-                ? 'Supervisor override for approved purchase with permanent audit logging'
-                : 'Enter supplier details, purchased items, quantities, and agreed purchase rates'}
+              Create a purchase order with multiple products and designated carbon types.
             </p>
           </div>
         </div>
 
-        {/* Action Buttons */}
         <div className="flex items-center gap-3">
           <Link
-            to={isEditMode ? `/purchases/${id}` : '/purchases'}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            to="/purchases/receive"
+            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition-colors"
           >
-            Cancel
+            <Inbox className="w-4 h-4 text-gray-500" />
+            Go to Order Received
           </Link>
-
-          {!isOverrideMode && (
-            <button
-              type="button"
-              onClick={() => handleSubmit(false)}
-              disabled={submitting}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
-            >
-              <Save className="w-4 h-4" />
-              {submitting ? 'Saving...' : 'Save Draft'}
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => handleSubmit(!isOverrideMode)}
-            disabled={submitting}
-            className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm disabled:opacity-50 ${
-              isOverrideMode
-                ? 'bg-purple-600 hover:bg-purple-700'
-                : 'bg-emerald-600 hover:bg-emerald-700'
-            }`}
-          >
-            {isOverrideMode ? (
-              <>
-                <ShieldAlert className="w-4 h-4" />
-                {submitting ? 'Overriding...' : 'Save Authorized Modification'}
-              </>
-            ) : (
-              <>
-                <Send className="w-4 h-4" />
-                {submitting ? 'Submitting...' : 'Save & Submit for Approval'}
-              </>
-            )}
-          </button>
         </div>
       </div>
 
       {/* Messages */}
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-lg flex items-center gap-3 text-sm">
-          <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
       {successMsg && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg flex items-center gap-3 text-sm">
           <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -403,325 +342,289 @@ const PurchaseForm = () => {
         </div>
       )}
 
-      {/* Override Reason Box */}
-      {isOverrideMode && (
-        <div className="bg-purple-50 p-5 rounded-xl border border-purple-200 space-y-3">
-          <div className="flex items-center gap-2 text-purple-900 font-semibold text-sm">
-            <ShieldAlert className="w-4 h-4 text-purple-600" />
-            Mandatory Audit Reason for Authorized Modification
-          </div>
-          <p className="text-xs text-purple-700">
-            Please document why this approved purchase is being modified. Your username, timestamp, and financial values will be permanently logged.
-          </p>
-          <textarea
-            rows="2"
-            value={overrideReason}
-            onChange={(e) => setOverrideReason(e.target.value)}
-            placeholder="e.g. Rate adjusted as per supplier credit note, quantity corrected after weighbridge reconciliation..."
-            className="w-full px-3 py-2 border border-purple-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-            required
-          />
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-lg flex items-center gap-3 text-sm">
+          <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
-      {/* Section 1: Header / Details */}
-      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-        <h2 className="text-base font-bold text-gray-900 border-b border-gray-100 pb-3 flex items-center gap-2">
-          <ShoppingCart className="w-4 h-4 text-blue-600" />
-          Purchase & Vendor Details
-        </h2>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* ORDER-LEVEL SECTION */}
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
+          <h2 className="text-lg font-semibold text-gray-900 border-b border-gray-100 pb-3 flex items-center gap-2">
+            <ShoppingCart className="w-5 h-5 text-blue-600" />
+            Order Information
+          </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Organization */}
-          {user?.role === 'SUPER_ADMIN' ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Order ID */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                Organization / Office <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={selectedOrgId}
-                onChange={(e) => setSelectedOrgId(e.target.value)}
-                disabled={isEditMode}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-              >
-                {organizations.map(org => (
-                  <option key={org.id} value={org.id}>{org.name}</option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                Organization
+              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
+                Order ID <span className="text-gray-400 font-normal">(Auto-generated or custom)</span>
               </label>
               <input
                 type="text"
-                disabled
-                value={user?.organization?.name || 'Assigned Office'}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600"
+                value={purchaseNumber}
+                onChange={(e) => setPurchaseNumber(e.target.value)}
+                placeholder="e.g. PO-001 or PUR-YYYYMM-XXXX"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 font-mono"
               />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Unique Order ID generated by the backend or specified.
+              </p>
             </div>
-          )}
 
-          {/* Purchase Date */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">
-              Purchase Date <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={purchaseDate}
-              onChange={(e) => setPurchaseDate(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            />
-          </div>
-
-          {/* Vendor / Supplier Name */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">
-              Supplier / Vendor Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={vendorName}
-              onChange={(e) => setVendorName(e.target.value)}
-              placeholder="e.g. Tata Steel BSL Ltd"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            />
-          </div>
-        </div>
-
-        {/* Purchase Description */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1">
-            Purchase Details / Description
-          </label>
-          <textarea
-            rows="2"
-            value={purchaseDetails}
-            onChange={(e) => setPurchaseDetails(e.target.value)}
-            placeholder="e.g. Procurement of 12mm TMT rebars for warehouse restocking, Invoice #TS-4091"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      </div>
-
-      {/* Section 2: Products Table (Pure Manual Entry) */}
-      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 pb-3">
-          <div>
-            <h2 className="text-base font-bold text-gray-900">Purchase Line Items</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Enter product details, specifications, quantities, and agreed purchase rates directly.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleAddItem}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 rounded-lg text-xs font-medium transition-colors shadow-sm self-start sm:self-auto"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Line Item
-          </button>
-        </div>
-
-        {items.length === 0 ? (
-          <div className="p-6 bg-gray-50 rounded-lg border border-dashed border-gray-300 text-center space-y-3">
-            <p className="text-xs text-gray-500">No individual line items added.</p>
-            <div className="flex flex-wrap justify-center items-center gap-3">
-              <button
-                type="button"
-                onClick={handleAddItem}
-                className="px-3.5 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
-              >
-                + Add Line Item
-              </button>
-              <span className="text-xs text-gray-400">or enter total purchase amount directly:</span>
-              <div className="w-36">
+            {/* Date */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
+                Date <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={manualAmount}
-                  onChange={(e) => setManualAmount(e.target.value)}
-                  placeholder="Total ₹ Amount"
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs font-mono font-medium focus:ring-1 focus:ring-blue-500"
+                  type="date"
+                  required
+                  value={purchaseDate}
+                  onChange={(e) => setPurchaseDate(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
             </div>
+
+            {/* Office Selection (for Super Admin or CEO with multiple offices) */}
+            {(user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
+                  Office / Branch <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <select
+                    value={selectedOrgId}
+                    onChange={(e) => setSelectedOrgId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  >
+                    {organizations.map(org => (
+                      <option key={org.id} value={org.id}>
+                        {org.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
-        ) : (
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+            {/* Party Name (Manually entered by the user) */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
+                Party Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={partyName}
+                onChange={(e) => setPartyName(e.target.value)}
+                placeholder="Enter party / supplier name"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Enter the supplier or party name for this purchase order.
+              </p>
+            </div>
+
+            {/* Remarks / Notes */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
+                Remarks / Instructions
+              </label>
+              <textarea
+                rows={3}
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Optional purchase order terms, delivery specifications, or notes..."
+                className="w-full px-3.5 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* PRODUCT-LEVEL SECTION (MULTIPLE PRODUCTS) */}
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 pb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Package className="w-5 h-5 text-blue-600" />
+                Products Ordered
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Add multiple product rows to this single purchase order. All quantities are in Tons.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddItem}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Product
+            </button>
+          </div>
+
+          {/* Product Lines Table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200 text-gray-600 uppercase font-semibold">
-                  <th className="py-2.5 px-3 w-10 text-center">#</th>
-                  <th className="py-2.5 px-3 min-w-[240px]">Product / Item Description *</th>
-                  <th className="py-2.5 px-3 w-36">Category (Optional)</th>
-                  <th className="py-2.5 px-3 w-36">Size / Spec (Optional)</th>
-                  <th className="py-2.5 px-3 w-28">Quantity *</th>
-                  <th className="py-2.5 px-3 w-28">Unit</th>
-                  <th className="py-2.5 px-3 w-36 text-right">Purchase Rate (₹) *</th>
-                  <th className="py-2.5 px-3 w-36 text-right">Amount (₹)</th>
-                  <th className="py-2.5 px-3 w-10 text-center"></th>
+                <tr className="border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50/50">
+                  <th className="py-3 px-3 w-12 text-center">#</th>
+                  <th className="py-3 px-3 min-w-[240px]">Product (from Master)</th>
+                  <th className="py-3 px-3 w-40">Quantity (Tons)</th>
+                  <th className="py-3 px-3 w-48">Carbon Type</th>
+                  <th className="py-3 px-3 w-36">Rate (Optional)</th>
+                  <th className="py-3 px-3 w-16 text-center">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {items.map((item, index) => {
-                  const lineAmt = Math.round(((parseFloat(item.quantity) || 0) * (parseFloat(item.rate) || 0) + Number.EPSILON) * 100) / 100;
+              <tbody className="divide-y divide-gray-100">
+                {items.map((line, index) => (
+                  <tr key={index} className="hover:bg-gray-50/50 transition-colors">
+                    {/* Index */}
+                    <td className="py-3 px-3 text-center text-xs font-semibold text-gray-400">
+                      {index + 1}
+                    </td>
 
-                  return (
-                    <tr key={index} className="hover:bg-gray-50/50">
-                      <td className="py-2.5 px-3 text-gray-400 font-mono text-center">{index + 1}</td>
-                      
-                      {/* Product Description */}
-                      <td className="py-2.5 px-3">
+                    {/* Product Master Dropdown */}
+                    <td className="py-3 px-3">
+                      <select
+                        required
+                        value={line.productId}
+                        onChange={(e) => handleItemChange(index, 'productId', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                      >
+                        <option value="">-- Select Product --</option>
+                        {products.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {p.size ? `(${p.size})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {!line.productId && (
                         <input
                           type="text"
-                          value={item.productNameSnapshot}
-                          onChange={(e) => handleItemChange(index, 'productNameSnapshot', e.target.value)}
-                          placeholder="e.g. 12mm TMT Steel Rebar, MS Pipe, Iron Angle"
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                          required
+                          placeholder="Or enter custom product name"
+                          value={line.productName}
+                          onChange={(e) => handleItemChange(index, 'productName', e.target.value)}
+                          className="w-full mt-1.5 px-3 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500"
                         />
-                      </td>
+                      )}
+                    </td>
 
-                      {/* Category */}
-                      <td className="py-2.5 px-3">
-                        <input
-                          type="text"
-                          value={item.productCategorySnapshot}
-                          onChange={(e) => handleItemChange(index, 'productCategorySnapshot', e.target.value)}
-                          placeholder="e.g. Steel Bar, Pipe"
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                        />
-                      </td>
-
-                      {/* Size / Specs */}
-                      <td className="py-2.5 px-3">
-                        <input
-                          type="text"
-                          value={item.productSizeSnapshot}
-                          onChange={(e) => handleItemChange(index, 'productSizeSnapshot', e.target.value)}
-                          placeholder="e.g. 12 mm, Fe 500D"
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
-                        />
-                      </td>
-
-                      {/* Quantity */}
-                      <td className="py-2.5 px-3">
+                    {/* Quantity */}
+                    <td className="py-3 px-3">
+                      <div className="relative">
                         <input
                           type="number"
-                          step="any"
-                          min="0"
-                          value={item.quantity}
+                          step="0.001"
+                          min="0.001"
+                          required
+                          value={line.quantity}
                           onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 font-mono"
-                          required
+                          placeholder="0.000"
+                          className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-lg text-sm text-right font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
-                      </td>
+                        <span className="absolute right-3 top-2.5 text-xs text-gray-500 pointer-events-none">
+                          Tons
+                        </span>
+                      </div>
+                    </td>
 
-                      {/* Unit */}
-                      <td className="py-2.5 px-3">
-                        <select
-                          value={item.unit}
-                          onChange={(e) => handleItemChange(index, 'unit', e.target.value)}
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:ring-1 focus:ring-blue-500"
-                        >
-                          {STANDARD_UNITS.map(u => (
-                            <option key={u} value={u}>{u}</option>
-                          ))}
-                        </select>
-                      </td>
+                    {/* Carbon Type */}
+                    <td className="py-3 px-3">
+                      <select
+                        required
+                        value={line.carbonType}
+                        onChange={(e) => handleItemChange(index, 'carbonType', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                      >
+                        <option value="Low Carbon">Low Carbon</option>
+                        <option value="High Carbon">High Carbon</option>
+                      </select>
+                    </td>
 
-                      {/* Purchase Rate */}
-                      <td className="py-2.5 px-3 text-right">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={item.rate}
-                          onChange={(e) => handleItemChange(index, 'rate', e.target.value)}
-                          placeholder="0.00"
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs text-right focus:ring-1 focus:ring-blue-500 font-mono font-medium"
-                          required
-                        />
-                      </td>
+                    {/* Rate */}
+                    <td className="py-3 px-3">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={line.rate}
+                        onChange={(e) => handleItemChange(index, 'rate', e.target.value)}
+                        placeholder="₹ / Ton"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
 
-                      {/* Amount */}
-                      <td className="py-2.5 px-3 text-right font-mono font-semibold text-gray-900">
-                        ₹{lineAmt.toFixed(2)}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-2.5 px-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(index)}
-                          className="text-gray-400 hover:text-red-600 transition-colors p-1"
-                          title="Remove item"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                    {/* Remove Action */}
+                    <td className="py-3 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveItem(index)}
+                        disabled={items.length <= 1}
+                        className={`p-1.5 rounded-lg text-gray-400 transition-colors ${
+                          items.length <= 1 
+                            ? 'opacity-30 cursor-not-allowed' 
+                            : 'hover:text-red-600 hover:bg-red-50'
+                        }`}
+                        title={items.length <= 1 ? 'At least one product line required' : 'Remove product line'}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
 
-      {/* Section 3: Remarks and Totals */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Remarks */}
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-3">
-          <h2 className="text-base font-bold text-gray-900 border-b border-gray-100 pb-2">
-            Remarks & Approver Notes
-          </h2>
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">
-              Internal Remarks
-            </label>
-            <textarea
-              rows="3"
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              placeholder="e.g. Weighbridge gross verified, supplier invoice attached..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
-            />
+          {/* Add Product Button */}
+          <div className="pt-2 flex justify-start">
+            <button
+              type="button"
+              onClick={handleAddItem}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 hover:border-blue-500 hover:bg-blue-50/50 text-blue-600 rounded-lg text-sm font-medium transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              Add Product Line
+            </button>
+          </div>
+
+          {/* Info note */}
+          <div className="bg-amber-50/60 border border-amber-200/60 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2 mt-4">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>
+              <strong>Inventory Notice:</strong> Creating a purchase order reserves quantities but does <strong>NOT</strong> increase inventory stock. Inventory stock will only be incremented when quantities are physically received via the <strong>Order Received</strong> interface.
+            </span>
           </div>
         </div>
 
-        {/* Totals Summary */}
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-          <h2 className="text-base font-bold text-gray-900 border-b border-gray-100 pb-2">
-            Purchase Summary
-          </h2>
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600">Total Quantity:</span>
-              <span className="font-semibold text-gray-900 font-mono">
-                {calculatedTotals.totalQuantity.toFixed(3)} Units
-              </span>
-            </div>
-
-            <div className="pt-3 border-t-2 border-gray-900 flex justify-between items-center">
-              <div>
-                <span className="text-base font-bold text-gray-900 block">Total Purchase Amount</span>
-                <span className="text-[11px] text-gray-500">Agreed Procurement Value</span>
-              </div>
-              <span className="text-2xl font-black text-blue-700 font-mono">
-                ₹{calculatedTotals.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            </div>
-          </div>
+        {/* Footer Actions */}
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+          <Link
+            to="/purchases"
+            className="px-5 py-2.5 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            Cancel
+          </Link>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50"
+          >
+            <Save className="w-4 h-4" />
+            {submitting ? 'Saving Order...' : isEditMode ? 'Update Purchase Order' : 'Save & Place Order'}
+          </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 };
