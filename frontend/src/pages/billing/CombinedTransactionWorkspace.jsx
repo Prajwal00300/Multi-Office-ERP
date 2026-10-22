@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Receipt,
@@ -92,6 +92,20 @@ export default function CombinedTransactionWorkspace() {
   // (Product, Description, Basic Rate, Difference, Quantity, Final Rate, Amount)
   // =========================================================================
   const [transactionItems, setTransactionItems] = useState(createBlankRows());
+  const [activeAutocompleteIdx, setActiveAutocompleteIdx] = useState(null);
+  const [highlightedSuggestionIdx, setHighlightedSuggestionIdx] = useState(0);
+  const autocompleteContainerRef = useRef(null);
+
+  // Close product autocomplete suggestions on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (autocompleteContainerRef.current && !autocompleteContainerRef.current.contains(e.target)) {
+        setActiveAutocompleteIdx(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
   // =========================================================================
   // 3. Estimate Details State
@@ -363,8 +377,117 @@ export default function CombinedTransactionWorkspace() {
   }, [transactionItems, estimateOthers, billTaxRate, billTransportCost]);
 
   // ==========================================
-  // Grid Handlers: Product, Difference, Quantity
+  // Grid Handlers: Product Autocomplete, Basic Rate, Difference, Quantity
   // ==========================================
+  const getFilteredProducts = (query) => {
+    if (!query || !query.trim()) {
+      return products.slice(0, 10);
+    }
+    const q = query.toLowerCase().trim();
+    return products.filter(p =>
+      (p.name && p.name.toLowerCase().includes(q)) ||
+      (p.category && p.category.toLowerCase().includes(q)) ||
+      (p.size && p.size.toLowerCase().includes(q)) ||
+      (p.specifications && p.specifications.toLowerCase().includes(q))
+    ).slice(0, 15);
+  };
+
+  const handleProductNameInputChange = (index, text) => {
+    if (mode === 'VIEW') return;
+    setIsDirty(true);
+    setActiveAutocompleteIdx(index);
+    setHighlightedSuggestionIdx(0);
+
+    setTransactionItems(prev => {
+      const updated = [...prev];
+      const match = products.find(p => p.name.toLowerCase() === text.trim().toLowerCase());
+
+      let bRate = parseFloat(updated[index].basicRate) || 0;
+      let prodId = updated[index].productId;
+      let desc = updated[index].description;
+
+      if (match) {
+        prodId = String(match.id);
+        bRate = parseFloat(match.price) || bRate;
+        desc = match.specifications || match.description || desc;
+      } else if (!text.trim()) {
+        prodId = '';
+        bRate = 0;
+      } else {
+        prodId = '';
+      }
+
+      const diff = parseFloat(updated[index].difference) || 0;
+      const fRate = bRate + diff;
+      const q = parseFloat(updated[index].quantity) || 0;
+
+      updated[index] = {
+        ...updated[index],
+        productId: prodId,
+        productName: text,
+        description: desc,
+        basicRate: String(bRate),
+        finalRate: fRate.toFixed(2),
+        amount: (fRate * q).toFixed(2)
+      };
+      return updated;
+    });
+  };
+
+  const handleSelectProductSuggestion = (index, prod) => {
+    if (mode === 'VIEW') return;
+    setIsDirty(true);
+    setTransactionItems(prev => {
+      const updated = [...prev];
+      const bRate = parseFloat(prod.price) || 0;
+      const diff = parseFloat(updated[index].difference) || 0;
+      const fRate = bRate + diff;
+      const currentQty = updated[index].quantity;
+      const q = currentQty && parseFloat(currentQty) > 0 ? parseFloat(currentQty) : 1;
+
+      updated[index] = {
+        ...updated[index],
+        productId: String(prod.id),
+        productName: prod.name,
+        description: prod.specifications || prod.description || updated[index].description || '',
+        basicRate: String(bRate),
+        quantity: currentQty && parseFloat(currentQty) > 0 ? currentQty : '1',
+        finalRate: fRate.toFixed(2),
+        amount: (fRate * q).toFixed(2)
+      };
+      return updated;
+    });
+    setActiveAutocompleteIdx(null);
+    setHighlightedSuggestionIdx(0);
+  };
+
+  const handleProductInputKeyDown = (e, idx, filtered) => {
+    if (activeAutocompleteIdx !== idx || filtered.length === 0) {
+      if (e.key === 'ArrowDown') {
+        setActiveAutocompleteIdx(idx);
+        setHighlightedSuggestionIdx(0);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedSuggestionIdx(prev => (prev + 1) % filtered.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedSuggestionIdx(prev => (prev - 1 + filtered.length) % filtered.length);
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (highlightedSuggestionIdx >= 0 && highlightedSuggestionIdx < filtered.length) {
+        e.preventDefault();
+        handleSelectProductSuggestion(idx, filtered[highlightedSuggestionIdx]);
+      } else {
+        setActiveAutocompleteIdx(null);
+      }
+    } else if (e.key === 'Escape') {
+      setActiveAutocompleteIdx(null);
+    }
+  };
+
   const handleItemProductChange = (index, productId) => {
     if (mode === 'VIEW') return;
     setIsDirty(true);
@@ -912,149 +1035,251 @@ export default function CombinedTransactionWorkspace() {
             - Final Rate (Basic Rate + Difference)
             - Amount (Final Rate * Quantity)
            ============================================================== */}
-        <section className="bg-white rounded border border-slate-300 shadow-sm p-3">
-          <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-200">
-            <span className="font-bold text-xs uppercase text-slate-700 tracking-wide">
-              Product Items Grid
-            </span>
-            <span className="text-[11px] text-slate-500">
-              Final Rate = Basic Rate + Difference | Amount = Final Rate × Quantity
-            </span>
+        {/* ==============================================================
+            2. PRODUCT ITEMS GRID BOX (RETRO EXCEL SPREADSHEET DESIGN)
+           ============================================================== */}
+        <section className="bg-white border-2 border-[#107c41] shadow-md rounded-none overflow-hidden my-3">
+          {/* Retro Excel Window Titlebar / Green Excel Header */}
+          <div className="bg-[#107c41] text-white px-3 py-1.5 flex items-center justify-between text-xs font-mono select-none">
+            <div className="flex items-center space-x-2">
+              <span className="bg-white text-[#107c41] font-black px-1.5 py-0.5 text-[10px] rounded-xs tracking-tighter">XLS</span>
+              <span className="font-bold text-[11px] tracking-wide">SALE_VOUCHER_SHEET.XLSX — [Spreadsheet Ledger View]</span>
+            </div>
+            <div className="flex items-center space-x-3 text-[10px] text-emerald-100">
+              <span className="hidden sm:inline">TYPE FOR AUTO-SUGGESTIONS</span>
+              <span className="bg-emerald-900/60 px-2 py-0.5 border border-emerald-500/40 font-semibold uppercase">
+                Retro Excel Mode
+              </span>
+            </div>
           </div>
 
-          <div className="overflow-x-auto border border-slate-300 rounded">
-            <table className="w-full text-left border-collapse text-xs">
+          {/* Excel Formula Bar */}
+          <div className="bg-[#f0f2f5] border-b border-slate-300 px-3 py-1 flex items-center space-x-2 text-xs font-mono text-slate-700">
+            <div className="bg-white border border-slate-400 px-2.5 py-0.5 text-[11px] font-bold text-slate-700 font-serif italic shadow-2xs">
+              fx
+            </div>
+            <div className="bg-white border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 flex-1 font-mono truncate shadow-2xs">
+              <span className="text-emerald-700 font-bold">= </span>
+              <span>FinalRate(BasicRate + Difference) × Quantity</span>
+              <span className="text-slate-400 ml-3 hidden md:inline">| Press Tab to move across cells</span>
+            </div>
+          </div>
+
+          {/* Spreadsheet Table with Excel Grid Lines */}
+          <div className="overflow-x-auto relative" ref={autocompleteContainerRef}>
+            <table className="w-full text-left border-collapse border-b border-slate-300 text-xs">
               <thead>
-                <tr className="bg-slate-100 border-b border-slate-300 text-slate-700 text-[10px] uppercase font-bold tracking-wider">
-                  <th className="py-2 px-1.5 w-8 text-center">#</th>
-                  <th className="py-2 px-2 w-64">Select Product</th>
-                  <th className="py-2 px-2">Description</th>
-                  <th className="py-2 px-2 w-28 text-right">Basic Rate (₹)</th>
-                  <th className="py-2 px-2 w-28 text-right bg-amber-50/50">Difference (₹)</th>
-                  <th className="py-2 px-2 w-28 text-right bg-blue-50/50">Quantity (Ton)</th>
-                  <th className="py-2 px-2 w-28 text-right bg-emerald-50/50">Final Rate (₹)</th>
-                  <th className="py-2 px-2 w-32 text-right">Amount (₹)</th>
-                  {!isReadOnly && <th className="py-2 px-1 w-10 text-center">Act</th>}
+                {/* Excel Column Letters Row (A, B, C, D...) */}
+                <tr className="bg-[#e9edf4] border-b border-slate-300 text-[10px] font-mono font-bold text-slate-500 select-none">
+                  <th className="w-9 border-r border-slate-300 text-center py-0.5">#</th>
+                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">A</th>
+                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">B</th>
+                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">C</th>
+                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">D</th>
+                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">E</th>
+                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">F</th>
+                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">G</th>
+                  {!isReadOnly && <th className="w-10 px-1 py-0.5 text-center">H</th>}
+                </tr>
+
+                {/* Column Headers */}
+                <tr className="bg-[#f1f4f9] border-b-2 border-slate-400 text-slate-800 text-[10px] uppercase font-bold tracking-wider font-mono">
+                  <th className="w-9 border-r border-slate-300 py-1.5 px-1 text-center bg-[#e4e8f0]">ROW</th>
+                  <th className="border-r border-slate-300 py-1.5 px-2.5 min-w-[240px]">Select / Type Product *</th>
+                  <th className="border-r border-slate-300 py-1.5 px-2 min-w-[180px]">Description</th>
+                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right">Basic Rate (₹)</th>
+                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right bg-amber-100/60 text-amber-900">Difference (₹)</th>
+                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right bg-blue-100/60 text-blue-900">Quantity (Ton)</th>
+                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right bg-emerald-100/60 text-emerald-900">Final Rate (₹)</th>
+                  <th className="border-r border-slate-300 py-1.5 px-2.5 w-32 text-right">Amount (₹)</th>
+                  {!isReadOnly && <th className="py-1.5 px-1 w-10 text-center">Act</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200">
-                {transactionItems.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50">
-                    <td className="py-1 px-1.5 text-center text-slate-500 text-[11px] font-mono">{idx + 1}</td>
+              <tbody className="divide-y divide-slate-300">
+                {transactionItems.map((item, idx) => {
+                  const filteredProducts = getFilteredProducts(item.productName);
 
-                    {/* 1. Select Product with Dropdown */}
-                    <td className="py-1 px-2">
-                      <select
-                        value={item.productId}
-                        disabled={isReadOnly}
-                        onChange={(e) => handleItemProductChange(idx, e.target.value)}
-                        className="w-full bg-white border border-slate-300 rounded px-1.5 py-1 text-xs font-semibold text-slate-800 disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="">{isReadOnly ? (item.productName || '—') : (item.productName || '-- Select Product --')}</option>
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {p.price ? `(₹${p.price}/${p.unit || 'Ton'})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    {/* 2. Description */}
-                    <td className="py-1 px-2">
-                      <input
-                        type="text"
-                        value={item.description}
-                        disabled={isReadOnly}
-                        onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
-                        placeholder={isReadOnly ? '' : 'Specifications / Description'}
-                        className="w-full bg-white border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-700 disabled:bg-transparent disabled:border-none"
-                      />
-                    </td>
-
-                    {/* 3. Basic Rate */}
-                    <td className="py-1 px-2 text-right">
-                      <input
-                        type="number"
-                        step="any"
-                        value={isReadOnly && !item.productId && !item.productName ? '' : item.basicRate}
-                        disabled={isReadOnly}
-                        onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
-                        placeholder={isReadOnly ? '' : '0.00'}
-                        className="w-full text-right font-mono bg-white border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-800 disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </td>
-
-                    {/* 4. Difference (Entered manually by user) */}
-                    <td className="py-1 px-2 text-right bg-amber-50/20">
-                      <input
-                        type="number"
-                        step="any"
-                        value={isReadOnly && !item.productId && !item.productName ? '' : item.difference}
-                        disabled={isReadOnly}
-                        onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
-                        placeholder={isReadOnly ? '' : '0.00'}
-                        className="w-full text-right font-mono font-bold bg-white border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-900 disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-amber-500"
-                        title="Manual difference added to basic rate"
-                      />
-                    </td>
-
-                    {/* 5. Quantity (Entered manually, default in Ton) */}
-                    <td className="py-1 px-2 text-right bg-blue-50/20">
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={isReadOnly && !item.productId && !item.productName ? '' : item.quantity}
-                        disabled={isReadOnly}
-                        onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
-                        placeholder={isReadOnly ? '' : '1.000'}
-                        className="w-full text-right font-mono font-bold text-blue-900 bg-white border border-blue-300 rounded px-1.5 py-1 text-xs disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </td>
-
-                    {/* 6. Final Rate (Basic Rate + Difference, computed) */}
-                    <td className="py-1 px-2 text-right font-mono font-bold text-emerald-800 bg-emerald-50/30">
-                      {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.finalRate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    </td>
-
-                    {/* 7. Amount (Final Rate * Quantity, computed) */}
-                    <td className="py-1 px-2 text-right font-mono font-bold text-slate-900">
-                      {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    </td>
-
-                    {/* Action */}
-                    {!isReadOnly && (
-                      <td className="py-1 px-1 text-center">
-                        <button
-                          type="button"
-                          onClick={() => removeTransactionRow(idx)}
-                          className="text-slate-400 hover:text-red-600 p-1"
-                          title="Clear / Remove Row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                  return (
+                    <tr key={idx} className="hover:bg-emerald-50/20 transition-colors h-8">
+                      {/* Left Excel Row Number Header */}
+                      <td className="w-9 border-r border-slate-300 bg-[#f0f2f5] text-center text-slate-600 text-[11px] font-mono font-bold select-none p-0">
+                        <div className="w-full h-full flex items-center justify-center">
+                          {idx + 1}
+                        </div>
                       </td>
-                    )}
-                  </tr>
-                ))}
+
+                      {/* 1. Product Name (Autocomplete / Type to search) */}
+                      <td className="border-r border-slate-300 p-0 relative focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset focus-within:z-30 bg-white">
+                        <input
+                          type="text"
+                          value={item.productName}
+                          disabled={isReadOnly}
+                          onChange={(e) => handleProductNameInputChange(idx, e.target.value)}
+                          onFocus={() => {
+                            if (!isReadOnly) {
+                              setActiveAutocompleteIdx(idx);
+                              setHighlightedSuggestionIdx(0);
+                            }
+                          }}
+                          onKeyDown={(e) => handleProductInputKeyDown(e, idx, filteredProducts)}
+                          placeholder={isReadOnly ? '' : 'Type product name...'}
+                          className="w-full h-8 px-2 py-1 text-xs font-semibold text-slate-900 bg-transparent border-0 outline-none placeholder:text-slate-400 placeholder:font-normal disabled:text-slate-800"
+                        />
+
+                        {/* Suggestion Dropdown Popover */}
+                        {!isReadOnly && activeAutocompleteIdx === idx && (
+                          <div className="absolute top-full left-0 z-50 min-w-[340px] max-w-[420px] bg-white border-2 border-[#107c41] shadow-2xl mt-0.5 text-xs text-left">
+                            <div className="bg-[#107c41] text-white px-2.5 py-1 text-[10px] font-mono uppercase font-bold flex justify-between items-center select-none">
+                              <span>Product Catalogue Suggestions ({filteredProducts.length})</span>
+                              <span className="text-[9px] opacity-90">↑↓ to navigate, Enter to pick</span>
+                            </div>
+                            <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+                              {filteredProducts.length === 0 ? (
+                                <div className="p-2.5 text-slate-500 text-xs italic bg-slate-50">
+                                  No catalog matches found. Custom name will be kept.
+                                </div>
+                              ) : (
+                                filteredProducts.map((p, pIdx) => (
+                                  <div
+                                    key={p.id}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      handleSelectProductSuggestion(idx, p);
+                                    }}
+                                    className={`p-2 cursor-pointer flex items-center justify-between transition-colors ${
+                                      pIdx === highlightedSuggestionIdx ? 'bg-emerald-100 border-l-4 border-[#107c41]' : 'hover:bg-emerald-50'
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="font-semibold text-slate-900">{p.name}</div>
+                                      {(p.size || p.category || p.specifications) && (
+                                        <div className="text-[10px] text-slate-500 mt-0.5">
+                                          {[p.size, p.category, p.specifications].filter(Boolean).join(' • ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="text-right pl-3 shrink-0">
+                                      <div className="font-mono font-bold text-emerald-800 text-[11px]">
+                                        ₹{p.price ? parseFloat(p.price).toFixed(2) : '0.00'}
+                                      </div>
+                                      <div className="text-[9px] text-slate-400">/{p.unit || 'Ton'}</div>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 2. Description */}
+                      <td className="border-r border-slate-300 p-0 focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset bg-white">
+                        <input
+                          type="text"
+                          value={item.description}
+                          disabled={isReadOnly}
+                          onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
+                          placeholder={isReadOnly ? '' : 'Specifications'}
+                          className="w-full h-8 px-2 py-1 text-xs text-slate-700 bg-transparent border-0 outline-none disabled:text-slate-700 placeholder:text-slate-400"
+                        />
+                      </td>
+
+                      {/* 3. Basic Rate */}
+                      <td className="border-r border-slate-300 p-0 text-right focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset bg-white">
+                        <input
+                          type="number"
+                          step="any"
+                          value={isReadOnly && !item.productId && !item.productName ? '' : item.basicRate}
+                          disabled={isReadOnly}
+                          onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
+                          placeholder={isReadOnly ? '' : '0.00'}
+                          className="w-full h-8 px-2 py-1 text-right font-mono text-xs text-slate-900 bg-transparent border-0 outline-none disabled:text-slate-800"
+                        />
+                      </td>
+
+                      {/* 4. Difference (Manual user entry) */}
+                      <td className="border-r border-slate-300 p-0 text-right bg-amber-50/30 focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset">
+                        <input
+                          type="number"
+                          step="any"
+                          value={isReadOnly && !item.productId && !item.productName ? '' : item.difference}
+                          disabled={isReadOnly}
+                          onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
+                          placeholder={isReadOnly ? '' : '0.00'}
+                          className="w-full h-8 px-2 py-1 text-right font-mono font-bold text-amber-900 bg-transparent border-0 outline-none disabled:text-amber-900"
+                          title="Manual difference added to basic rate"
+                        />
+                      </td>
+
+                      {/* 5. Quantity */}
+                      <td className="border-r border-slate-300 p-0 text-right bg-blue-50/30 focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset">
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={isReadOnly && !item.productId && !item.productName ? '' : item.quantity}
+                          disabled={isReadOnly}
+                          onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
+                          placeholder={isReadOnly ? '' : '1.000'}
+                          className="w-full h-8 px-2 py-1 text-right font-mono font-bold text-blue-900 bg-transparent border-0 outline-none disabled:text-blue-900"
+                        />
+                      </td>
+
+                      {/* 6. Final Rate (Basic + Diff) */}
+                      <td className="border-r border-slate-300 p-0 text-right font-mono font-bold text-emerald-800 bg-emerald-50/40">
+                        <div className="w-full h-8 px-2 py-1 flex items-center justify-end">
+                          {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.finalRate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        </div>
+                      </td>
+
+                      {/* 7. Amount (Final Rate * Qty) */}
+                      <td className="border-r border-slate-300 p-0 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
+                        <div className="w-full h-8 px-2.5 py-1 flex items-center justify-end">
+                          {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        </div>
+                      </td>
+
+                      {/* Action */}
+                      {!isReadOnly && (
+                        <td className="p-0 text-center bg-white">
+                          <button
+                            type="button"
+                            onClick={() => removeTransactionRow(idx)}
+                            className="w-full h-8 flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Clear / Reset Row"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {/* Grid Footer Controls & Subtotal */}
-          <div className="flex items-center justify-between mt-2 pt-2 bg-slate-50 p-2 rounded border border-slate-200">
-            <div className="text-[11px] text-slate-500 font-medium">
-              <span>Standard 12-Item Ledger Grid</span>
+          {/* Retro Excel Status Bar Footer */}
+          <div className="bg-[#e9edf4] border-t-2 border-slate-300 px-3 py-1 flex items-center justify-between text-xs font-mono text-slate-700 select-none">
+            <div className="flex items-center space-x-3 text-[11px]">
+              <span className="flex items-center space-x-1.5 text-emerald-800 font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block"></span>
+                <span>READY</span>
+              </span>
+              <span className="text-slate-400">|</span>
+              <span className="text-slate-600">SHEET 1: VOUCHER_ITEMS (12 ROWS)</span>
             </div>
 
-            <div className="flex items-center space-x-6 font-mono text-xs">
-              <div>
-                <span className="text-[10px] text-slate-500 font-sans uppercase">Total Quantity: </span>
-                <span className="font-bold text-blue-800 text-sm">{calculations.totalQty} Ton</span>
+            <div className="flex items-center space-x-6 text-xs font-mono">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-[10px] text-slate-500 font-sans uppercase font-bold">SUM(QTY):</span>
+                <span className="font-bold text-blue-900 bg-white px-2 py-0.5 border border-slate-300 shadow-2xs">
+                  {calculations.totalQty} Ton
+                </span>
               </div>
-              <div className="bg-slate-200/80 px-3 py-1 rounded">
-                <span className="text-[10px] text-slate-600 font-sans font-bold uppercase">Subtotal / Basic: </span>
-                <span className="font-bold text-slate-900 text-sm">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-[10px] text-slate-500 font-sans uppercase font-bold">SUBTOTAL:</span>
+                <span className="font-bold text-slate-900 bg-white px-2 py-0.5 border border-slate-300 shadow-2xs">
                   ₹{parseFloat(calculations.subtotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>
               </div>
