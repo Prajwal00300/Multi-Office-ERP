@@ -33,16 +33,22 @@ import {
   updateBill
 } from '../../services/billingService';
 
+const DEFAULT_ROWS_COUNT = 12;
+
 const BLANK_TRANSACTION_ROW = {
   productId: '',
   productName: '',
   description: '',
   basicRate: '0.00',
   difference: '0.00',
-  quantity: '1',
+  quantity: '',
   unit: 'Ton', // Weight is by default in Tons
   finalRate: '0.00',
   amount: '0.00'
+};
+
+const createBlankRows = (count = DEFAULT_ROWS_COUNT) => {
+  return Array.from({ length: count }, () => ({ ...BLANK_TRANSACTION_ROW }));
 };
 
 export default function CombinedTransactionWorkspace() {
@@ -85,7 +91,7 @@ export default function CombinedTransactionWorkspace() {
   // 2. Product Items Grid State
   // (Product, Description, Basic Rate, Difference, Quantity, Final Rate, Amount)
   // =========================================================================
-  const [transactionItems, setTransactionItems] = useState([{ ...BLANK_TRANSACTION_ROW }]);
+  const [transactionItems, setTransactionItems] = useState(createBlankRows());
 
   // =========================================================================
   // 3. Estimate Details State
@@ -232,7 +238,7 @@ export default function CombinedTransactionWorkspace() {
     }
 
     if (bill.items && bill.items.length > 0) {
-      setTransactionItems(bill.items.map(item => {
+      const mapped = bill.items.map(item => {
         const finalRateVal = parseFloat(item.rate) || 0;
         const qVal = parseFloat(item.quantity) || 1;
         const prod = products.find(p => String(p.id) === String(item.productId));
@@ -249,9 +255,15 @@ export default function CombinedTransactionWorkspace() {
           finalRate: finalRateVal.toFixed(2),
           amount: (finalRateVal * qVal).toFixed(2)
         };
-      }));
+      });
+
+      const padded = [...mapped];
+      while (padded.length < DEFAULT_ROWS_COUNT) {
+        padded.push({ ...BLANK_TRANSACTION_ROW });
+      }
+      setTransactionItems(padded);
     } else {
-      setTransactionItems([{ ...BLANK_TRANSACTION_ROW }]);
+      setTransactionItems(createBlankRows());
     }
 
     const gstVal = parseFloat(bill.gstPercentage) || 0;
@@ -277,7 +289,7 @@ export default function CombinedTransactionWorkspace() {
     setBillDate(new Date().toISOString().split('T')[0]);
     setBillNumber('');
 
-    setTransactionItems([{ ...BLANK_TRANSACTION_ROW }]);
+    setTransactionItems(createBlankRows());
     setEstimateId(null);
     setEstimateNumber('');
     setEstimateOthers('0.00');
@@ -318,14 +330,17 @@ export default function CombinedTransactionWorkspace() {
     let subtotal = 0;
 
     transactionItems.forEach(item => {
+      const isFilled = Boolean(item.productId || (item.productName && item.productName.trim()));
       const q = parseFloat(item.quantity) || 0;
       const bRate = parseFloat(item.basicRate) || 0;
       const diff = parseFloat(item.difference) || 0;
       const fRate = bRate + diff;
       const amt = q * fRate;
 
-      totalQty += q;
-      subtotal += amt;
+      if (isFilled || amt > 0) {
+        totalQty += q;
+        subtotal += amt;
+      }
     });
 
     // 1. Estimate Total (Pre-tax)
@@ -369,14 +384,16 @@ export default function CombinedTransactionWorkspace() {
 
       const diff = parseFloat(updated[index].difference) || 0;
       const fRate = bRate + diff;
-      const q = parseFloat(updated[index].quantity) || 1;
+      const currentQty = updated[index].quantity;
+      const q = currentQty && parseFloat(currentQty) > 0 ? parseFloat(currentQty) : (productId ? 1 : 0);
 
       updated[index] = {
         ...updated[index],
         productId: productId || '',
-        productName: name || updated[index].productName,
-        description: desc || updated[index].description,
+        productName: name,
+        description: desc || (productId ? updated[index].description : ''),
         basicRate: String(bRate),
+        quantity: currentQty && parseFloat(currentQty) > 0 ? currentQty : (productId ? '1' : ''),
         finalRate: fRate.toFixed(2),
         amount: (fRate * q).toFixed(2)
       };
@@ -451,17 +468,16 @@ export default function CombinedTransactionWorkspace() {
     });
   };
 
-  const addTransactionRow = () => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
-    setTransactionItems(prev => [...prev, { ...BLANK_TRANSACTION_ROW }]);
-  };
-
   const removeTransactionRow = (index) => {
     if (mode === 'VIEW') return;
-    if (transactionItems.length <= 1) return;
     setIsDirty(true);
-    setTransactionItems(prev => prev.filter((_, i) => i !== index));
+    setTransactionItems(prev => {
+      const filtered = prev.filter((_, i) => i !== index);
+      while (filtered.length < DEFAULT_ROWS_COUNT) {
+        filtered.push({ ...BLANK_TRANSACTION_ROW });
+      }
+      return filtered;
+    });
   };
 
   // GST Dropdown / Custom handler
@@ -554,6 +570,13 @@ export default function CombinedTransactionWorkspace() {
       return;
     }
     setMode('EDIT');
+    setTransactionItems(prev => {
+      const padded = [...prev];
+      while (padded.length < DEFAULT_ROWS_COUNT) {
+        padded.push({ ...BLANK_TRANSACTION_ROW });
+      }
+      return padded;
+    });
     setSuccessMsg('Edit mode active. You may now modify the voucher details.');
   };
 
@@ -564,23 +587,28 @@ export default function CombinedTransactionWorkspace() {
       return;
     }
 
-    if (!transactionItems || transactionItems.length === 0) {
-      setErrorMsg('Voucher must contain at least one line item.');
+    // Filter out completely blank rows
+    const filledItems = transactionItems.filter(item => 
+      Boolean(item.productId || (item.productName && item.productName.trim()) || (item.description && item.description.trim()))
+    );
+
+    if (filledItems.length === 0) {
+      setErrorMsg('Voucher must contain at least one line item. Please select a product in at least one row.');
       return;
     }
 
-    for (let i = 0; i < transactionItems.length; i++) {
-      const item = transactionItems[i];
+    for (let i = 0; i < filledItems.length; i++) {
+      const item = filledItems[i];
       if (!item.productName.trim() && !item.productId) {
         setErrorMsg(`Row #${i + 1}: Please select a product or enter description.`);
         return;
       }
-      if (parseFloat(item.quantity) <= 0) {
-        setErrorMsg(`Row #${i + 1}: Quantity must be greater than zero.`);
+      if (parseFloat(item.quantity) <= 0 || isNaN(parseFloat(item.quantity))) {
+        setErrorMsg(`Row #${i + 1} (${item.productName || 'Product'}): Quantity must be greater than zero.`);
         return;
       }
-      if (parseFloat(item.finalRate) < 0) {
-        setErrorMsg(`Row #${i + 1}: Final rate cannot be negative.`);
+      if (parseFloat(item.finalRate) < 0 || isNaN(parseFloat(item.finalRate))) {
+        setErrorMsg(`Row #${i + 1} (${item.productName || 'Product'}): Final rate cannot be negative.`);
         return;
       }
     }
@@ -593,7 +621,7 @@ export default function CombinedTransactionWorkspace() {
     try {
       // 1. Create or Update underlying Estimate record
       let targetEstimateId = estimateId;
-      const estimateItemsPayload = transactionItems.map(item => ({
+      const estimateItemsPayload = filledItems.map(item => ({
         productId: item.productId ? parseInt(item.productId, 10) : null,
         productNameSnapshot: item.productName.trim(),
         productSpecificationsSnapshot: item.description ? item.description.trim() : null,
@@ -607,7 +635,7 @@ export default function CombinedTransactionWorkspace() {
         organizationId: effectiveOrgId,
         customerId: parseInt(selectedCustomerId, 10),
         estimateDate: billDate,
-        basic: transactionItems[0]?.basicRate || '0.00',
+        basic: filledItems[0]?.basicRate || '0.00',
         others: parseFloat(estimateOthers) || 0,
         notes: billRemark || null,
         status: 'GENERATED',
@@ -634,7 +662,7 @@ export default function CombinedTransactionWorkspace() {
       }
 
       // 2. Create or Update Bill record linked to this Estimate
-      const billItemsPayload = transactionItems.map(item => ({
+      const billItemsPayload = filledItems.map(item => ({
         productId: item.productId ? parseInt(item.productId, 10) : null,
         productNameSnapshot: item.productName.trim(),
         productSpecificationsSnapshot: item.description ? item.description.trim() : null,
@@ -922,7 +950,7 @@ export default function CombinedTransactionWorkspace() {
                         onChange={(e) => handleItemProductChange(idx, e.target.value)}
                         className="w-full bg-white border border-slate-300 rounded px-1.5 py-1 text-xs font-semibold text-slate-800 disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-blue-500"
                       >
-                        <option value="">{item.productName || '-- Select Product --'}</option>
+                        <option value="">{isReadOnly ? (item.productName || '—') : (item.productName || '-- Select Product --')}</option>
                         {products.map(p => (
                           <option key={p.id} value={p.id}>
                             {p.name} {p.price ? `(₹${p.price}/${p.unit || 'Ton'})` : ''}
@@ -938,7 +966,7 @@ export default function CombinedTransactionWorkspace() {
                         value={item.description}
                         disabled={isReadOnly}
                         onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
-                        placeholder="Specifications / Description"
+                        placeholder={isReadOnly ? '' : 'Specifications / Description'}
                         className="w-full bg-white border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-700 disabled:bg-transparent disabled:border-none"
                       />
                     </td>
@@ -948,10 +976,10 @@ export default function CombinedTransactionWorkspace() {
                       <input
                         type="number"
                         step="any"
-                        value={item.basicRate}
+                        value={isReadOnly && !item.productId && !item.productName ? '' : item.basicRate}
                         disabled={isReadOnly}
                         onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
-                        placeholder="0.00"
+                        placeholder={isReadOnly ? '' : '0.00'}
                         className="w-full text-right font-mono bg-white border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-800 disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-blue-500"
                       />
                     </td>
@@ -961,10 +989,10 @@ export default function CombinedTransactionWorkspace() {
                       <input
                         type="number"
                         step="any"
-                        value={item.difference}
+                        value={isReadOnly && !item.productId && !item.productName ? '' : item.difference}
                         disabled={isReadOnly}
                         onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
-                        placeholder="0.00"
+                        placeholder={isReadOnly ? '' : '0.00'}
                         className="w-full text-right font-mono font-bold bg-white border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-900 disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-amber-500"
                         title="Manual difference added to basic rate"
                       />
@@ -976,22 +1004,22 @@ export default function CombinedTransactionWorkspace() {
                         type="number"
                         step="any"
                         min="0"
-                        value={item.quantity}
+                        value={isReadOnly && !item.productId && !item.productName ? '' : item.quantity}
                         disabled={isReadOnly}
                         onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
-                        placeholder="1.000"
+                        placeholder={isReadOnly ? '' : '1.000'}
                         className="w-full text-right font-mono font-bold text-blue-900 bg-white border border-blue-300 rounded px-1.5 py-1 text-xs disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-blue-500"
                       />
                     </td>
 
                     {/* 6. Final Rate (Basic Rate + Difference, computed) */}
                     <td className="py-1 px-2 text-right font-mono font-bold text-emerald-800 bg-emerald-50/30">
-                      ₹{parseFloat(item.finalRate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.finalRate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </td>
 
                     {/* 7. Amount (Final Rate * Quantity, computed) */}
                     <td className="py-1 px-2 text-right font-mono font-bold text-slate-900">
-                      ₹{parseFloat(item.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </td>
 
                     {/* Action */}
@@ -1000,9 +1028,8 @@ export default function CombinedTransactionWorkspace() {
                         <button
                           type="button"
                           onClick={() => removeTransactionRow(idx)}
-                          disabled={transactionItems.length <= 1}
-                          className="text-slate-400 hover:text-red-600 disabled:opacity-20 p-1"
-                          title="Remove Row"
+                          className="text-slate-400 hover:text-red-600 p-1"
+                          title="Clear / Remove Row"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1016,16 +1043,9 @@ export default function CombinedTransactionWorkspace() {
 
           {/* Grid Footer Controls & Subtotal */}
           <div className="flex items-center justify-between mt-2 pt-2 bg-slate-50 p-2 rounded border border-slate-200">
-            {!isReadOnly ? (
-              <button
-                type="button"
-                onClick={addTransactionRow}
-                className="inline-flex items-center space-x-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Product Row</span>
-              </button>
-            ) : <div />}
+            <div className="text-[11px] text-slate-500 font-medium">
+              <span>Standard 12-Item Ledger Grid</span>
+            </div>
 
             <div className="flex items-center space-x-6 font-mono text-xs">
               <div>

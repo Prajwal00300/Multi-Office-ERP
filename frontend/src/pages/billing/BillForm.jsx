@@ -28,6 +28,25 @@ import {
   overrideBill 
 } from '../../services/billingService';
 
+const DEFAULT_ROWS_COUNT = 12;
+
+const BLANK_LINE_ITEM = {
+  productId: '',
+  productNameSnapshot: '',
+  productCategorySnapshot: '',
+  productSizeSnapshot: '',
+  productSpecificationsSnapshot: '',
+  btls: '',
+  quantity: '',
+  unit: 'Ton',
+  rate: '',
+  amount: 0
+};
+
+const createBlankItems = (count = DEFAULT_ROWS_COUNT) => {
+  return Array.from({ length: count }, () => ({ ...BLANK_LINE_ITEM }));
+};
+
 const BillForm = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -50,21 +69,8 @@ const BillForm = () => {
   const [gstPercentage, setGstPercentage] = useState(18); // Default 18% standard GST
   const [transportCost, setTransportCost] = useState(0);
 
-  // Line items state
-  const [items, setItems] = useState([
-    {
-      productId: '',
-      productNameSnapshot: '',
-      productCategorySnapshot: '',
-      productSizeSnapshot: '',
-      productSpecificationsSnapshot: '',
-      btls: '',
-      quantity: 1,
-      unit: 'Ton',
-      rate: '',
-      amount: 0
-    }
-  ]);
+  // Line items state - defaults to 12 rows
+  const [items, setItems] = useState(() => createBlankItems(DEFAULT_ROWS_COUNT));
 
   // Master Lists
   const [organizations, setOrganizations] = useState([]);
@@ -177,7 +183,7 @@ const BillForm = () => {
         setTransportCost(parseFloat(bill.transportCost) || 0);
 
         if (bill.items && bill.items.length > 0) {
-          setItems(bill.items.map(i => ({
+          const mapped = bill.items.map(i => ({
             id: i.id,
             productId: i.productId || '',
             productNameSnapshot: i.productNameSnapshot || '',
@@ -185,11 +191,18 @@ const BillForm = () => {
             productSizeSnapshot: i.productSizeSnapshot || '',
             productSpecificationsSnapshot: i.productSpecificationsSnapshot || '',
             btls: i.btls || '',
-            quantity: parseFloat(i.quantity) || 0,
-            unit: i.unit || 'Kg',
-            rate: parseFloat(i.rate) || 0,
+            quantity: parseFloat(i.quantity) || '',
+            unit: i.unit || 'Ton',
+            rate: parseFloat(i.rate) || '',
             amount: parseFloat(i.amount) || 0
-          })));
+          }));
+          const padded = [...mapped];
+          while (padded.length < DEFAULT_ROWS_COUNT) {
+            padded.push({ ...BLANK_LINE_ITEM });
+          }
+          setItems(padded);
+        } else {
+          setItems(createBlankItems(DEFAULT_ROWS_COUNT));
         }
       } catch (err) {
         console.error(err);
@@ -213,11 +226,14 @@ const BillForm = () => {
     let totalQty = 0;
 
     const calculatedItems = items.map(item => {
+      const isFilled = Boolean(item.productId || (item.productNameSnapshot && item.productNameSnapshot.trim()));
       const q = parseFloat(item.quantity) || 0;
       const r = parseFloat(item.rate) || 0;
-      const amt = Math.round((q * r + Number.EPSILON) * 100) / 100;
-      subtotal += amt;
-      totalQty += q;
+      const amt = (isFilled || (q > 0 && r > 0)) ? Math.round((q * r + Number.EPSILON) * 100) / 100 : 0;
+      if (isFilled || amt > 0) {
+        subtotal += amt;
+        totalQty += q;
+      }
       return { ...item, amount: amt };
     });
 
@@ -255,8 +271,10 @@ const BillForm = () => {
         updated[index].productCategorySnapshot = prod.category || '';
         updated[index].productSizeSnapshot = prod.size || '';
         updated[index].productSpecificationsSnapshot = prod.specifications || '';
-        updated[index].unit = prod.unit || 'Kg';
-        // Note: rate is deliberately left unchanged / empty because Product Master has no selling price!
+        updated[index].unit = prod.unit || 'Ton';
+        if (!updated[index].quantity) {
+          updated[index].quantity = 1;
+        }
       } else {
         updated[index].productId = '';
         updated[index].productNameSnapshot = '';
@@ -271,30 +289,16 @@ const BillForm = () => {
 
   // Add line item
   const handleAddItem = () => {
-    setItems([
-      ...items,
-      {
-        productId: '',
-        productNameSnapshot: '',
-        productCategorySnapshot: '',
-        productSizeSnapshot: '',
-        productSpecificationsSnapshot: '',
-        btls: '',
-        quantity: 1,
-        unit: 'Kg',
-        rate: '',
-        amount: 0
-      }
-    ]);
+    setItems(prev => [...prev, { ...BLANK_LINE_ITEM }]);
   };
 
   // Remove line item
   const handleRemoveItem = (index) => {
-    if (items.length <= 1) {
-      alert('A bill must contain at least one line item.');
-      return;
+    const updated = items.filter((_, idx) => idx !== index);
+    while (updated.length < DEFAULT_ROWS_COUNT) {
+      updated.push({ ...BLANK_LINE_ITEM });
     }
-    setItems(items.filter((_, idx) => idx !== index));
+    setItems(updated);
   };
 
   // Import products from selected estimate
@@ -322,11 +326,15 @@ const BillForm = () => {
       productSizeSnapshot: i.productSizeSnapshot || '',
       productSpecificationsSnapshot: i.productSpecificationsSnapshot || '',
       btls: i.btls || '',
-      quantity: parseFloat(i.quantity) || 0,
-      unit: i.unit || 'Kg',
-      rate: parseFloat(i.negotiatedRate) || 0,
+      quantity: parseFloat(i.quantity) || '',
+      unit: i.unit || 'Ton',
+      rate: parseFloat(i.negotiatedRate) || '',
       amount: parseFloat(i.amount) || 0
     }));
+
+    while (importedItems.length < DEFAULT_ROWS_COUNT) {
+      importedItems.push({ ...BLANK_LINE_ITEM });
+    }
 
     setItems(importedItems);
     setSuccessMsg(`Imported ${importedItems.length} items from Estimate ${est.estimateNumber}.`);
@@ -344,13 +352,17 @@ const BillForm = () => {
       return;
     }
 
-    if (!items || items.length === 0) {
-      setError('Please add at least one line item.');
+    const filledItems = items.filter(
+      itm => itm.productId || (itm.productNameSnapshot && itm.productNameSnapshot.trim()) || (parseFloat(itm.quantity) > 0 && parseFloat(itm.rate) > 0)
+    );
+
+    if (filledItems.length === 0) {
+      setError('Please add at least one product line item.');
       return;
     }
 
-    for (let i = 0; i < items.length; i++) {
-      const itm = items[i];
+    for (let i = 0; i < filledItems.length; i++) {
+      const itm = filledItems[i];
       if (!itm.productId) {
         setError(`Row #${i + 1}: Please select a product from the products module.`);
         return;
@@ -387,7 +399,7 @@ const BillForm = () => {
         gstPercentage: calculatedTotals.gstPercentage,
         transportCost: calculatedTotals.transportCost,
         notes,
-        items: items.map(itm => ({
+        items: filledItems.map(itm => ({
           productId: itm.productId ? parseInt(itm.productId, 10) : null,
           productNameSnapshot: itm.productNameSnapshot.trim(),
           productCategorySnapshot: itm.productCategorySnapshot || null,
@@ -395,7 +407,7 @@ const BillForm = () => {
           productSpecificationsSnapshot: itm.productSpecificationsSnapshot || null,
           btls: itm.btls ? String(itm.btls).trim() : null,
           quantity: parseFloat(itm.quantity),
-          unit: itm.unit || 'Kg',
+          unit: itm.unit || 'Ton',
           rate: parseFloat(itm.rate)
         }))
       };
@@ -691,14 +703,7 @@ const BillForm = () => {
               Select products from catalogue and enter negotiated rates. (Product catalogue does not store prices).
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleAddItem}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Row
-          </button>
+          <span className="text-xs text-gray-500 font-medium">Standard 12-Item Ledger Grid</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -719,6 +724,7 @@ const BillForm = () => {
             <tbody className="divide-y divide-gray-200">
               {items.map((item, index) => {
                 const lineAmt = Math.round(((parseFloat(item.quantity) || 0) * (parseFloat(item.rate) || 0) + Number.EPSILON) * 100) / 100;
+                const isRowActive = Boolean(item.productId || (item.productNameSnapshot && item.productNameSnapshot.trim()) || lineAmt > 0);
 
                 return (
                   <tr key={index} className="hover:bg-gray-50/50">
@@ -733,7 +739,6 @@ const BillForm = () => {
                         value={item.productId || ''}
                         onChange={(e) => handleItemChange(index, 'productId', e.target.value)}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-                        required
                       >
                         <option value="">-- Select Product --</option>
                         {products.length === 0 ? (
@@ -761,7 +766,6 @@ const BillForm = () => {
                         onChange={(e) => handleItemChange(index, 'productNameSnapshot', e.target.value)}
                         placeholder={item.productId ? 'Product Description' : 'Select product first'}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        required
                       />
                     </td>
 
@@ -784,8 +788,8 @@ const BillForm = () => {
                         min="0"
                         value={item.quantity}
                         onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                        placeholder="1.000"
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        required
                       />
                     </td>
 
@@ -809,13 +813,12 @@ const BillForm = () => {
                         onChange={(e) => handleItemChange(index, 'rate', e.target.value)}
                         placeholder="0.00"
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono font-medium"
-                        required
                       />
                     </td>
 
                     {/* Line Amount */}
                     <td className="py-2 px-3 text-right font-mono font-semibold text-gray-900">
-                      ₹{lineAmt.toFixed(2)}
+                      {isRowActive ? `₹${lineAmt.toFixed(2)}` : '—'}
                     </td>
 
                     {/* Delete Action */}
