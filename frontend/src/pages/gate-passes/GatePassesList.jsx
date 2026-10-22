@@ -33,7 +33,6 @@ const GatePassesList = () => {
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [typeFilter, setTypeFilter] = useState('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
@@ -70,7 +69,6 @@ const GatePassesList = () => {
       const params = {};
       if (searchTerm.trim()) params.search = searchTerm.trim();
       if (statusFilter !== 'ALL') params.status = statusFilter;
-      if (typeFilter !== 'ALL') params.transactionType = typeFilter;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
 
@@ -258,11 +256,11 @@ const GatePassesList = () => {
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* Search */}
-          <div className="relative md:col-span-2">
+          <div className="relative md:col-span-3">
             <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
             <input
               type="text"
-              placeholder="Search by Gate Pass #, Vehicle #, Customer, Bill/Estimate #..."
+              placeholder="Search by Gate Pass #, Vehicle #, Customer Name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white"
@@ -270,7 +268,7 @@ const GatePassesList = () => {
           </div>
 
           {/* Status Filter */}
-          <div>
+          <div className="md:col-span-1">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -282,19 +280,6 @@ const GatePassesList = () => {
               <option value="DISPATCHED">Dispatched</option>
               <option value="REWEIGHING_REQUIRED">Reweighing Required</option>
               <option value="CANCELLED">Cancelled</option>
-            </select>
-          </div>
-
-          {/* Type Filter */}
-          <div>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="ALL">All Types (Bills & Estimates)</option>
-              <option value="BILL">Bills Only</option>
-              <option value="ESTIMATE">Estimates Only</option>
             </select>
           </div>
         </div>
@@ -348,12 +333,11 @@ const GatePassesList = () => {
             <thead className="bg-slate-50 text-slate-700 text-xs uppercase font-semibold border-b border-slate-200">
               <tr>
                 <th className="px-4 py-3">Gate Pass #</th>
-                <th className="px-4 py-3">Ref Document</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Vehicle Details</th>
-                <th className="px-4 py-3">Weighing #</th>
-                <th className="px-4 py-3 text-right">Net Weight</th>
-                <th className="px-4 py-3">10-Min Validity</th>
+                <th className="px-4 py-3">Customer Name</th>
+                <th className="px-4 py-3">Vehicle Number</th>
+                <th className="px-4 py-3 text-right">Gross Weight</th>
+                <th className="px-4 py-3">Weighbridge Slip</th>
+                <th className="px-4 py-3">10-Min Status</th>
                 <th className="px-4 py-3 text-center">Status</th>
                 <th className="px-4 py-3 text-center">Actions</th>
               </tr>
@@ -361,25 +345,21 @@ const GatePassesList = () => {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan="8" className="px-4 py-12 text-center text-slate-400">
                     <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-blue-600 border-t-transparent mb-2"></div>
                     <p>Loading gate passes...</p>
                   </td>
                 </tr>
               ) : gatePasses.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan="8" className="px-4 py-12 text-center text-slate-400">
                     <Ticket className="mx-auto h-8 w-8 text-slate-300 mb-2" />
                     <p className="font-medium text-slate-600">No gate passes found</p>
-                    <p className="text-xs text-slate-400 mt-1">Generate a gate pass from verified weighbridge records.</p>
+                    <p className="text-xs text-slate-400 mt-1">Generate a gate pass using Customer, Vehicle, and Gross Weight.</p>
                   </td>
                 </tr>
               ) : (
                 gatePasses.map((gp) => {
-                  const docNumber = gp.transactionType === 'BILL' 
-                    ? (gp.bill?.billNumber || 'Bill') 
-                    : (gp.estimate?.estimateNumber || 'Estimate');
-
                   return (
                     <tr key={gp.id} className="hover:bg-slate-50/80 transition-colors">
                       {/* Gate Pass Number */}
@@ -395,35 +375,25 @@ const GatePassesList = () => {
                         </p>
                       </td>
 
-                      {/* Ref Document */}
+                      {/* Customer Name */}
                       <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            gp.transactionType === 'BILL' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {gp.transactionType}
-                          </span>
-                          <span className="font-medium text-slate-800">{docNumber}</span>
-                        </div>
-                      </td>
-
-                      {/* Customer */}
-                      <td className="px-4 py-3.5">
-                        <p className="font-medium text-slate-800">{gp.customer?.name || 'Customer'}</p>
+                        <p className="font-semibold text-slate-800">{gp.customer?.name || 'Customer'}</p>
                         <p className="text-[11px] text-slate-400">{gp.customer?.city || ''}</p>
                       </td>
 
-                      {/* Vehicle Details */}
+                      {/* Vehicle Number */}
                       <td className="px-4 py-3.5">
-                        <p className="font-semibold text-slate-900 font-mono tracking-wide">{gp.vehicleNumber}</p>
-                        {gp.driverName && (
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            Driver: {gp.driverName}
-                          </p>
-                        )}
+                        <p className="font-bold text-slate-900 font-mono tracking-wide">{gp.vehicleNumber}</p>
                       </td>
 
-                      {/* Weighing Record */}
+                      {/* Gross Weight */}
+                      <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-900">
+                        {gp.grossWeight !== undefined && gp.grossWeight !== null 
+                          ? `${parseFloat(gp.grossWeight).toFixed(3)} ${gp.weightUnit || 'Ton'}` 
+                          : '—'}
+                      </td>
+
+                      {/* Weighbridge Slip */}
                       <td className="px-4 py-3.5">
                         {gp.weighingRecord ? (
                           <Link 
@@ -435,13 +405,6 @@ const GatePassesList = () => {
                         ) : (
                           <span className="text-xs text-slate-400 italic">None</span>
                         )}
-                      </td>
-
-                      {/* Net Weight */}
-                      <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-900">
-                        {gp.weighingRecord 
-                          ? `${parseFloat(gp.weighingRecord.netWeight).toFixed(2)} ${gp.weighingRecord.unit}` 
-                          : '—'}
                       </td>
 
                       {/* 10-Minute Validity */}

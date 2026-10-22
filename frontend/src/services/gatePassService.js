@@ -17,6 +17,18 @@ export const getGatePassById = async (id) => {
   return res.data;
 };
 
+export const checkEligibility = async (params = {}) => {
+  const query = new URLSearchParams();
+  Object.keys(params).forEach(key => {
+    if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+      query.append(key, params[key]);
+    }
+  });
+  const queryString = query.toString();
+  const res = await api.get(`/gate-passes/check-eligibility${queryString ? `?${queryString}` : ''}`);
+  return res.data;
+};
+
 export const createGatePass = async (data) => {
   const res = await api.post('/gate-passes', data);
   return res.data;
@@ -45,6 +57,7 @@ export const requestReweigh = async (id, data) => {
 export default {
   getGatePasses,
   getGatePassById,
+  checkEligibility,
   createGatePass,
   issueGatePass,
   confirmDispatch,

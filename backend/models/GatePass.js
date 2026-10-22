@@ -2,8 +2,6 @@ const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 const Organization = require('./Organization');
 const Customer = require('./Customer');
-const Bill = require('./Bill');
-const Estimate = require('./Estimate');
 const WeighingRecord = require('./WeighingRecord');
 const User = require('./User');
 
@@ -27,27 +25,6 @@ const GatePass = sequelize.define('GatePass', {
       key: 'id'
     }
   },
-  transactionType: {
-    type: DataTypes.ENUM('BILL', 'ESTIMATE'),
-    allowNull: false,
-    comment: 'Source transaction type: BILL or ESTIMATE'
-  },
-  billId: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: 'bills',
-      key: 'id'
-    }
-  },
-  estimateId: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: 'estimates',
-      key: 'id'
-    }
-  },
   customerId: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -59,6 +36,18 @@ const GatePass = sequelize.define('GatePass', {
   vehicleNumber: {
     type: DataTypes.STRING,
     allowNull: false,
+  },
+  grossWeight: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Manually entered Gross Weight on Gate Pass'
+  },
+  weightUnit: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'Ton',
+    comment: 'Measurement unit: Ton or Kg'
   },
   weighingRecordId: {
     type: DataTypes.INTEGER,
@@ -140,10 +129,6 @@ const GatePass = sequelize.define('GatePass', {
     type: DataTypes.TEXT,
     allowNull: true,
   },
-  remarks: {
-    type: DataTypes.TEXT,
-    allowNull: true,
-  },
   createdBy: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -163,14 +148,6 @@ const GatePass = sequelize.define('GatePass', {
     {
       unique: false,
       fields: ['organizationId']
-    },
-    {
-      unique: false,
-      fields: ['billId']
-    },
-    {
-      unique: false,
-      fields: ['estimateId']
     },
     {
       unique: false,
@@ -197,12 +174,6 @@ GatePass.belongsTo(Organization, { foreignKey: 'organizationId' });
 
 Customer.hasMany(GatePass, { foreignKey: 'customerId' });
 GatePass.belongsTo(Customer, { foreignKey: 'customerId' });
-
-Bill.hasMany(GatePass, { foreignKey: 'billId', as: 'gatePasses' });
-GatePass.belongsTo(Bill, { foreignKey: 'billId' });
-
-Estimate.hasMany(GatePass, { foreignKey: 'estimateId', as: 'gatePasses' });
-GatePass.belongsTo(Estimate, { foreignKey: 'estimateId' });
 
 WeighingRecord.hasMany(GatePass, { foreignKey: 'weighingRecordId', as: 'gatePasses' });
 GatePass.belongsTo(WeighingRecord, { foreignKey: 'weighingRecordId', as: 'weighingRecord' });

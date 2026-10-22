@@ -3,21 +3,10 @@ const sequelize = require('../config/database');
 const GatePass = require('../models/GatePass');
 const GatePassAudit = require('../models/GatePassAudit');
 const WeighingRecord = require('../models/WeighingRecord');
-const Bill = require('../models/Bill');
-const BillItem = require('../models/BillItem');
-const Estimate = require('../models/Estimate');
-const EstimateItem = require('../models/EstimateItem');
 const Customer = require('../models/Customer');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 
-const { 
-  DEFAULT_VALIDITY_MINUTES,
-  TIME_EXCEEDED_MESSAGE,
-  calculateValidityWindow, 
-  checkValidityPeriod, 
-  evaluateGatePassEligibility 
-} = require('../services/weighbridge/GatePassEligibilityService');
 const { generateUniqueGatePassNumber } = require('../utils/gatePassNumberGenerator');
 const {
   getAuthorizedOfficeScope,
@@ -26,9 +15,11 @@ const {
   buildOfficeWhereClause
 } = require('../utils/scopeFilter');
 
+const TEN_MINUTES_MS = 10 * 60 * 1000;
+
 /**
  * GET /api/gate-passes
- * List all gate passes with real-time validity evaluation and filters.
+ * List all gate passes with filters and real-time status.
  */
 exports.getGatePasses = async (req, res) => {
   try {
@@ -37,8 +28,7 @@ exports.getGatePasses = async (req, res) => {
       status, 
       organizationId, 
       startDate, 
-      endDate,
-      transactionType 
+      endDate
     } = req.query;
 
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
@@ -48,9 +38,6 @@ exports.getGatePasses = async (req, res) => {
 
     if (status && status !== 'ALL') {
       where.status = status;
-    }
-    if (transactionType && transactionType !== 'ALL') {
-      where.transactionType = transactionType;
     }
     if (startDate && endDate) {
       where.createdAt = {
@@ -67,9 +54,7 @@ exports.getGatePasses = async (req, res) => {
       where[Op.or] = [
         { gatePassNumber: { [Op.like]: term } },
         { vehicleNumber: { [Op.like]: term } },
-        { '$Customer.name$': { [Op.like]: term } },
-        { '$Bill.billNumber$': { [Op.like]: term } },
-        { '$Estimate.estimateNumber$': { [Op.like]: term } }
+        { '$Customer.name$': { [Op.like]: term } }
       ];
     }
 
@@ -78,12 +63,10 @@ exports.getGatePasses = async (req, res) => {
       include: [
         { model: Organization, attributes: ['id', 'name'] },
         { model: Customer, attributes: ['id', 'name', 'phone', 'city'] },
-        { model: Bill, attributes: ['id', 'billNumber', 'createdAt'] },
-        { model: Estimate, attributes: ['id', 'estimateNumber', 'createdAt'] },
         { 
           model: WeighingRecord, 
           as: 'weighingRecord',
-          attributes: ['id', 'weighingNumber', 'tareWeight', 'grossWeight', 'netWeight', 'expectedWeight', 'weightDifference', 'weightUnit', 'weightSource', 'status']
+          attributes: ['id', 'weighingNumber', 'firstWeight', 'grossWeight', 'taleWeight', 'weightUnit', 'weighedAt']
         },
         { model: User, as: 'creator', attributes: ['id', 'username'] },
         { model: User, as: 'dispatcher', attributes: ['id', 'username'] }
@@ -91,25 +74,16 @@ exports.getGatePasses = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    // Evaluate live validity on returned passes
-    const now = new Date().getTime();
+    const now = Date.now();
     const enriched = passes.map(p => {
       const plain = p.toJSON();
+      plain.customer = plain.Customer || plain.customer;
+      plain.organization = plain.Organization || plain.organization;
       const expiry = new Date(plain.validityExpiry).getTime();
       const remainingMs = expiry - now;
       const isExpired = remainingMs <= 0;
 
-      // If active pass has expired past validity, reflect REWEIGHING_REQUIRED status
-      if (['READY_FOR_DISPATCH', 'ISSUED'].includes(plain.status) && isExpired) {
-        plain.effectiveStatus = 'REWEIGHING_REQUIRED';
-        plain.isExpired = true;
-        plain.validityMessage = TIME_EXCEEDED_MESSAGE;
-      } else {
-        plain.effectiveStatus = plain.status;
-        plain.isExpired = isExpired;
-        plain.validityMessage = isExpired ? TIME_EXCEEDED_MESSAGE : null;
-      }
-
+      plain.isExpired = isExpired;
       plain.remainingSeconds = isExpired ? 0 : Math.floor(remainingMs / 1000);
       return plain;
     });
@@ -125,8 +99,71 @@ exports.getGatePasses = async (req, res) => {
 };
 
 /**
+ * GET /api/gate-passes/check-eligibility
+ * Check if a valid Weighbridge slip exists for the Customer + Vehicle within the 10-minute window.
+ */
+exports.checkEligibility = async (req, res) => {
+  try {
+    const { customerId, vehicleNumber, organizationId } = req.query;
+    if (!customerId || !vehicleNumber || !vehicleNumber.trim()) {
+      return res.status(200).json({ found: false });
+    }
+
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    const cleanVehicle = vehicleNumber.trim();
+
+    const record = await WeighingRecord.findOne({
+      where: {
+        organizationId: { [Op.in]: targetOfficeIds },
+        customerId: parseInt(customerId, 10),
+        vehicleDetails: { [Op.like]: `%${cleanVehicle}%` }
+      },
+      order: [['weighedAt', 'DESC']],
+      include: [{ model: Customer, attributes: ['id', 'name'] }]
+    });
+
+    if (!record) {
+      return res.status(200).json({ 
+        found: false, 
+        message: 'No matching Weighbridge slip found for this Customer and Vehicle.' 
+      });
+    }
+
+    // Check if duplicate gate pass exists for this slip
+    const existingPass = await GatePass.findOne({
+      where: {
+        weighingRecordId: record.id,
+        status: { [Op.ne]: 'CANCELLED' }
+      }
+    });
+
+    const slipTime = new Date(record.weighedAt || record.createdAt).getTime();
+    const now = Date.now();
+    const elapsedMs = now - slipTime;
+    const remainingMs = Math.max(0, TEN_MINUTES_MS - elapsedMs);
+    const isExpired = elapsedMs > TEN_MINUTES_MS;
+
+    res.status(200).json({
+      found: true,
+      weighingRecordId: record.id,
+      weighingNumber: record.weighingNumber,
+      slipTime: record.weighedAt || record.createdAt,
+      elapsedMs,
+      remainingMs,
+      remainingSeconds: Math.floor(remainingMs / 1000),
+      isExpired,
+      alreadyUsed: Boolean(existingPass),
+      existingPassNumber: existingPass?.gatePassNumber || null
+    });
+  } catch (error) {
+    console.error('Error checking gate pass eligibility:', error);
+    res.status(500).json({ error: 'Failed to check slip eligibility.' });
+  }
+};
+
+/**
  * GET /api/gate-passes/:id
- * Retrieve single gate pass with comprehensive details for viewing or printing.
+ * Retrieve single gate pass with Customer, Organization, and Weighbridge record.
  */
 exports.getGatePassById = async (req, res) => {
   try {
@@ -134,66 +171,34 @@ exports.getGatePassById = async (req, res) => {
 
     const gatePass = await GatePass.findByPk(id, {
       include: [
-        { model: Organization, attributes: ['id', 'name'] },
+        { model: Organization, attributes: ['id', 'name', 'address', 'phone'] },
         { model: Customer, attributes: ['id', 'name', 'phone', 'city', 'address', 'tin'] },
-        { 
-          model: Bill, 
-          attributes: ['id', 'billNumber', 'billDate', 'status', 'finalAmount', 'createdAt'],
-          include: [{ model: BillItem, as: 'items' }]
-        },
-        { 
-          model: Estimate, 
-          attributes: ['id', 'estimateNumber', 'estimateDate', 'status', 'grandTotal', 'createdAt'],
-          include: [{ model: EstimateItem, as: 'items' }]
-        },
         { 
           model: WeighingRecord, 
           as: 'weighingRecord',
-          include: [
-            { model: User, as: 'recorder', attributes: ['id', 'username', 'role'] },
-            { model: User, as: 'discrepancyApprover', attributes: ['id', 'username', 'role'] },
-            { 
-              model: WeighingRecord, 
-              as: 'previousRecord',
-              attributes: ['id', 'weighingNumber', 'tareWeight', 'grossWeight', 'netWeight', 'weighedAt', 'status']
-            }
-          ]
+          attributes: ['id', 'weighingNumber', 'firstWeight', 'grossWeight', 'taleWeight', 'weightUnit', 'weighedAt']
         },
-        { model: User, as: 'creator', attributes: ['id', 'username', 'role'] },
-        { model: User, as: 'issuer', attributes: ['id', 'username', 'role'] },
-        { model: User, as: 'dispatcher', attributes: ['id', 'username', 'role'] },
-        { model: User, as: 'canceller', attributes: ['id', 'username', 'role'] },
-        {
-          model: GatePassAudit,
-          as: 'audits',
-          include: [{ model: User, as: 'performer', attributes: ['id', 'username', 'role'] }],
-          separate: true,
-          order: [['createdAt', 'DESC']]
-        }
+        { model: User, as: 'creator', attributes: ['id', 'username'] },
+        { model: User, as: 'issuer', attributes: ['id', 'username'] },
+        { model: User, as: 'dispatcher', attributes: ['id', 'username'] },
+        { model: User, as: 'canceller', attributes: ['id', 'username'] }
       ]
     });
 
     if (!gatePass) {
-      return res.status(404).json({ error: 'Gate pass record not found.' });
+      return res.status(404).json({ error: 'Gate pass not found.' });
     }
 
     await verifyRecordOwnership(gatePass, req.user);
 
+    const now = Date.now();
     const plain = gatePass.toJSON();
-    const now = new Date().getTime();
+    plain.customer = plain.Customer || plain.customer;
+    plain.organization = plain.Organization || plain.organization;
     const expiry = new Date(plain.validityExpiry).getTime();
     const remainingMs = expiry - now;
-    const isExpired = remainingMs <= 0;
-
-    // Check if expired and update DB status if it was READY_FOR_DISPATCH or ISSUED
-    if (['READY_FOR_DISPATCH', 'ISSUED'].includes(plain.status) && isExpired) {
-      await gatePass.update({ status: 'REWEIGHING_REQUIRED' });
-      plain.status = 'REWEIGHING_REQUIRED';
-    }
-
-    plain.isExpired = isExpired;
-    plain.remainingSeconds = isExpired ? 0 : Math.floor(remainingMs / 1000);
-    plain.validityMessage = isExpired ? TIME_EXCEEDED_MESSAGE : null;
+    plain.isExpired = remainingMs <= 0;
+    plain.remainingSeconds = plain.isExpired ? 0 : Math.floor(remainingMs / 1000);
 
     res.status(200).json(plain);
   } catch (error) {
@@ -201,155 +206,220 @@ exports.getGatePassById = async (req, res) => {
       return res.status(error.statusCode).json({ error: error.message });
     }
     console.error('Error fetching gate pass details:', error);
-    res.status(500).json({ error: 'Internal server error while fetching gate pass details.' });
+    res.status(500).json({ error: 'Internal server error while fetching gate pass.' });
   }
 };
 
 /**
  * POST /api/gate-passes
- * Create a new Gate Pass linked to an eligible Bill/Estimate and its latest WeighingRecord.
+ * Create and save a new Gate Pass.
+ * Enforces:
+ * 1. Exactly 3 business fields: Customer Name (customerId), Vehicle Number, Gross Weight (> 0)
+ * 2. 10-Minute Rule from Weighbridge slip generation
+ * 3. Duplicate prevention for same Weighbridge slip
+ * 4. Office-level authorization
  */
 exports.createGatePass = async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
     const {
-      weighingRecordId,
-      validityMinutes,
-      remarks
+      customerId,
+      vehicleNumber,
+      grossWeight,
+      weightUnit,
+      weighingRecordId: customWeighingId,
+      organizationId: customOrgId
     } = req.body;
 
-    if (!weighingRecordId) {
+    // Field 1: Customer Name
+    if (!customerId) {
       await transaction.rollback();
-      return res.status(400).json({ error: 'A valid Weighing Record ID is required to generate a Gate Pass.' });
+      return res.status(400).json({ error: 'Customer Name is required. Please select a customer from the dropdown.' });
     }
 
-    const weighingRecord = await WeighingRecord.findByPk(weighingRecordId, {
-      include: [
-        { model: Bill, include: [{ model: BillItem, as: 'items' }] },
-        { model: Estimate, include: [{ model: EstimateItem, as: 'items' }] },
-        { model: Customer }
-      ],
-      transaction
-    });
+    // Field 2: Vehicle Number
+    if (!vehicleNumber || typeof vehicleNumber !== 'string' || !vehicleNumber.trim()) {
+      await transaction.rollback();
+      return res.status(400).json({ error: 'Vehicle Number is required. Please enter the vehicle registration number.' });
+    }
+    const cleanVehicleNumber = vehicleNumber.trim();
+
+    // Field 3: Gross Weight (must be positive numeric value greater than zero)
+    if (grossWeight === undefined || grossWeight === null || grossWeight === '') {
+      await transaction.rollback();
+      return res.status(400).json({ error: 'Gross Weight is required.' });
+    }
+    const parsedGrossWeight = parseFloat(grossWeight);
+    if (isNaN(parsedGrossWeight) || parsedGrossWeight <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({ error: 'Gross Weight must be a valid positive number greater than zero.' });
+    }
+
+    // Office authorization check
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, customOrgId);
+
+    // Verify Customer exists and belongs to authorized office
+    const customer = await Customer.findByPk(customerId, { transaction });
+    if (!customer) {
+      await transaction.rollback();
+      return res.status(404).json({ error: 'Selected customer not found.' });
+    }
+    if (!targetOfficeIds.includes(customer.organizationId) && req.user.role !== 'SUPER_ADMIN') {
+      await transaction.rollback();
+      return res.status(403).json({ error: 'Access denied: Customer does not belong to your authorized office.' });
+    }
+
+    // Identify the corresponding Weighbridge slip
+    let weighingRecord = null;
+
+    if (customWeighingId) {
+      weighingRecord = await WeighingRecord.findByPk(customWeighingId, { transaction });
+      if (!weighingRecord) {
+        await transaction.rollback();
+        return res.status(404).json({ error: 'Specified Weighbridge record not found.' });
+      }
+      if (!targetOfficeIds.includes(weighingRecord.organizationId)) {
+        await transaction.rollback();
+        return res.status(403).json({ error: 'Access denied: Weighbridge slip belongs to another office.' });
+      }
+      if (parseInt(weighingRecord.customerId, 10) !== parseInt(customerId, 10)) {
+        await transaction.rollback();
+        return res.status(400).json({ error: 'Weighbridge slip customer does not match the selected customer.' });
+      }
+    } else {
+      // Find the most recent Weighbridge record matching this Customer and Vehicle in authorized office
+      weighingRecord = await WeighingRecord.findOne({
+        where: {
+          organizationId: { [Op.in]: targetOfficeIds },
+          customerId: customer.id,
+          vehicleDetails: { [Op.like]: `%${cleanVehicleNumber}%` }
+        },
+        order: [['weighedAt', 'DESC']],
+        transaction
+      });
+    }
 
     if (!weighingRecord) {
       await transaction.rollback();
-      return res.status(404).json({ error: 'Weighing record not found.' });
+      return res.status(404).json({ 
+        error: `No Weighbridge slip found for Customer "${customer.name}" and Vehicle "${cleanVehicleNumber}". A weighbridge slip must be generated before creating a Gate Pass.` 
+      });
     }
 
-    if (weighingRecord.status === 'SUPERSEDED') {
+    // Prevent duplicate Gate Pass creation for the same Weighbridge slip
+    const existingPass = await GatePass.findOne({
+      where: {
+        weighingRecordId: weighingRecord.id,
+        status: { [Op.ne]: 'CANCELLED' }
+      },
+      transaction
+    });
+
+    if (existingPass) {
       await transaction.rollback();
-      return res.status(400).json({ error: 'This weighing record has been superseded by a reweighing. Please select the latest weighing record.' });
+      return res.status(409).json({ 
+        error: `A Gate Pass (Pass #${existingPass.gatePassNumber}) has already been generated for Weighbridge Slip #${weighingRecord.weighingNumber}. Duplicate gate passes for the same weighing slip are not permitted.` 
+      });
     }
 
-    // Role & Ownership check
-    try {
-      await verifyRecordOwnership(weighingRecord, req.user);
-    } catch (authErr) {
+    // 10-Minute Rule Validation (Server-side Authoritative Enforcement)
+    const slipGenTime = new Date(weighingRecord.weighedAt || weighingRecord.createdAt);
+    const now = new Date();
+    const elapsedMs = now.getTime() - slipGenTime.getTime();
+
+    if (elapsedMs > TEN_MINUTES_MS) {
+      const elapsedMins = Math.floor(elapsedMs / 60000);
+      const elapsedSecs = Math.floor((elapsedMs % 60000) / 1000);
       await transaction.rollback();
-      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
+      return res.status(400).json({
+        error: `The 10-minute window for Weighbridge Slip #${weighingRecord.weighingNumber} has expired. The slip was generated at ${slipGenTime.toLocaleTimeString()} (${elapsedMins}m ${elapsedSecs}s ago). A Gate Pass must be saved within 10 minutes of Weighbridge slip generation.`
+      });
     }
 
-    // Determine target document & initial validity start time
-    const targetDoc = weighingRecord.Bill || weighingRecord.Estimate;
-    if (!targetDoc) {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'Associated transaction document (Bill or Estimate) not found.' });
-    }
+    // Calculate validity window: exactly 10 minutes from slip generation
+    const validityStart = slipGenTime;
+    const validityExpiry = new Date(slipGenTime.getTime() + TEN_MINUTES_MS);
 
-    // 10-Minute Validity Rule:
-    // Initial validity starts from bill/estimate generation timestamp.
-    // If this is a reweighing, validity starts from the reweighing timestamp.
-    const initialStartTime = weighingRecord.isReweigh 
-      ? weighingRecord.weighedAt 
-      : targetDoc.createdAt;
-
-    const durationMins = parseInt(validityMinutes || DEFAULT_VALIDITY_MINUTES, 10);
-    const validityWindow = calculateValidityWindow(initialStartTime, durationMins);
-
-    // Initial Gate Pass status evaluation
-    const initialStatus = evaluateGatePassEligibility(
-      weighingRecord,
-      validityWindow.validityExpiry,
-      'DRAFT'
-    );
-
-    // Generate unique sequential gate pass number
+    // Generate unique Gate Pass number
     const gatePassNumber = await generateUniqueGatePassNumber(transaction);
 
-    // Create Gate Pass
+    // Save the Gate Pass record
     const newGatePass = await GatePass.create({
       gatePassNumber,
       organizationId: weighingRecord.organizationId,
-      transactionType: weighingRecord.transactionType,
-      billId: weighingRecord.billId,
-      estimateId: weighingRecord.estimateId,
-      customerId: weighingRecord.customerId,
-      vehicleNumber: weighingRecord.vehicleNumber,
+      customerId: customer.id,
+      vehicleNumber: cleanVehicleNumber,
+      grossWeight: parsedGrossWeight,
+      weightUnit: weightUnit && weightUnit.trim() ? weightUnit.trim() : (weighingRecord.weightUnit || 'Ton'),
       weighingRecordId: weighingRecord.id,
-      status: initialStatus.status,
-      validityStart: validityWindow.validityStart,
-      validityExpiry: validityWindow.validityExpiry,
-      validityMinutes: validityWindow.validityMinutes,
-      remarks: remarks ? remarks.trim() : null,
-      createdBy: req.user.userId
+      status: 'ISSUED',
+      validityStart,
+      validityExpiry,
+      validityMinutes: 10,
+      issuedAt: now,
+      issuedBy: req.user.id,
+      createdBy: req.user.id
     }, { transaction });
 
-    // Create Audit entry
+    // Record audit entry
     await GatePassAudit.create({
       gatePassId: newGatePass.id,
-      userId: req.user.userId,
+      userId: req.user.id,
       action: 'CREATED',
-      reason: 'Gate pass generated for vehicle dispatch.',
+      reason: 'Gate pass created within 10-minute validity window.',
       newValues: JSON.stringify({
         gatePassNumber,
-        status: initialStatus.status,
-        validityStart: validityWindow.validityStart,
-        validityExpiry: validityWindow.validityExpiry
+        customerName: customer.name,
+        vehicleNumber: cleanVehicleNumber,
+        grossWeight: parsedGrossWeight,
+        weighingRecordId: weighingRecord.id,
+        validityStart,
+        validityExpiry
       }),
-      ipAddress: req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '127.0.0.1'
+      ipAddress: req.ip || req.connection?.remoteAddress || '127.0.0.1'
     }, { transaction });
 
     await transaction.commit();
 
     const created = await GatePass.findByPk(newGatePass.id, {
       include: [
-        { model: Organization, attributes: ['id', 'name'] },
-        { model: Customer, attributes: ['id', 'name', 'phone'] },
-        { model: Bill, attributes: ['id', 'billNumber'] },
-        { model: Estimate, attributes: ['id', 'estimateNumber'] },
-        { model: WeighingRecord, as: 'weighingRecord' },
+        { model: Organization, attributes: ['id', 'name', 'address'] },
+        { model: Customer, attributes: ['id', 'name', 'phone', 'city'] },
+        { 
+          model: WeighingRecord, 
+          as: 'weighingRecord',
+          attributes: ['id', 'weighingNumber', 'firstWeight', 'grossWeight', 'taleWeight', 'weightUnit', 'weighedAt']
+        },
         { model: User, as: 'creator', attributes: ['id', 'username'] }
       ]
     });
 
     res.status(201).json({
-      message: 'Gate pass created successfully.',
-      gatePass: created,
-      validity: validityWindow,
-      statusReason: initialStatus.reason
+      message: 'Gate Pass saved successfully.',
+      gatePass: created
     });
   } catch (error) {
-    await transaction.rollback();
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error creating gate pass:', error);
-    res.status(500).json({ error: error.message || 'Internal server error while creating gate pass.' });
+    res.status(500).json({ error: error.message || 'Internal server error while saving gate pass.' });
   }
 };
 
 /**
- * POST /api/gate-passes/:id/issue
- * Mark gate pass as ISSUED for printing. Does not confirm dispatch.
+ * POST /api/gate-passes/:id/confirm-dispatch
+ * Confirm physical vehicle crossing through gate.
  */
-exports.issueGatePass = async (req, res) => {
+exports.confirmDispatch = async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
 
-    const gatePass = await GatePass.findByPk(id, {
-      include: [{ model: WeighingRecord, as: 'weighingRecord' }],
-      transaction
-    });
-
+    const gatePass = await GatePass.findByPk(id, { transaction });
     if (!gatePass) {
       await transaction.rollback();
       return res.status(404).json({ error: 'Gate pass not found.' });
@@ -360,22 +430,6 @@ exports.issueGatePass = async (req, res) => {
     } catch (authErr) {
       await transaction.rollback();
       return res.status(authErr.statusCode || 403).json({ error: authErr.message });
-    }
-
-    // Check validity
-    const validity = checkValidityPeriod(gatePass.validityExpiry);
-    if (validity.isExpired) {
-      await gatePass.update({ status: 'REWEIGHING_REQUIRED' }, { transaction });
-      await transaction.commit();
-      return res.status(400).json({ error: TIME_EXCEEDED_MESSAGE });
-    }
-
-    // Check discrepancy
-    if (gatePass.weighingRecord && gatePass.weighingRecord.status === 'DISCREPANCY_FLAGGED') {
-      await transaction.rollback();
-      return res.status(400).json({ 
-        error: 'Cannot issue gate pass: Weight discrepancy has not been approved by Admin/CEO.' 
-      });
     }
 
     if (gatePass.status === 'DISPATCHED') {
@@ -385,109 +439,7 @@ exports.issueGatePass = async (req, res) => {
 
     if (gatePass.status === 'CANCELLED') {
       await transaction.rollback();
-      return res.status(400).json({ error: 'Cannot issue a cancelled gate pass.' });
-    }
-
-    const prevStatus = gatePass.status;
-    await gatePass.update({
-      status: 'ISSUED',
-      issuedAt: new Date(),
-      issuedBy: req.user.userId
-    }, { transaction });
-
-    await GatePassAudit.create({
-      gatePassId: gatePass.id,
-      userId: req.user.userId,
-      action: 'ISSUED',
-      reason: 'Gate pass issued for vehicle dispatch & printing.',
-      previousValues: JSON.stringify({ status: prevStatus }),
-      newValues: JSON.stringify({ status: 'ISSUED', issuedAt: new Date() }),
-      ipAddress: req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '127.0.0.1'
-    }, { transaction });
-
-    await transaction.commit();
-
-    const updated = await GatePass.findByPk(id, {
-      include: [
-        { model: User, as: 'issuer', attributes: ['id', 'username'] },
-        { model: WeighingRecord, as: 'weighingRecord' }
-      ]
-    });
-
-    res.status(200).json({
-      message: 'Gate pass issued successfully. Ready for printing.',
-      gatePass: updated
-    });
-  } catch (error) {
-    await transaction.rollback();
-    console.error('Error issuing gate pass:', error);
-    res.status(500).json({ error: 'Internal server error while issuing gate pass.' });
-  }
-};
-
-/**
- * POST /api/gate-passes/:id/confirm-dispatch
- * Gate Operator action: Confirm that vehicle physically crossed the gate.
- * Validates 10-minute validity and discrepancy approvals.
- */
-exports.confirmDispatch = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const { id } = req.params;
-
-    const gatePass = await GatePass.findByPk(id, {
-      include: [{ model: WeighingRecord, as: 'weighingRecord' }],
-      transaction
-    });
-
-    if (!gatePass) {
-      await transaction.rollback();
-      return res.status(404).json({ error: 'Gate pass not found.' });
-    }
-
-    try {
-      await verifyRecordOwnership(gatePass, req.user);
-    } catch (authErr) {
-      await transaction.rollback();
-      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
-    }
-
-    if (gatePass.status === 'DISPATCHED') {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'Duplicate dispatch prevented: Vehicle has already been dispatched.' });
-    }
-
-    if (gatePass.status === 'CANCELLED') {
-      await transaction.rollback();
       return res.status(400).json({ error: 'Cannot dispatch a cancelled gate pass.' });
-    }
-
-    // Ten-Minute Validity Check (Backend Authoritative Enforcement)
-    const validity = checkValidityPeriod(gatePass.validityExpiry);
-    if (validity.isExpired) {
-      // Mark workflow as requiring reweighing
-      await gatePass.update({ status: 'REWEIGHING_REQUIRED' }, { transaction });
-
-      await GatePassAudit.create({
-        gatePassId: gatePass.id,
-        userId: req.user.userId,
-        action: 'DISPATCH_BLOCKED_EXPIRY',
-        reason: TIME_EXCEEDED_MESSAGE,
-        previousValues: JSON.stringify({ status: gatePass.status }),
-        newValues: JSON.stringify({ status: 'REWEIGHING_REQUIRED' }),
-        ipAddress: req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '127.0.0.1'
-      }, { transaction });
-
-      await transaction.commit();
-      return res.status(400).json({ error: TIME_EXCEEDED_MESSAGE });
-    }
-
-    // Weight discrepancy check
-    if (gatePass.weighingRecord && gatePass.weighingRecord.status === 'DISCREPANCY_FLAGGED') {
-      await transaction.rollback();
-      return res.status(400).json({ 
-        error: 'Cannot confirm dispatch: An unresolved weight discrepancy exists. Admin/CEO approval is required.' 
-      });
     }
 
     const prevStatus = gatePass.status;
@@ -496,31 +448,24 @@ exports.confirmDispatch = async (req, res) => {
     await gatePass.update({
       status: 'DISPATCHED',
       dispatchedAt: dispatchTime,
-      dispatchedBy: req.user.userId
+      dispatchedBy: req.user.id
     }, { transaction });
 
     await GatePassAudit.create({
       gatePassId: gatePass.id,
-      userId: req.user.userId,
+      userId: req.user.id,
       action: 'DISPATCH_CONFIRMED',
-      reason: 'Physical gate crossing confirmed by gate operator.',
+      reason: 'Physical gate crossing confirmed.',
       previousValues: JSON.stringify({ status: prevStatus }),
       newValues: JSON.stringify({ status: 'DISPATCHED', dispatchedAt: dispatchTime }),
-      ipAddress: req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '127.0.0.1'
+      ipAddress: req.ip || '127.0.0.1'
     }, { transaction });
 
     await transaction.commit();
 
-    const updated = await GatePass.findByPk(id, {
-      include: [
-        { model: User, as: 'dispatcher', attributes: ['id', 'username'] },
-        { model: WeighingRecord, as: 'weighingRecord' }
-      ]
-    });
-
     res.status(200).json({
       message: 'Dispatch confirmed successfully. Vehicle has crossed the gate.',
-      gatePass: updated
+      gatePass
     });
   } catch (error) {
     await transaction.rollback();
@@ -566,29 +511,25 @@ exports.cancelGatePass = async (req, res) => {
     await gatePass.update({
       status: 'CANCELLED',
       cancelledAt: new Date(),
-      cancelledBy: req.user.userId,
+      cancelledBy: req.user.id,
       cancellationReason: reason.trim()
     }, { transaction });
 
     await GatePassAudit.create({
       gatePassId: gatePass.id,
-      userId: req.user.userId,
+      userId: req.user.id,
       action: 'CANCELLED',
       reason: reason.trim(),
       previousValues: JSON.stringify({ status: prevStatus }),
       newValues: JSON.stringify({ status: 'CANCELLED', cancellationReason: reason.trim() }),
-      ipAddress: req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '127.0.0.1'
+      ipAddress: req.ip || '127.0.0.1'
     }, { transaction });
 
     await transaction.commit();
 
-    const updated = await GatePass.findByPk(id, {
-      include: [{ model: User, as: 'canceller', attributes: ['id', 'username'] }]
-    });
-
     res.status(200).json({
       message: 'Gate pass cancelled successfully.',
-      gatePass: updated
+      gatePass
     });
   } catch (error) {
     await transaction.rollback();
@@ -598,55 +539,12 @@ exports.cancelGatePass = async (req, res) => {
 };
 
 /**
- * POST /api/gate-passes/:id/request-reweigh
- * Explicit action by authorized user to mark gate pass as requiring reweighing.
+ * Compatibility stubs
  */
+exports.issueGatePass = async (req, res) => {
+  res.status(200).json({ message: 'Gate pass is ready for printing.' });
+};
+
 exports.requestReweigh = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    const gatePass = await GatePass.findByPk(id, { transaction });
-    if (!gatePass) {
-      await transaction.rollback();
-      return res.status(404).json({ error: 'Gate pass not found.' });
-    }
-
-    try {
-      await verifyRecordOwnership(gatePass, req.user);
-    } catch (authErr) {
-      await transaction.rollback();
-      return res.status(authErr.statusCode || 403).json({ error: authErr.message });
-    }
-
-    if (gatePass.status === 'DISPATCHED') {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'Cannot request reweighing: Vehicle has already been dispatched.' });
-    }
-
-    const prevStatus = gatePass.status;
-    await gatePass.update({ status: 'REWEIGHING_REQUIRED' }, { transaction });
-
-    await GatePassAudit.create({
-      gatePassId: gatePass.id,
-      userId: req.user.userId,
-      action: 'REWEIGH_REQUESTED',
-      reason: reason ? reason.trim() : 'Manual reweigh requested by operator/admin.',
-      previousValues: JSON.stringify({ status: prevStatus }),
-      newValues: JSON.stringify({ status: 'REWEIGHING_REQUIRED' }),
-      ipAddress: req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '127.0.0.1'
-    }, { transaction });
-
-    await transaction.commit();
-
-    res.status(200).json({
-      message: 'Gate pass marked for reweighing. Vehicle must be reweighed.',
-      gatePass
-    });
-  } catch (error) {
-    await transaction.rollback();
-    console.error('Error requesting reweigh:', error);
-    res.status(500).json({ error: 'Internal server error while requesting reweigh.' });
-  }
+  res.status(400).json({ error: 'Reweigh is handled in the Weighbridge module.' });
 };

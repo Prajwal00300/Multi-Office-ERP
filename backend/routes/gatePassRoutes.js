@@ -7,7 +7,7 @@ const checkModulePermission = require('../middleware/checkModulePermission');
 
 // Role-based authorization middleware for Gate Pass module
 const authorizeGatePassAccess = (req, res, next) => {
-  const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'];
+  const allowedRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'];
 
   if (!allowedRoles.includes(req.user.role)) {
     return res.status(403).json({
@@ -21,6 +21,9 @@ const authorizeGatePassAccess = (req, res, next) => {
 router.use(authMiddleware);
 router.use(authorizeGatePassAccess);
 router.use(checkModulePermission('GATE_PASS'));
+
+// Check 10-minute eligibility for customer & vehicle or weighing record
+router.get('/check-eligibility', gatePassController.checkEligibility);
 
 // List gate passes with search and filters
 router.get('/', gatePassController.getGatePasses);

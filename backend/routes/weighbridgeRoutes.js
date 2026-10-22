@@ -7,7 +7,7 @@ const checkModulePermission = require('../middleware/checkModulePermission');
 
 // Role-based authorization middleware for Weighbridge module
 const authorizeWeighbridgeAccess = (req, res, next) => {
-  const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'];
+  const allowedRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'];
 
   if (!allowedRoles.includes(req.user.role)) {
     return res.status(403).json({

@@ -495,7 +495,10 @@ exports.getCeoModuleData = async (req, res) => {
       case 'WEIGHBRIDGE':
         records = await WeighingRecord.findAll({
           where: orgFilter,
-          include: [{ model: Organization, attributes: ['id', 'name'] }],
+          include: [
+            { model: Organization, attributes: ['id', 'name'] },
+            { model: Customer, attributes: ['id', 'name'] }
+          ],
           order: [['createdAt', 'DESC']],
           limit: 100
         });
