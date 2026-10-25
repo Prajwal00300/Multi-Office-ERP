@@ -51,14 +51,6 @@ const CeoOffices = () => {
     fetchOffices();
   }, []);
 
-  const handleOpenAddModal = () => {
-    setIsEditing(false);
-    setCurrentOfficeId(null);
-    setModalData({ name: '', address: '', phone: '', status: 'ACTIVE' });
-    setModalError('');
-    setShowModal(true);
-  };
-
   const handleOpenEditModal = (office) => {
     setIsEditing(true);
     setCurrentOfficeId(office.id);
@@ -82,16 +74,12 @@ const CeoOffices = () => {
 
     try {
       setSubmitting(true);
-      if (isEditing) {
-        await ceoService.updateOffice(currentOfficeId, modalData);
-      } else {
-        await ceoService.createOffice(modalData);
-      }
+      await ceoService.updateOffice(currentOfficeId, modalData);
       setShowModal(false);
       await fetchOffices();
     } catch (err) {
       console.error(err);
-      setModalError(err.response?.data?.error || 'Failed to save office.');
+      setModalError(err.response?.data?.error || 'Failed to update office.');
     } finally {
       setSubmitting(false);
     }
@@ -121,18 +109,11 @@ const CeoOffices = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Branch Offices</h2>
+          <h2 className="text-2xl font-bold text-gray-800">My Assigned Office</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Create and oversee branch offices owned by your CEO executive account.
+            Overview and manage the branch office assigned to your CEO executive account.
           </p>
         </div>
-        <button
-          onClick={handleOpenAddModal}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center shadow-sm transition-colors"
-        >
-          <Plus size={16} className="mr-1.5" />
-          Add New Branch Office
-        </button>
       </div>
 
       {error && (
@@ -198,7 +179,7 @@ const CeoOffices = () => {
               ) : filteredOffices.length === 0 ? (
                 <tr>
                   <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
-                    No offices found. Click "Add New Branch Office" to establish an office.
+                    No assigned office found. Offices and CEO assignments are managed exclusively by the Super Admin.
                   </td>
                 </tr>
               ) : (

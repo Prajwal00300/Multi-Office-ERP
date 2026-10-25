@@ -253,7 +253,27 @@ async function runSafeHierarchyMigration() {
         INDEX idx_inv_ref (referenceType, referenceId)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
-    console.log("   ✅ inventory_movements table verified/created.");
+    // 10. Non-destructive CEO-to-Office 1:1 assignment inspection
+    try {
+      const [conflicts] = await sequelize.query(`
+        SELECT ceoId, COUNT(*) as officeCount, GROUP_CONCAT(id SEPARATOR ', ') as officeIds, GROUP_CONCAT(name SEPARATOR ', ') as officeNames
+        FROM organizations
+        WHERE ceoId IS NOT NULL
+        GROUP BY ceoId
+        HAVING COUNT(*) > 1
+      `);
+      if (conflicts && conflicts.length > 0) {
+        console.warn('   ⚠️ [DATA INSPECTION REPORT] Existing multi-office CEO assignments identified:');
+        conflicts.forEach(c => {
+          console.warn(`      - CEO ID #${c.ceoId} is currently assigned to ${c.officeCount} offices (IDs: [${c.officeIds}], Names: [${c.officeNames}]).`);
+        });
+        console.warn('      Preserving existing records without modification as instructed. Enforcing strict 1:1 for all future operations.');
+      } else {
+        console.log('   ✅ CEO-to-office 1:1 assignment inspection passed.');
+      }
+    } catch (confErr) {
+      console.warn('   ⚠️ Note checking CEO conflicts:', confErr.message);
+    }
 
     console.log('✅ Safe hierarchy migration completed successfully.');
   } catch (error) {

@@ -120,9 +120,16 @@ const SuperAdminDashboard = () => {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link
+            to="/super-admin/organizations/new"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center shadow-sm transition-colors text-sm"
+          >
+            <Building2 size={18} className="mr-1.5" />
+            Create Office
+          </Link>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center shadow-sm transition-colors text-sm"
+            className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-4 py-2 rounded-lg font-medium flex items-center shadow-sm transition-colors text-sm"
           >
             <Plus size={18} className="mr-1.5" />
             Add New CEO
@@ -149,16 +156,21 @@ const SuperAdminDashboard = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center">
-          <div className="h-12 w-12 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mr-4">
+        <Link 
+          to="/super-admin/organizations" 
+          className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center hover:border-blue-300 transition-colors cursor-pointer group"
+        >
+          <div className="h-12 w-12 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mr-4 group-hover:bg-blue-600 group-hover:text-white transition-colors">
             <Building2 size={24} />
           </div>
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Managed Offices</p>
             <h3 className="text-2xl font-bold text-gray-800">{totalOffices}</h3>
-            <span className="text-xs text-gray-500">Across all CEOs</span>
+            <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+              View All Offices &rarr;
+            </span>
           </div>
-        </div>
+        </Link>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center">
           <div className="h-12 w-12 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center mr-4">

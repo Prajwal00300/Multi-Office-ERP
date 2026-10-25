@@ -51,7 +51,7 @@ exports.getCeos = async (req, res) => {
     });
 
     // Compute office count and total employee count for each CEO
-    const ceoList = await Promise.all(ceos.map(async (ceo) => {
+    let ceoList = await Promise.all(ceos.map(async (ceo) => {
       const ceoObj = ceo.toJSON();
       const officeIds = (ceoObj.offices || []).map(o => o.id);
 
@@ -68,6 +68,10 @@ exports.getCeos = async (req, res) => {
       ceoObj.employeeCount = employeeCount;
       return ceoObj;
     }));
+
+    if (req.query.unassigned === 'true') {
+      ceoList = ceoList.filter(c => c.officeCount === 0);
+    }
 
     res.status(200).json(ceoList);
   } catch (error) {
@@ -357,8 +361,51 @@ exports.updateCeo = async (req, res) => {
 };
 
 /**
+ * GET /api/super-admin/eligible-ceos
+ * Retrieve active CEOs not currently assigned to any office
+ */
+exports.getEligibleCeos = async (req, res) => {
+  try {
+    const { currentOfficeId } = req.query;
+
+    const whereOrg = { ceoId: { [Op.ne]: null } };
+    if (currentOfficeId) {
+      whereOrg.id = { [Op.ne]: parseInt(currentOfficeId, 10) };
+    }
+
+    const assignedOrgs = await Organization.findAll({
+      where: whereOrg,
+      attributes: ['ceoId']
+    });
+
+    const assignedCeoIds = assignedOrgs.map(o => o.ceoId).filter(Boolean);
+
+    const whereCeo = {
+      role: 'CEO',
+      status: 'ACTIVE'
+    };
+
+    if (assignedCeoIds.length > 0) {
+      whereCeo.id = { [Op.notIn]: assignedCeoIds };
+    }
+
+    const eligibleCeos = await User.findAll({
+      where: whereCeo,
+      attributes: ['id', 'username', 'fullName', 'email', 'phone', 'status', 'createdAt'],
+      order: [['fullName', 'ASC'], ['username', 'ASC']]
+    });
+
+    res.status(200).json(eligibleCeos);
+  } catch (error) {
+    console.error('Error fetching eligible CEOs:', error);
+    res.status(500).json({ error: 'Internal server error while fetching eligible CEOs' });
+  }
+};
+
+/**
  * PATCH /api/super-admin/offices/:id/assign-ceo
- * Assign an office to a CEO or transfer office ownership
+ * Assign an office to a CEO or transfer office ownership.
+ * Enforces 1:1 relationship between CEO and Office.
  */
 exports.assignOfficeToCeo = async (req, res) => {
   try {
@@ -374,17 +421,51 @@ exports.assignOfficeToCeo = async (req, res) => {
       return res.status(404).json({ error: 'Office not found.' });
     }
 
-    if (targetCeoId) {
-      const ceo = await User.findOne({ where: { id: targetCeoId, role: 'CEO' } });
-      if (!ceo) {
-        return res.status(404).json({ error: 'Selected CEO does not exist.' });
-      }
-      office.ceoId = ceo.id;
-    } else {
-      office.ceoId = null;
+    if (!targetCeoId) {
+      return res.status(400).json({ 
+        error: 'An assigned CEO is mandatory. An office cannot be left without an assigned CEO.' 
+      });
     }
 
-    await office.save();
+    const ceo = await User.findOne({ where: { id: targetCeoId, role: 'CEO' } });
+    if (!ceo) {
+      return res.status(404).json({ error: 'Selected CEO does not exist.' });
+    }
+    if (ceo.status === 'INACTIVE') {
+      return res.status(400).json({ error: 'Selected CEO account is inactive.' });
+    }
+
+    // Verify target CEO is not already assigned to another office (1:1 rule)
+    const existingOfficeForCeo = await Organization.findOne({
+      where: {
+        ceoId: ceo.id,
+        id: { [Op.ne]: office.id }
+      }
+    });
+
+    if (existingOfficeForCeo) {
+      return res.status(400).json({
+        error: `This CEO (${ceo.fullName || ceo.username}) is already assigned to office "${existingOfficeForCeo.name}". Each CEO can only manage one office.`
+      });
+    }
+
+    await sequelize.transaction(async (t) => {
+      const previousCeoId = office.ceoId;
+
+      // Disassociate previous CEO user
+      if (previousCeoId && previousCeoId !== ceo.id) {
+        await User.update(
+          { organizationId: null },
+          { where: { id: previousCeoId, organizationId: office.id }, transaction: t }
+        );
+      }
+
+      office.ceoId = ceo.id;
+      await office.save({ transaction: t });
+
+      ceo.organizationId = office.id;
+      await ceo.save({ transaction: t });
+    });
 
     res.status(200).json({
       message: 'Office assigned to CEO successfully.',

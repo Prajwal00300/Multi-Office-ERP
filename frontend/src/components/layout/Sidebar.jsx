@@ -34,12 +34,10 @@ const Sidebar = ({ isOpen, onClose }) => {
       roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING', 'PAYMENT_COLLECTOR'] 
     },
     { 
-      name: 'Organizations', 
+      name: 'Offices', 
       icon: Building2, 
-      path: '#', 
-      roles: ['SUPER_ADMIN'], 
-      disabled: true,
-      badge: 'Disabled'
+      path: '/super-admin/organizations', 
+      roles: ['SUPER_ADMIN'] 
     },
     { name: 'My Offices', icon: Building2, path: '/ceo/offices', roles: ['CEO'] },
     { name: 'My Employees', icon: Users, path: '/ceo/employees', roles: ['CEO'] },

@@ -173,32 +173,12 @@ exports.getOffices = async (req, res) => {
 
 /**
  * POST /api/ceo/offices
- * Create a new office owned by the authenticated CEO
+ * Disabled for CEO role. Offices are created and assigned exclusively by SUPER_ADMIN.
  */
 exports.createOffice = async (req, res) => {
-  try {
-    const { name, address, phone, status } = req.body;
-
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Office name is required.' });
-    if (!address || !address.trim()) return res.status(400).json({ error: 'Office address is required.' });
-    if (!phone || !phone.trim()) return res.status(400).json({ error: 'Office phone is required.' });
-
-    const office = await Organization.create({
-      name: name.trim(),
-      address: address.trim(),
-      phone: phone.trim(),
-      status: status && ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE',
-      ceoId: req.user.userId
-    });
-
-    res.status(201).json({
-      message: 'Office created successfully.',
-      office
-    });
-  } catch (error) {
-    console.error('Error creating office:', error);
-    res.status(500).json({ error: 'Internal server error while creating office.' });
-  }
+  return res.status(403).json({
+    error: 'Access denied: CEOs cannot create offices. Offices and CEO assignments are managed exclusively by Super Admin.'
+  });
 };
 
 /**

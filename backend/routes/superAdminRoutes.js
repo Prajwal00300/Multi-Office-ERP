@@ -14,6 +14,7 @@ const requireSuperAdmin = (req, res, next) => {
 router.use(authMiddleware, requireSuperAdmin);
 
 // CEO Management endpoints
+router.get('/eligible-ceos', superAdminController.getEligibleCeos);
 router.get('/ceos', superAdminController.getCeos);
 router.post('/ceos', superAdminController.createCeo);
 router.get('/ceos/:id', superAdminController.getCeoDetails);

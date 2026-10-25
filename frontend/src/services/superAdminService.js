@@ -7,6 +7,12 @@ export const superAdminService = {
     return res.data;
   },
 
+  getEligibleCeos: async (currentOfficeId = null) => {
+    const params = currentOfficeId ? { currentOfficeId } : {};
+    const res = await api.get('/super-admin/eligible-ceos', { params });
+    return res.data;
+  },
+
   createCeo: async (ceoData) => {
     const res = await api.post('/super-admin/ceos', ceoData);
     return res.data;
@@ -37,6 +43,32 @@ export const superAdminService = {
     const res = await api.get(`/super-admin/ceos/${id}/modules/${moduleName}`, { params });
     // Normalize to always return the records array
     return res.data?.records !== undefined ? res.data.records : res.data;
+  },
+
+  // Offices / Organizations
+  getOrganizations: async () => {
+    const res = await api.get('/organizations');
+    return res.data;
+  },
+
+  getOrganizationById: async (id) => {
+    const res = await api.get(`/organizations/${id}`);
+    return res.data;
+  },
+
+  createOffice: async (officeData) => {
+    const res = await api.post('/organizations', officeData);
+    return res.data;
+  },
+
+  updateOffice: async (id, officeData) => {
+    const res = await api.put(`/organizations/${id}`, officeData);
+    return res.data;
+  },
+
+  deleteOrganization: async (id) => {
+    const res = await api.delete(`/organizations/${id}`);
+    return res.data;
   }
 };
 
