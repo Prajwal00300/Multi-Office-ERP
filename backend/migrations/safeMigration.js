@@ -146,6 +146,23 @@ async function runSafeHierarchyMigration() {
       console.log("   ✅ products.currentStock added.");
     }
 
+    // 3c. Ensure products.difference exists
+    if (!productColumnNames.includes('difference')) {
+      console.log("   -> Adding 'difference' column to products...");
+      await sequelize.query(`
+        ALTER TABLE products 
+        ADD COLUMN difference DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+      `);
+      try {
+        await sequelize.query(`
+          UPDATE products SET difference = price WHERE difference = 0.00 AND price != 0.00
+        `);
+      } catch (syncErr) {
+        // Ignore if no records
+      }
+      console.log("   ✅ products.difference added and synced.");
+    }
+
     // 4. Remove bill_audits and estimate_audits tables as requested
     try {
       await sequelize.query('DROP TABLE IF EXISTS bill_audits');

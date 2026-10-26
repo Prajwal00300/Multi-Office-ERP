@@ -49,8 +49,9 @@ const ProductsList = () => {
   // Form Fields
   const [formData, setFormData] = useState({
     name: '',
-    unit: 'Ton', // By default in tons
-    price: '',
+    unit: 'Ton', // Standard Ton in background
+    difference: '',
+    quantity: '',
     description: '',
     specifications: '',
     status: 'ACTIVE',
@@ -116,8 +117,9 @@ const ProductsList = () => {
     setEditingProduct(null);
     setFormData({
       name: '',
-      unit: 'Ton', // By default in tons
-      price: '',
+      unit: 'Ton',
+      difference: '',
+      quantity: '',
       description: '',
       specifications: '',
       status: 'ACTIVE',
@@ -147,10 +149,18 @@ const ProductsList = () => {
       }
     }
 
+    const diffVal = product.difference !== undefined && product.difference !== null 
+      ? String(product.difference) 
+      : (product.price !== undefined && product.price !== null ? String(product.price) : '');
+    const stockVal = product.currentStock !== undefined && product.currentStock !== null 
+      ? String(product.currentStock) 
+      : '';
+
     setFormData({
       name: product.name || '',
       unit: product.unit || 'Ton',
-      price: product.price !== undefined && product.price !== null ? String(product.price) : '',
+      difference: diffVal,
+      quantity: stockVal,
       description: product.description || '',
       specifications: parsedSpecs,
       status: product.status || 'ACTIVE',
@@ -227,12 +237,12 @@ const ProductsList = () => {
       return setModalError('Product name is required.');
     }
 
-    if (!formData.unit || !formData.unit.trim()) {
-      return setModalError('Unit of measurement is required.');
+    if (formData.difference === '' || formData.difference === null || isNaN(parseFloat(formData.difference))) {
+      return setModalError('Product difference is required and must be a valid number (e.g. 0, 500, -200).');
     }
 
-    if (formData.price === '' || formData.price === null || isNaN(parseFloat(formData.price)) || parseFloat(formData.price) < 0) {
-      return setModalError('Product price is required and must be a valid non-negative number.');
+    if (formData.quantity !== '' && formData.quantity !== null && (isNaN(parseFloat(formData.quantity)) || parseFloat(formData.quantity) < 0)) {
+      return setModalError('Inventory quantity must be a valid non-negative number.');
     }
 
     if (user?.role === 'SUPER_ADMIN' && !formData.organizationId) {
@@ -243,11 +253,19 @@ const ProductsList = () => {
       setModalLoading(true);
       setModalError('');
 
-      // Payload with price and unit in tons (category & size handled with safe defaults by backend)
+      const parsedDiff = parseFloat(formData.difference) || 0;
+      const parsedQty = formData.quantity !== '' && formData.quantity !== null 
+        ? parseFloat(formData.quantity) 
+        : 0;
+
+      // Payload with difference, quantity, and unit in tons
       const payload = {
         name: formData.name.trim(),
         unit: 'Ton',
-        price: parseFloat(formData.price) || 0,
+        difference: parsedDiff,
+        price: parsedDiff, // Synchronized for backward compatibility
+        quantity: parsedQty,
+        currentStock: parsedQty,
         description: formData.description?.trim() || null,
         specifications: formData.specifications?.trim() || null,
         status: formData.status,
@@ -485,7 +503,7 @@ const ProductsList = () => {
                 <th className="px-6 py-4">Size / Diameter</th>
                 <th className="px-6 py-4">Unit</th>
                 <th className="px-6 py-4 text-right">Stock Left</th>
-                <th className="px-6 py-4">Price / Rate</th>
+                <th className="px-6 py-4">Difference (₹)</th>
                 <th className="px-6 py-4">Specifications & Details</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
@@ -600,10 +618,16 @@ const ProductsList = () => {
                       </div>
                     </td>
 
-                    {/* Price */}
+                    {/* Difference */}
                     <td className="px-6 py-4 text-sm font-semibold font-mono text-slate-900 whitespace-nowrap">
-                      ₹{parseFloat(product.price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      <span className="text-[11px] text-gray-500 font-sans ml-1 font-normal">/ {product.unit || 'Ton'}</span>
+                      {(() => {
+                        const val = product.difference !== undefined && product.difference !== null
+                          ? parseFloat(product.difference)
+                          : parseFloat(product.price || 0);
+                        const sign = val > 0 ? '+' : '';
+                        return `${sign}₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                      })()}
+                      <span className="text-[11px] text-gray-500 font-sans ml-1 font-normal">/ Ton</span>
                     </td>
 
                     {/* Specifications & Details */}
@@ -679,7 +703,7 @@ const ProductsList = () => {
                     {editingProduct ? 'Edit Product' : 'Add New Product'}
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Default weight unit is Ton. Specify price per unit.
+                    Enter product rate difference and current inventory quantity.
                   </p>
                 </div>
               </div>
@@ -739,11 +763,11 @@ const ProductsList = () => {
                 />
               </div>
 
-              {/* Price, Unit (Default: Ton), and Status */}
+              {/* Difference, Quantity, and Status (Units removed from popup) */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                    Price / Rate (₹) <span className="text-red-500">*</span>
+                    Difference (₹) <span className="text-red-500">*</span>
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 font-bold text-xs pointer-events-none">
@@ -752,25 +776,30 @@ const ProductsList = () => {
                     <input
                       type="number"
                       step="0.01"
-                      min="0"
-                      value={formData.price}
-                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                      placeholder="0.00"
+                      value={formData.difference}
+                      onChange={(e) => setFormData({ ...formData, difference: e.target.value })}
+                      placeholder="0.00 (e.g. +500, -200)"
                       className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm font-mono font-bold focus:ring-2 focus:ring-blue-500"
                       required
                     />
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Per Ton</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Rate diff per Ton</p>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
-                    Unit of Measurement
+                    Quantity (Tons)
                   </label>
-                  <div className="flex items-center px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-sm font-semibold text-gray-800">
-                    <span>Ton</span>
-                  </div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Quantity is standard in Tons</p>
+                  <input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                    placeholder="0.000"
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-0.5">Current inventory quantity</p>
                 </div>
 
                 <div>
@@ -785,6 +814,7 @@ const ProductsList = () => {
                     <option value="ACTIVE">ACTIVE</option>
                     <option value="INACTIVE">INACTIVE</option>
                   </select>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Operational state</p>
                 </div>
               </div>
 

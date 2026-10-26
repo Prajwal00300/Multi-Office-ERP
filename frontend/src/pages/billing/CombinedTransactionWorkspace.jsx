@@ -403,21 +403,25 @@ export default function CombinedTransactionWorkspace() {
       const match = products.find(p => p.name.toLowerCase() === text.trim().toLowerCase());
 
       let bRate = parseFloat(updated[index].basicRate) || 0;
+      let diff = parseFloat(updated[index].difference) || 0;
       let prodId = updated[index].productId;
       let desc = updated[index].description;
 
       if (match) {
         prodId = String(match.id);
-        bRate = parseFloat(match.price) || bRate;
         desc = match.specifications || match.description || desc;
+        const matchDiff = match.difference !== undefined && match.difference !== null
+          ? parseFloat(match.difference)
+          : (parseFloat(match.price) || 0);
+        if (!updated[index].difference || updated[index].difference === '0') {
+          diff = matchDiff;
+        }
       } else if (!text.trim()) {
         prodId = '';
-        bRate = 0;
       } else {
         prodId = '';
       }
 
-      const diff = parseFloat(updated[index].difference) || 0;
       const fRate = bRate + diff;
       const q = parseFloat(updated[index].quantity) || 0;
 
@@ -426,7 +430,8 @@ export default function CombinedTransactionWorkspace() {
         productId: prodId,
         productName: text,
         description: desc,
-        basicRate: String(bRate),
+        basicRate: updated[index].basicRate || '',
+        difference: String(diff),
         finalRate: fRate.toFixed(2),
         amount: (fRate * q).toFixed(2)
       };
@@ -439,8 +444,11 @@ export default function CombinedTransactionWorkspace() {
     setIsDirty(true);
     setTransactionItems(prev => {
       const updated = [...prev];
-      const bRate = parseFloat(prod.price) || 0;
-      const diff = parseFloat(updated[index].difference) || 0;
+      const bRate = parseFloat(updated[index].basicRate) || 0;
+      const prodDiff = prod.difference !== undefined && prod.difference !== null
+        ? parseFloat(prod.difference)
+        : (parseFloat(prod.price) || 0);
+      const diff = prodDiff;
       const fRate = bRate + diff;
       const currentQty = updated[index].quantity;
       const q = currentQty && parseFloat(currentQty) > 0 ? parseFloat(currentQty) : 1;
@@ -450,7 +458,8 @@ export default function CombinedTransactionWorkspace() {
         productId: String(prod.id),
         productName: prod.name,
         description: prod.specifications || prod.description || updated[index].description || '',
-        basicRate: String(bRate),
+        basicRate: updated[index].basicRate || '',
+        difference: String(diff),
         quantity: currentQty && parseFloat(currentQty) > 0 ? currentQty : '1',
         finalRate: fRate.toFixed(2),
         amount: (fRate * q).toFixed(2)
@@ -1160,7 +1169,10 @@ export default function CombinedTransactionWorkspace() {
                                     </div>
                                     <div className="text-right pl-3 shrink-0">
                                       <div className="font-mono font-bold text-emerald-800 text-[11px]">
-                                        ₹{p.price ? parseFloat(p.price).toFixed(2) : '0.00'}
+                                        {(() => {
+                                          const diffVal = parseFloat(p.difference !== undefined && p.difference !== null ? p.difference : (p.price || 0));
+                                          return `Diff: ${diffVal >= 0 ? '+' : ''}₹${diffVal.toFixed(2)}`;
+                                        })()}
                                       </div>
                                       <div className="text-[9px] text-slate-400">/{p.unit || 'Ton'}</div>
                                     </div>

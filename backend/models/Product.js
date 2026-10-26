@@ -41,14 +41,17 @@ const Product = sequelize.define('Product', {
       notEmpty: true,
     }
   },
+  difference: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0.00,
+    comment: 'Product rate difference per Ton (can be positive, zero, or negative)'
+  },
   price: {
     type: DataTypes.DECIMAL(15, 2),
     allowNull: false,
-    defaultValue: 0,
-    validate: {
-      min: 0,
-    },
-    comment: 'Product price / rate (default per Ton)'
+    defaultValue: 0.00,
+    comment: 'Product price / rate difference (default per Ton)'
   },
   description: {
     type: DataTypes.TEXT,

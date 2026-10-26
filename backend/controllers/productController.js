@@ -110,6 +110,9 @@ exports.createProduct = async (req, res) => {
       size,
       unit,
       price,
+      difference,
+      quantity,
+      currentStock,
       description,
       specifications,
       status,
@@ -126,12 +129,29 @@ exports.createProduct = async (req, res) => {
     const productSize = (size && size.trim()) ? size.trim() : '-';
     const productUnit = (unit && unit.trim()) ? unit.trim() : 'Ton';
 
-    if (price === undefined || price === null || price === '') {
-      return res.status(400).json({ error: 'Product price is required' });
+    // Difference / Price: accept either difference or price, support positive, zero, and negative values
+    const rawDiff = (difference !== undefined && difference !== null && difference !== '')
+      ? difference
+      : price;
+
+    if (rawDiff === undefined || rawDiff === null || rawDiff === '') {
+      return res.status(400).json({ error: 'Product difference is required' });
     }
-    const parsedPrice = parseFloat(price);
-    if (isNaN(parsedPrice) || parsedPrice < 0) {
-      return res.status(400).json({ error: 'Product price must be a valid non-negative number' });
+    const parsedDiff = parseFloat(rawDiff);
+    if (isNaN(parsedDiff)) {
+      return res.status(400).json({ error: 'Product difference must be a valid number' });
+    }
+
+    // Quantity / Current Stock: how much quantity is in the inventory
+    const rawQty = (quantity !== undefined && quantity !== null && quantity !== '')
+      ? quantity
+      : currentStock;
+    const parsedStock = (rawQty !== undefined && rawQty !== null && rawQty !== '')
+      ? parseFloat(rawQty)
+      : 0;
+
+    if (isNaN(parsedStock) || parsedStock < 0) {
+      return res.status(400).json({ error: 'Quantity must be a valid non-negative number' });
     }
 
     if (status && !['ACTIVE', 'INACTIVE'].includes(status.toUpperCase())) {
@@ -166,11 +186,31 @@ exports.createProduct = async (req, res) => {
       category: productCategory,
       size: productSize,
       unit: productUnit,
-      price: parsedPrice,
+      price: parsedDiff,
+      difference: parsedDiff,
+      currentStock: parsedStock,
       description: description ? description.trim() : null,
       specifications: formattedSpecs,
       status: status ? status.toUpperCase() : 'ACTIVE'
     });
+
+    // If initial inventory quantity was entered, record initial inventory movement
+    if (parsedStock > 0) {
+      try {
+        await InventoryMovement.create({
+          organizationId: targetOrgId,
+          productId: newProduct.id,
+          movementType: 'IN',
+          quantity: parsedStock,
+          referenceType: 'MANUAL',
+          referenceNumber: 'INITIAL_STOCK',
+          performedBy: req.user?.userId || null,
+          notes: 'Initial inventory quantity recorded during product creation'
+        });
+      } catch (invErr) {
+        console.warn('Note recording initial inventory movement:', invErr.message);
+      }
+    }
 
     const createdProductWithOrg = await Product.findByPk(newProduct.id, {
       include: [
@@ -204,6 +244,9 @@ exports.updateProduct = async (req, res) => {
       size,
       unit,
       price,
+      difference,
+      quantity,
+      currentStock,
       description,
       specifications,
       status
@@ -228,13 +271,24 @@ exports.updateProduct = async (req, res) => {
       return res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
     }
 
-    let targetPrice = product.price;
-    if (price !== undefined) {
-      const parsedPrice = parseFloat(price);
-      if (isNaN(parsedPrice) || parsedPrice < 0) {
-        return res.status(400).json({ error: 'Product price must be a valid non-negative number' });
+    let targetDiff = product.difference !== undefined ? product.difference : product.price;
+    const rawDiff = difference !== undefined ? difference : price;
+    if (rawDiff !== undefined && rawDiff !== null && rawDiff !== '') {
+      const parsedDiff = parseFloat(rawDiff);
+      if (isNaN(parsedDiff)) {
+        return res.status(400).json({ error: 'Product difference must be a valid number' });
       }
-      targetPrice = parsedPrice;
+      targetDiff = parsedDiff;
+    }
+
+    let targetStock = product.currentStock;
+    const rawQty = quantity !== undefined ? quantity : currentStock;
+    if (rawQty !== undefined && rawQty !== null && rawQty !== '') {
+      const parsedQty = parseFloat(rawQty);
+      if (isNaN(parsedQty) || parsedQty < 0) {
+        return res.status(400).json({ error: 'Quantity must be a valid non-negative number' });
+      }
+      targetStock = parsedQty;
     }
 
     const targetName = name !== undefined ? name.trim() : product.name;
@@ -274,7 +328,9 @@ exports.updateProduct = async (req, res) => {
       category: targetCategory,
       size: targetSize,
       unit: unit !== undefined ? unit.trim() : product.unit,
-      price: targetPrice,
+      difference: targetDiff,
+      price: targetDiff,
+      currentStock: targetStock,
       description: description !== undefined ? (description ? description.trim() : null) : product.description,
       specifications: formattedSpecs,
       status: status !== undefined ? status.toUpperCase() : product.status
