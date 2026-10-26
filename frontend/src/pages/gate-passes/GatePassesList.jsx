@@ -87,7 +87,7 @@ const GatePassesList = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, statusFilter, typeFilter, startDate, endDate, selectedOrgId, user]);
+  }, [searchTerm, statusFilter, startDate, endDate, selectedOrgId, user]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {

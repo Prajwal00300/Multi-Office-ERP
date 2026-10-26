@@ -220,7 +220,7 @@ const EstimatesList = () => {
                       </div>
                       <p className="text-gray-700 font-medium text-base">No estimates found.</p>
                       <p className="text-gray-400 text-sm max-w-sm">
-                        {searchTerm || statusFilter !== 'ALL' || startDate || endDate
+                        {searchTerm || startDate || endDate
                           ? 'Try adjusting your search criteria or date filter.'
                           : 'No estimates have been created for this office yet.'}
                       </p>

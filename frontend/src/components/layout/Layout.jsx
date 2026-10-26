@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 
 const Layout = () => {
+  const location = useLocation();
+  const isSaleVoucher = location.pathname.startsWith('/sale-voucher');
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('officeflow_sidebar_open');
@@ -54,7 +56,7 @@ const Layout = () => {
             toggleSidebar={handleToggleSidebar} 
           />
         </div>
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 print:p-0 print:overflow-visible">
+        <main className={`flex-1 ${isSaleVoucher ? 'p-1 overflow-hidden' : 'overflow-y-auto p-4 sm:p-6 lg:p-8'} print:p-0 print:overflow-visible`}>
           <Outlet />
         </main>
       </div>

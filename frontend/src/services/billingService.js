@@ -41,6 +41,24 @@ export const getNextBillNumber = async (organizationId) => {
   return res.data;
 };
 
+export const getFirstBill = async (organizationId) => {
+  const query = organizationId ? `?organizationId=${organizationId}` : '';
+  const res = await api.get(`/bills${query}`);
+  const bills = res.data || [];
+  if (bills.length === 0) return null;
+  const first = bills[bills.length - 1];
+  return getBillById(first.id);
+};
+
+export const getLastBill = async (organizationId) => {
+  const query = organizationId ? `?organizationId=${organizationId}` : '';
+  const res = await api.get(`/bills${query}`);
+  const bills = res.data || [];
+  if (bills.length === 0) return null;
+  const last = bills[0];
+  return getBillById(last.id);
+};
+
 
 export const createBill = async (data) => {
   const res = await api.post('/bills', data);
@@ -68,6 +86,8 @@ export default {
   getPreviousBill,
   getNextBill,
   getNextBillNumber,
+  getFirstBill,
+  getLastBill,
   createBill,
   updateBill,
   finalizeBill,

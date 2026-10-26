@@ -19,6 +19,72 @@ const {
 } = require('../utils/scopeFilter');
 
 /**
+ * Deducts stock from Product.currentStock and logs InventoryMovement OUT
+ */
+async function deductInventoryForBillItems(items, bill, userId, transaction, actionNote) {
+  if (!items || !Array.isArray(items)) return;
+  for (const item of items) {
+    if (item.productId) {
+      const product = await Product.findByPk(item.productId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      });
+      if (product && product.organizationId === bill.organizationId) {
+        const deductQty = parseFloat(item.quantity) || 0;
+        if (deductQty > 0) {
+          const currentStock = parseFloat(product.currentStock) || 0;
+          const newStock = parseFloat((currentStock - deductQty).toFixed(3));
+          await product.update({ currentStock: newStock }, { transaction });
+
+          await InventoryMovement.create({
+            organizationId: bill.organizationId,
+            productId: product.id,
+            movementType: 'OUT',
+            quantity: deductQty,
+            referenceType: 'BILL',
+            referenceId: bill.id,
+            referenceNumber: bill.billNumber,
+            notes: actionNote || `Bill finalized #${bill.billNumber}`,
+            performedBy: userId
+          }, { transaction });
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Reverts previously deducted stock from Product.currentStock and removes previous BILL InventoryMovements
+ */
+async function revertInventoryForBillItems(items, bill, transaction) {
+  if (items && Array.isArray(items)) {
+    for (const item of items) {
+      if (item.productId) {
+        const product = await Product.findByPk(item.productId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+        if (product && product.organizationId === bill.organizationId) {
+          const revertQty = parseFloat(item.quantity) || 0;
+          if (revertQty > 0) {
+            const currentStock = parseFloat(product.currentStock) || 0;
+            const newStock = parseFloat((currentStock + revertQty).toFixed(3));
+            await product.update({ currentStock: newStock }, { transaction });
+          }
+        }
+      }
+    }
+  }
+  await InventoryMovement.destroy({
+    where: {
+      referenceType: 'BILL',
+      referenceId: bill.id
+    },
+    transaction
+  });
+}
+
+/**
  * GET /api/bills - List bills with filters and org isolation
  */
 exports.getBills = async (req, res) => {
@@ -392,6 +458,7 @@ exports.createBill = async (req, res) => {
       gstPercentage,
       transportCost,
       notes,
+      status,
       organizationId: customOrgId
     } = req.body;
 
@@ -456,6 +523,19 @@ exports.createBill = async (req, res) => {
       let unit = item.unit || 'Kg';
 
       let productId = item.productId || null;
+      if (!productId && productName.trim()) {
+        const matchedProduct = await Product.findOne({
+          where: {
+            organizationId: targetOrgId,
+            name: productName.trim()
+          },
+          transaction
+        });
+        if (matchedProduct) {
+          productId = matchedProduct.id;
+        }
+      }
+
       if (productId) {
         const product = await Product.findByPk(productId, { transaction });
         if (product) {
@@ -497,6 +577,9 @@ exports.createBill = async (req, res) => {
     // Generate unique sequential bill number scoped to this office
     const billNumber = await generateUniqueBillNumber(targetOrgId, transaction);
 
+    const isFinalized = status === 'FINALIZED';
+    const billStatus = isFinalized ? 'FINALIZED' : 'DRAFT';
+
     // Create Bill
     const newBill = await Bill.create({
       billNumber,
@@ -509,8 +592,10 @@ exports.createBill = async (req, res) => {
       gstAmount: calculated.gstAmount,
       transportCost: calculated.transportCost,
       finalAmount: calculated.finalAmount,
-      status: 'DRAFT',
+      status: billStatus,
       createdBy: req.user.userId,
+      finalizedAt: isFinalized ? new Date() : null,
+      finalizedBy: isFinalized ? req.user.userId : null,
       notes: notes || null
     }, { transaction });
 
@@ -531,6 +616,11 @@ exports.createBill = async (req, res) => {
 
     await BillItem.bulkCreate(itemsToCreate, { transaction });
 
+    // Deduct stock if bill is finalized
+    if (isFinalized) {
+      await deductInventoryForBillItems(itemsToCreate, newBill, req.user.userId, transaction, `Bill created #${newBill.billNumber}`);
+    }
+
     await transaction.commit();
 
     const createdBill = await Bill.findByPk(newBill.id, {
@@ -539,6 +629,7 @@ exports.createBill = async (req, res) => {
         { model: Organization, attributes: ['id', 'name'] },
         { model: Estimate, attributes: ['id', 'estimateNumber', 'status'] },
         { model: User, as: 'creator', attributes: ['id', 'username'] },
+        { model: User, as: 'finalizer', attributes: ['id', 'username'] },
         { model: BillItem, as: 'items' }
       ]
     });
@@ -565,7 +656,8 @@ exports.updateBill = async (req, res) => {
       items,
       gstPercentage,
       transportCost,
-      notes
+      notes,
+      status
     } = req.body;
 
     const bill = await Bill.findByPk(id, {
@@ -627,6 +719,19 @@ exports.updateBill = async (req, res) => {
       let unit = item.unit || 'Kg';
 
       let productId = item.productId || null;
+      if (!productId && productName.trim()) {
+        const matchedProduct = await Product.findOne({
+          where: {
+            organizationId: bill.organizationId,
+            name: productName.trim()
+          },
+          transaction
+        });
+        if (matchedProduct) {
+          productId = matchedProduct.id;
+        }
+      }
+
       if (productId) {
         const product = await Product.findByPk(productId, { transaction });
         if (product) {
@@ -665,22 +770,14 @@ exports.updateBill = async (req, res) => {
     // Authoritative calculation
     const calculated = calculateBillTotals(enrichedItems, gstPercentage, transportCost);
 
-    // Snapshot previous values for audit
-    const previousSnapshot = {
-      customerId: bill.customerId,
-      estimateId: bill.estimateId,
-      productSubtotal: bill.productSubtotal,
-      gstPercentage: bill.gstPercentage,
-      gstAmount: bill.gstAmount,
-      transportCost: bill.transportCost,
-      finalAmount: bill.finalAmount,
-      items: bill.items.map(i => ({
-        productName: i.productNameSnapshot,
-        quantity: i.quantity,
-        rate: i.rate,
-        amount: i.amount
-      }))
-    };
+    const wasFinalized = bill.status === 'FINALIZED' || bill.status === 'OVERRIDDEN';
+    const willBeFinalized = status === 'FINALIZED' || wasFinalized;
+    const targetStatus = willBeFinalized ? (bill.status === 'OVERRIDDEN' ? 'OVERRIDDEN' : 'FINALIZED') : 'DRAFT';
+
+    // If bill was already finalized or overridden, revert its previously deducted stock first
+    if (wasFinalized) {
+      await revertInventoryForBillItems(bill.items, bill, transaction);
+    }
 
     // Update bill header
     await bill.update({
@@ -692,6 +789,9 @@ exports.updateBill = async (req, res) => {
       gstAmount: calculated.gstAmount,
       transportCost: calculated.transportCost,
       finalAmount: calculated.finalAmount,
+      status: targetStatus,
+      finalizedAt: willBeFinalized ? (bill.finalizedAt || new Date()) : bill.finalizedAt,
+      finalizedBy: willBeFinalized ? (bill.finalizedBy || req.user.userId) : bill.finalizedBy,
       notes: notes !== undefined ? notes : bill.notes
     }, { transaction });
 
@@ -714,6 +814,11 @@ exports.updateBill = async (req, res) => {
 
     await BillItem.bulkCreate(itemsToCreate, { transaction });
 
+    // If bill will be finalized/overridden, deduct the updated items' stock
+    if (willBeFinalized) {
+      await deductInventoryForBillItems(itemsToCreate, bill, req.user.userId, transaction, `Bill updated #${bill.billNumber}`);
+    }
+
     await transaction.commit();
 
     const updatedBill = await Bill.findByPk(bill.id, {
@@ -722,6 +827,8 @@ exports.updateBill = async (req, res) => {
         { model: Organization, attributes: ['id', 'name'] },
         { model: Estimate, attributes: ['id', 'estimateNumber', 'status'] },
         { model: User, as: 'creator', attributes: ['id', 'username'] },
+        { model: User, as: 'finalizer', attributes: ['id', 'username'] },
+        { model: User, as: 'overrider', attributes: ['id', 'username'] },
         { model: BillItem, as: 'items' }
       ]
     });
@@ -762,7 +869,17 @@ exports.finalizeBill = async (req, res) => {
 
     if (bill.status === 'FINALIZED') {
       await transaction.rollback();
-      return res.status(400).json({ error: 'Bill is already finalized and locked.' });
+      const existingFinalized = await Bill.findByPk(bill.id, {
+        include: [
+          { model: Customer, attributes: ['id', 'name', 'phone', 'city', 'tin'] },
+          { model: Organization, attributes: ['id', 'name'] },
+          { model: Estimate, attributes: ['id', 'estimateNumber', 'status'] },
+          { model: User, as: 'creator', attributes: ['id', 'username'] },
+          { model: User, as: 'finalizer', attributes: ['id', 'username'] },
+          { model: BillItem, as: 'items' }
+        ]
+      });
+      return res.status(200).json(existingFinalized);
     }
 
     if (!bill.items || bill.items.length === 0) {
@@ -782,33 +899,7 @@ exports.finalizeBill = async (req, res) => {
     }, { transaction });
 
     // Deduct stock for all line items that have a productId, safely within transaction
-    for (const item of bill.items) {
-      if (item.productId) {
-        const product = await Product.findByPk(item.productId, {
-          transaction,
-          lock: transaction.LOCK.UPDATE
-        });
-        if (product && product.organizationId === bill.organizationId) {
-          const deductQty = parseFloat(item.quantity) || 0;
-          if (deductQty > 0) {
-            const currentStock = parseFloat(product.currentStock) || 0;
-            const newStock = Math.max(0, currentStock - deductQty);
-            await product.update({ currentStock: newStock }, { transaction });
-
-            await InventoryMovement.create({
-              organizationId: bill.organizationId,
-              productId: product.id,
-              movementType: 'OUT',
-              quantity: deductQty,
-              referenceType: 'BILL',
-              referenceId: bill.id,
-              notes: `Bill finalized #${bill.billNumber}`,
-              performedBy: req.user.userId
-            }, { transaction });
-          }
-        }
-      }
-    }
+    await deductInventoryForBillItems(bill.items, bill, req.user.userId, transaction, `Bill finalized #${bill.billNumber}`);
 
     await transaction.commit();
 
@@ -919,6 +1010,19 @@ exports.overrideBill = async (req, res) => {
       let unit = item.unit || 'Kg';
 
       let productId = item.productId || null;
+      if (!productId && productName.trim()) {
+        const matchedProduct = await Product.findOne({
+          where: {
+            organizationId: bill.organizationId,
+            name: productName.trim()
+          },
+          transaction
+        });
+        if (matchedProduct) {
+          productId = matchedProduct.id;
+        }
+      }
+
       if (productId) {
         const product = await Product.findByPk(productId, { transaction });
         if (product) {
@@ -956,6 +1060,9 @@ exports.overrideBill = async (req, res) => {
 
     // Authoritative calculation
     const calculated = calculateBillTotals(enrichedItems, gstPercentage, transportCost);
+
+    // Revert previous stock if the bill was finalized or overridden
+    await revertInventoryForBillItems(bill.items, bill, transaction);
 
     // Capture comprehensive previous snapshot
     const previousSnapshot = {
@@ -1009,6 +1116,9 @@ exports.overrideBill = async (req, res) => {
     }));
 
     await BillItem.bulkCreate(itemsToCreate, { transaction });
+
+    // Deduct stock for new items
+    await deductInventoryForBillItems(itemsToCreate, bill, req.user.userId, transaction, `Bill overridden #${bill.billNumber}`);
 
     await transaction.commit();
 

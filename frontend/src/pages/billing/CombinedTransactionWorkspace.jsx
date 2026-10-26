@@ -1,48 +1,28 @@
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  Receipt,
-  Eye,
-  FileText,
-  Plus,
-  Trash2,
-  Save,
-  Edit3,
-  ChevronLeft,
-  ChevronRight,
-  Printer,
-  Building2,
-  Lock,
-  ShieldAlert,
-  AlertCircle,
-  CheckCircle,
-  Loader2,
-  Percent,
-  Truck,
-  Calendar,
-  MessageSquare
-} from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
 import {
   getPreviousBill,
   getNextBill,
+  getFirstBill,
+  getLastBill,
   getNextBillNumber,
   getBillById,
   createBill,
   updateBill
 } from '../../services/billingService';
 
-const DEFAULT_ROWS_COUNT = 12;
+const DEFAULT_ROWS_COUNT = 30;
 
 const BLANK_TRANSACTION_ROW = {
   productId: '',
   productName: '',
   description: '',
-  basicRate: '0.00',
   difference: '0.00',
+  pcs: '0',
   quantity: '',
-  unit: 'Ton', // Weight is by default in Tons
+  basicRate: '',
   finalRate: '0.00',
   amount: '0.00'
 };
@@ -51,13 +31,48 @@ const createBlankRows = (count = DEFAULT_ROWS_COUNT) => {
   return Array.from({ length: count }, () => ({ ...BLANK_TRANSACTION_ROW }));
 };
 
+// Date utilities
+const formatToDisplayDate = (isoStr) => {
+  if (!isoStr) return '';
+  const parts = isoStr.split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return isoStr;
+};
+
+const parseDisplayDateToIso = (dispStr) => {
+  if (!dispStr) return '';
+  const parts = dispStr.split('-');
+  if (parts.length === 3 && parts[2].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return dispStr;
+};
+
+const getDayOfWeekName = (dateStr) => {
+  if (!dateStr) return '';
+  let d;
+  if (dateStr.includes('-') && dateStr.split('-')[0].length === 4) {
+    const [y, m, day] = dateStr.split('-');
+    d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(day, 10));
+  } else if (dateStr.includes('-')) {
+    const [day, m, y] = dateStr.split('-');
+    d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(day, 10));
+  } else {
+    d = new Date(dateStr);
+  }
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { weekday: 'long' });
+};
+
 export default function CombinedTransactionWorkspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialBillId = searchParams.get('billId');
   const { user } = useContext(AuthContext);
 
-  // Finite State Machine: 'VIEW' | 'ADD' | 'EDIT' | 'SAVING'
+  // Mode: 'VIEW' | 'ADD' | 'EDIT' | 'SAVING'
   const [mode, setMode] = useState('VIEW');
   const [isDirty, setIsDirty] = useState(false);
 
@@ -80,21 +95,81 @@ export default function CombinedTransactionWorkspace() {
   const [currentBill, setCurrentBill] = useState(null);
 
   // =========================================================================
-  // 1. Header Fields (Exact required fields: Date, Bill No, Customer, City, TIN)
+  // Exact Header Fields from Client Screenshot
   // =========================================================================
   const [billDate, setBillDate] = useState(new Date().toISOString().split('T')[0]);
   const [billNumber, setBillNumber] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
 
+  // Middle Column Header Fields
+  const [headerBRate, setHeaderBRate] = useState('');
+  const [terms, setTerms] = useState('');
+  const [vehicle, setVehicle] = useState('');
+
+  // Right Column Header Fields (Fixed to Vat Sale, Bill, Trading Sale)
+  const [taxType, setTaxType] = useState('Vat Sale');
+  const [billCash, setBillCash] = useState('Bill');
+  const [mfgTrd, setMfgTrd] = useState('Trading Sale');
+
   // =========================================================================
-  // 2. Product Items Grid State
-  // (Product, Description, Basic Rate, Difference, Quantity, Final Rate, Amount)
+  // Product Items Grid State (Table)
+  // Columns: ▸ | Product Name | Description | Difference | Pcs | Quantity | B.Rate | Rate | Amount
   // =========================================================================
   const [transactionItems, setTransactionItems] = useState(createBlankRows());
+  const [activeRowIdx, setActiveRowIdx] = useState(0);
   const [activeAutocompleteIdx, setActiveAutocompleteIdx] = useState(null);
   const [highlightedSuggestionIdx, setHighlightedSuggestionIdx] = useState(0);
   const autocompleteContainerRef = useRef(null);
+
+  // =========================================================================
+  // Lower Section Fields
+  // Left: Remark (compact), Transport, Broker
+  // Center: Due Date, Total VAT (red), Shortage (qty & amt)
+  // Right: Value, Exp Before Tax, Vat/Cst, Sur @, Exp After Tax, Grand Total
+  // =========================================================================
+  const [billRemark, setBillRemark] = useState('');
+  const [transportName, setTransportName] = useState('');
+  const [brokerName, setBrokerName] = useState('');
+
+  const [billDueDate, setBillDueDate] = useState('');
+  const [shortageQty, setShortageQty] = useState('');
+  const [shortageAmt, setShortageAmt] = useState('');
+
+  const [expBeforeTax, setExpBeforeTax] = useState('');
+  const [billTaxRate, setBillTaxRate] = useState('18.00');
+  const [surchargeRate, setSurchargeRate] = useState('');
+  const [expAfterTax, setExpAfterTax] = useState('');
+
+  // Search Modal & Dialogs
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allOfficeBills, setAllOfficeBills] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  // Estimate link
+  const [estimateId, setEstimateId] = useState(null);
+
+  // UI state
+  const [actionLoading, setActionLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  const remarkTextareaRef = useRef(null);
+
+  useEffect(() => {
+    const handleKeyStatus = (e) => {
+      if (e.key === 'F7') {
+        e.preventDefault();
+        if (remarkTextareaRef.current) {
+          remarkTextareaRef.current.focus();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyStatus);
+    return () => window.removeEventListener('keydown', handleKeyStatus);
+  }, []);
 
   // Close product autocomplete suggestions on outside click
   useEffect(() => {
@@ -106,29 +181,6 @@ export default function CombinedTransactionWorkspace() {
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
-
-  // =========================================================================
-  // 3. Estimate Details State
-  // =========================================================================
-  const [estimateId, setEstimateId] = useState(null);
-  const [estimateNumber, setEstimateNumber] = useState('');
-  const [estimateOthers, setEstimateOthers] = useState('0.00');
-
-  // =========================================================================
-  // 4. Billing Details State
-  // (GST Rate dropdown/custom, Transport Cost, Due Date, Remarks/Notes, Final Bill Amount)
-  // =========================================================================
-  const [gstPreset, setGstPreset] = useState('18'); // '18' | '12' | '5' | '0' | 'custom'
-  const [billTaxRate, setBillTaxRate] = useState('18');
-  const [billTransportCost, setBillTransportCost] = useState('0.00');
-  const [billDueDate, setBillDueDate] = useState('');
-  const [billRemark, setBillRemark] = useState('');
-
-  // UI state
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
 
   // ==========================================
   // Load Offices for Super Admin / CEO
@@ -196,7 +248,6 @@ export default function CombinedTransactionWorkspace() {
     if (!effectiveOrgId) return;
 
     const loadInitialTransaction = async () => {
-      setLoading(true);
       setErrorMsg('');
       try {
         let billData = null;
@@ -224,15 +275,15 @@ export default function CombinedTransactionWorkspace() {
       } catch (err) {
         console.error('Initial transaction load error:', err);
         await resetToAddMode();
-      } finally {
-        setLoading(false);
       }
     };
 
     loadInitialTransaction();
   }, [effectiveOrgId, initialBillId]);
 
+  // ==========================================
   // Populate state from saved bill
+  // ==========================================
   const populateBillIntoState = (bill) => {
     setCurrentBill(bill);
     setIsDirty(false);
@@ -240,32 +291,47 @@ export default function CombinedTransactionWorkspace() {
     setBillDate(bill.billDate || new Date().toISOString().split('T')[0]);
     setBillNumber(bill.billNumber || '');
     setSelectedCustomerId(bill.customerId ? String(bill.customerId) : '');
+    if (bill.Customer) {
+      setSelectedCustomer(bill.Customer);
+    }
 
     if (bill.Estimate) {
       setEstimateId(bill.Estimate.id);
-      setEstimateNumber(bill.Estimate.estimateNumber || '');
-      setEstimateOthers(String(parseFloat(bill.Estimate.others) || 0));
     } else {
       setEstimateId(bill.estimateId || null);
-      setEstimateNumber('');
-      setEstimateOthers('0.00');
     }
+
+    // Notes / Remark (clean text)
+    if (bill.notes && bill.notes.includes('---METADATA---')) {
+      const [pureRemark] = bill.notes.split('---METADATA---');
+      setBillRemark(pureRemark ? pureRemark.trim() : '');
+    } else {
+      setBillRemark(bill.notes || '');
+    }
+
+    // Financial totals from backend
+    const transportVal = parseFloat(bill.transportCost) || 0;
+    setExpBeforeTax(transportVal > 0 ? transportVal.toFixed(2) : '');
+
+    const gstVal = parseFloat(bill.gstPercentage) || 0;
+    setBillTaxRate(gstVal.toFixed(2));
 
     if (bill.items && bill.items.length > 0) {
       const mapped = bill.items.map(item => {
         const finalRateVal = parseFloat(item.rate) || 0;
-        const qVal = parseFloat(item.quantity) || 1;
-        const prod = products.find(p => String(p.id) === String(item.productId));
-        const bRateVal = prod && prod.price ? parseFloat(prod.price) : finalRateVal;
-        const diffVal = (finalRateVal - bRateVal).toFixed(2);
+        const qVal = parseFloat(item.quantity) || 0;
+        const prod = (products && products.find(p => String(p.id) === String(item.productId))) || item.Product;
+        const diffVal = prod && prod.difference !== undefined ? parseFloat(prod.difference) : 0;
+        const bRateVal = finalRateVal - diffVal > 0 ? (finalRateVal - diffVal) : (finalRateVal > 0 ? finalRateVal : '');
+
         return {
           productId: item.productId ? String(item.productId) : '',
           productName: item.productNameSnapshot || '',
           description: item.productSpecificationsSnapshot || '',
-          basicRate: String(bRateVal),
-          difference: String(diffVal),
-          quantity: String(qVal),
-          unit: item.unit || 'Ton',
+          difference: String(diffVal.toFixed(2)),
+          pcs: item.btls !== undefined && item.btls !== null ? String(item.btls) : (item.pcs !== undefined ? String(item.pcs) : '0'),
+          quantity: qVal > 0 ? qVal.toFixed(3) : '',
+          basicRate: bRateVal !== '' ? (typeof bRateVal === 'number' ? bRateVal.toFixed(2) : String(bRateVal)) : '',
           finalRate: finalRateVal.toFixed(2),
           amount: (finalRateVal * qVal).toFixed(2)
         };
@@ -280,59 +346,58 @@ export default function CombinedTransactionWorkspace() {
       setTransactionItems(createBlankRows());
     }
 
-    const gstVal = parseFloat(bill.gstPercentage) || 0;
-    setBillTaxRate(String(gstVal));
-    if ([18, 12, 5, 0].includes(gstVal)) {
-      setGstPreset(String(gstVal));
-    } else {
-      setGstPreset('custom');
+    if (!billDueDate && bill.billDate) {
+      setBillDueDate(bill.billDate);
     }
-
-    setBillTransportCost(String(parseFloat(bill.transportCost) || 0));
-    setBillDueDate(bill.billDate || '');
-    setBillRemark(bill.notes || '');
   };
 
+  // ==========================================
   // Reset state to fresh ADD mode
+  // ==========================================
   const resetToAddMode = async (targetOrgId) => {
     const orgId = targetOrgId || effectiveOrgId;
 
     setCurrentBill(null);
     setSelectedCustomerId('');
     setSelectedCustomer(null);
-    setBillDate(new Date().toISOString().split('T')[0]);
+    const todayIso = new Date().toISOString().split('T')[0];
+    setBillDate(todayIso);
+    setBillDueDate(todayIso);
     setBillNumber('');
 
     setTransactionItems(createBlankRows());
     setEstimateId(null);
-    setEstimateNumber('');
-    setEstimateOthers('0.00');
 
-    setGstPreset('18');
-    setBillTaxRate('18');
-    setBillTransportCost('0.00');
-    setBillDueDate('');
+    setHeaderBRate('');
+    setTerms('');
+    setVehicle('');
+    setTaxType('Vat Sale');
+    setBillCash('Bill');
+    setMfgTrd('Trading Sale');
     setBillRemark('');
+    setTransportName('');
+    setBrokerName('');
+    setShortageQty('');
+    setShortageAmt('');
+    setExpBeforeTax('');
+    setBillTaxRate('18.00');
+    setSurchargeRate('');
+    setExpAfterTax('');
 
     setIsDirty(false);
     setErrorMsg('');
     setSuccessMsg('');
     setMode('ADD');
+    setActiveRowIdx(0);
 
-    // Fetch next upcoming bill and estimate number previews scoped to this office
+    // Fetch next upcoming bill number preview
     try {
-      const [billRes, estRes] = await Promise.allSettled([
-        getNextBillNumber(orgId),
-        api.get(`/estimates/next-number${orgId ? `?organizationId=${orgId}` : ''}`)
-      ]);
-      if (billRes.status === 'fulfilled' && billRes.value?.nextBillNumber) {
-        setBillNumber(billRes.value.nextBillNumber);
-      }
-      if (estRes.status === 'fulfilled' && estRes.value?.data?.nextEstimateNumber) {
-        setEstimateNumber(estRes.value.data.nextEstimateNumber);
+      const billRes = await getNextBillNumber(orgId);
+      if (billRes?.nextBillNumber) {
+        setBillNumber(billRes.nextBillNumber);
       }
     } catch (err) {
-      console.warn('Could not fetch next number previews:', err);
+      console.warn('Could not fetch next number preview:', err);
     }
   };
 
@@ -340,44 +405,51 @@ export default function CombinedTransactionWorkspace() {
   // Real-Time Calculations Engine
   // ==========================================
   const calculations = useMemo(() => {
+    let totalPcs = 0;
     let totalQty = 0;
-    let subtotal = 0;
+    let value = 0;
 
     transactionItems.forEach(item => {
-      const isFilled = Boolean(item.productId || (item.productName && item.productName.trim()));
+      const hasContent = Boolean(item.productId || (item.productName && item.productName.trim()));
+      const pcs = parseInt(item.pcs, 10) || 0;
       const q = parseFloat(item.quantity) || 0;
       const bRate = parseFloat(item.basicRate) || 0;
       const diff = parseFloat(item.difference) || 0;
       const fRate = bRate + diff;
       const amt = q * fRate;
 
-      if (isFilled || amt > 0) {
+      if (hasContent || amt > 0 || q > 0) {
+        totalPcs += pcs;
         totalQty += q;
-        subtotal += amt;
+        value += amt;
       }
     });
 
-    // 1. Estimate Total (Pre-tax)
-    const estOthers = parseFloat(estimateOthers) || 0;
-    const estimateTotal = subtotal + estOthers;
-
-    // 2. Billing & Final Amount
-    const taxRate = parseFloat(billTaxRate) || 0;
-    const gstAmount = (subtotal * taxRate) / 100;
-    const transport = parseFloat(billTransportCost) || 0;
-    const finalBillAmount = subtotal + gstAmount + transport;
+    // Align with backend billingCalculationService
+    const expBefore = parseFloat(expBeforeTax) || 0;
+    const taxPercent = parseFloat(billTaxRate) || 0;
+    const totalVat = (value * taxPercent) / 100;
+    const grandTotalVal = value + totalVat + expBefore;
 
     return {
+      totalPcs,
       totalQty: totalQty.toFixed(3),
-      subtotal: subtotal.toFixed(2),
-      estimateTotal: estimateTotal.toFixed(2),
-      gstAmount: gstAmount.toFixed(2),
-      finalBillAmount: finalBillAmount.toFixed(2)
+      value: value.toFixed(2),
+      totalVat: totalVat.toFixed(2),
+      grandTotal: grandTotalVal.toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+      rawGrandTotal: grandTotalVal
     };
-  }, [transactionItems, estimateOthers, billTaxRate, billTransportCost]);
+  }, [
+    transactionItems,
+    expBeforeTax,
+    billTaxRate
+  ]);
 
   // ==========================================
-  // Grid Handlers: Product Autocomplete, Basic Rate, Difference, Quantity
+  // Grid Handlers
   // ==========================================
   const getFilteredProducts = (query) => {
     if (!query || !query.trim()) {
@@ -390,9 +462,18 @@ export default function CombinedTransactionWorkspace() {
     ).slice(0, 15);
   };
 
-  const handleProductNameInputChange = (index, text) => {
-    if (mode === 'VIEW') return;
+  // Helper to mark dirty and switch to edit mode when any field is changed
+  const markDirtyAndEdit = () => {
     setIsDirty(true);
+    if (mode === 'VIEW') {
+      setMode('EDIT');
+    }
+  };
+
+  const handleProductNameInputChange = (index, text) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
+    setActiveRowIdx(index);
     setActiveAutocompleteIdx(index);
     setHighlightedSuggestionIdx(0);
 
@@ -400,7 +481,9 @@ export default function CombinedTransactionWorkspace() {
       const updated = [...prev];
       const match = products.find(p => p.name.toLowerCase() === text.trim().toLowerCase());
 
-      let bRate = parseFloat(updated[index].basicRate) || 0;
+      const bRate = updated[index].isCustomBRate
+        ? updated[index].basicRate
+        : (headerBRate || updated[index].basicRate || '');
       let diff = parseFloat(updated[index].difference) || 0;
       let prodId = updated[index].productId;
       let desc = updated[index].description;
@@ -408,19 +491,13 @@ export default function CombinedTransactionWorkspace() {
       if (match) {
         prodId = String(match.id);
         desc = match.specifications || match.description || desc;
-        const matchDiff = match.difference !== undefined && match.difference !== null
+        diff = match.difference !== undefined && match.difference !== null
           ? parseFloat(match.difference)
-          : (parseFloat(match.price) || 0);
-        if (!updated[index].difference || updated[index].difference === '0') {
-          diff = matchDiff;
-        }
-      } else if (!text.trim()) {
-        prodId = '';
-      } else {
-        prodId = '';
+          : 0;
       }
 
-      const fRate = bRate + diff;
+      const bRateNum = parseFloat(bRate) || 0;
+      const fRate = bRateNum + diff;
       const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
@@ -428,8 +505,8 @@ export default function CombinedTransactionWorkspace() {
         productId: prodId,
         productName: text,
         description: desc,
-        basicRate: updated[index].basicRate || '',
-        difference: String(diff),
+        basicRate: String(bRate),
+        difference: diff.toFixed(2),
         finalRate: fRate.toFixed(2),
         amount: (fRate * q).toFixed(2)
       };
@@ -438,27 +515,31 @@ export default function CombinedTransactionWorkspace() {
   };
 
   const handleSelectProductSuggestion = (index, prod) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
+    setActiveRowIdx(index);
+
     setTransactionItems(prev => {
       const updated = [...prev];
-      const bRate = parseFloat(updated[index].basicRate) || 0;
       const prodDiff = prod.difference !== undefined && prod.difference !== null
         ? parseFloat(prod.difference)
-        : (parseFloat(prod.price) || 0);
-      const diff = prodDiff;
-      const fRate = bRate + diff;
-      const currentQty = updated[index].quantity;
-      const q = currentQty && parseFloat(currentQty) > 0 ? parseFloat(currentQty) : 1;
+        : 0;
+      const bRate = updated[index].isCustomBRate
+        ? updated[index].basicRate
+        : (headerBRate || updated[index].basicRate || '');
+      const bRateNum = parseFloat(bRate) || 0;
+      const fRate = bRateNum + prodDiff;
+      const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
         ...updated[index],
         productId: String(prod.id),
         productName: prod.name,
-        description: prod.specifications || prod.description || updated[index].description || '',
-        basicRate: updated[index].basicRate || '',
-        difference: String(diff),
-        quantity: currentQty && parseFloat(currentQty) > 0 ? currentQty : '1',
+        description: prod.specifications || prod.description || prod.name,
+        difference: prodDiff.toFixed(2),
+        pcs: updated[index].pcs || '0',
+        quantity: updated[index].quantity || '',
+        basicRate: String(bRate),
         finalRate: fRate.toFixed(2),
         amount: (fRate * q).toFixed(2)
       };
@@ -495,35 +576,63 @@ export default function CombinedTransactionWorkspace() {
     }
   };
 
-  const handleItemProductChange = (index, productId) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
+  const handleItemDescriptionChange = (index, val) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
-      const prod = products.find(p => String(p.id) === String(productId));
+      updated[index] = { ...updated[index], description: val };
+      return updated;
+    });
+  };
 
-      let bRate = 0;
-      let name = '';
-      let desc = '';
-
-      if (prod) {
-        name = prod.name;
-        desc = prod.specifications || prod.description || '';
-        bRate = parseFloat(prod.price) || 0;
-      }
-
-      const diff = parseFloat(updated[index].difference) || 0;
+  const handleItemDifferenceChange = (index, val) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
+    setTransactionItems(prev => {
+      const updated = [...prev];
+      const diff = parseFloat(val) || 0;
+      const bRateStr = updated[index].isCustomBRate
+        ? updated[index].basicRate
+        : (headerBRate || updated[index].basicRate || '');
+      const bRate = parseFloat(bRateStr) || 0;
       const fRate = bRate + diff;
-      const currentQty = updated[index].quantity;
-      const q = currentQty && parseFloat(currentQty) > 0 ? parseFloat(currentQty) : (productId ? 1 : 0);
+      const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
         ...updated[index],
-        productId: productId || '',
-        productName: name,
-        description: desc || (productId ? updated[index].description : ''),
-        basicRate: String(bRate),
-        quantity: currentQty && parseFloat(currentQty) > 0 ? currentQty : (productId ? '1' : ''),
+        difference: val,
+        basicRate: bRateStr,
+        finalRate: fRate.toFixed(2),
+        amount: (fRate * q).toFixed(2)
+      };
+      return updated;
+    });
+  };
+
+  const handleItemPcsChange = (index, val) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
+    setTransactionItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], pcs: val };
+      return updated;
+    });
+  };
+
+  const handleItemQuantityChange = (index, val) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
+    setTransactionItems(prev => {
+      const updated = [...prev];
+      const q = parseFloat(val) || 0;
+      const diff = parseFloat(updated[index].difference) || 0;
+      const bRate = parseFloat(updated[index].basicRate || headerBRate || 0) || 0;
+      const fRate = bRate + diff;
+
+      updated[index] = {
+        ...updated[index],
+        quantity: val,
         finalRate: fRate.toFixed(2),
         amount: (fRate * q).toFixed(2)
       };
@@ -532,18 +641,20 @@ export default function CombinedTransactionWorkspace() {
   };
 
   const handleItemBasicRateChange = (index, val) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
-      const bRate = parseFloat(val) || 0;
+      const isCustom = val !== '' && val !== headerBRate;
       const diff = parseFloat(updated[index].difference) || 0;
+      const bRate = parseFloat(val) || 0;
       const fRate = bRate + diff;
       const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
         ...updated[index],
         basicRate: val,
+        isCustomBRate: isCustom,
         finalRate: fRate.toFixed(2),
         amount: (fRate * q).toFixed(2)
       };
@@ -551,87 +662,86 @@ export default function CombinedTransactionWorkspace() {
     });
   };
 
-  const handleItemDifferenceChange = (index, val) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
+  // Direct Rate change: calculate Difference = Rate - B.Rate, Amount = Rate * Quantity
+  const handleItemRateChange = (index, val) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
-      const bRate = parseFloat(updated[index].basicRate) || 0;
-      const diff = parseFloat(val) || 0;
-      const fRate = bRate + diff;
+      const fRate = parseFloat(val) || 0;
+      const bRate = parseFloat(updated[index].basicRate || headerBRate || 0) || 0;
+      const diff = fRate - bRate;
       const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
         ...updated[index],
-        difference: val,
-        finalRate: fRate.toFixed(2),
+        finalRate: val,
+        difference: diff.toFixed(2),
         amount: (fRate * q).toFixed(2)
       };
       return updated;
     });
   };
 
-  const handleItemQuantityChange = (index, val) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
+  // Direct Amount change: calculate Rate = Amount / Quantity (if qty > 0)
+  const handleItemAmountChange = (index, val) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
-      const q = parseFloat(val) || 0;
-      const fRate = parseFloat(updated[index].finalRate) || 0;
+      const amt = parseFloat(val) || 0;
+      const q = parseFloat(updated[index].quantity) || 0;
+      let fRate = parseFloat(updated[index].finalRate) || 0;
+      if (q > 0) {
+        fRate = amt / q;
+      }
+      const bRate = parseFloat(updated[index].basicRate || headerBRate || 0) || 0;
+      const diff = fRate - bRate;
 
       updated[index] = {
         ...updated[index],
-        quantity: val,
-        amount: (fRate * q).toFixed(2)
+        amount: val,
+        finalRate: fRate > 0 ? fRate.toFixed(2) : updated[index].finalRate,
+        difference: diff.toFixed(2)
       };
       return updated;
     });
   };
 
-  const handleItemDescriptionChange = (index, val) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
+  // Header B.Rate change: propagate to all rows (unless user set a custom row B.Rate)
+  const handleHeaderBRateChange = (val) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
+    setHeaderBRate(val);
     setTransactionItems(prev => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], description: val };
-      return updated;
+      return prev.map(item => {
+        // If user explicitly entered a custom B.Rate for this specific row, don't overwrite it
+        if (item.isCustomBRate) {
+          return item;
+        }
+
+        const hasProduct = Boolean(item.productId || (item.productName && item.productName.trim()));
+        const diff = parseFloat(item.difference) || 0;
+        const bRate = parseFloat(val) || 0;
+        const fRate = bRate + diff;
+        const q = parseFloat(item.quantity) || 0;
+
+        return {
+          ...item,
+          basicRate: hasProduct ? val : '',
+          finalRate: hasProduct ? fRate.toFixed(2) : '0.00',
+          amount: hasProduct ? (fRate * q).toFixed(2) : '0.00'
+        };
+      });
     });
   };
 
-  const removeTransactionRow = (index) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
-    setTransactionItems(prev => {
-      const filtered = prev.filter((_, i) => i !== index);
-      while (filtered.length < DEFAULT_ROWS_COUNT) {
-        filtered.push({ ...BLANK_TRANSACTION_ROW });
-      }
-      return filtered;
-    });
-  };
-
-  // GST Dropdown / Custom handler
-  const handleGstPresetChange = (preset) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
-    setGstPreset(preset);
-    if (preset !== 'custom') {
-      setBillTaxRate(preset);
-    }
-  };
-
-  const handleCustomGstChange = (val) => {
-    if (mode === 'VIEW') return;
-    setIsDirty(true);
-    setGstPreset('custom');
-    setBillTaxRate(val);
-  };
-
   // =========================================================================
-  // THE FOUR FUNCTIONAL BUTTONS: Add, Previous, Edit, Save (+ Print)
+  // TOOLBAR ACTION HANDLERS
+  // Buttons: Add, Edit, <Previous, Next >, First, Last, Search, Move, Print, Vch.Prn, Exit, Save
   // =========================================================================
 
-  // BUTTON 1: ADD
+  // 1. ADD
   const handleAdd = async () => {
     if (isDirty) {
       const confirmDiscard = window.confirm('You have unsaved changes. Discard and start a new sale voucher?');
@@ -641,7 +751,17 @@ export default function CombinedTransactionWorkspace() {
     setSuccessMsg('Ready for new entry. Select customer, enter products and quantities.');
   };
 
-  // BUTTON 2: PREVIOUS
+  // 2. EDIT
+  const handleEdit = () => {
+    if (!currentBill) {
+      setErrorMsg('No saved sale voucher is currently loaded to edit.');
+      return;
+    }
+    setMode('EDIT');
+    setSuccessMsg('Edit mode active. You may now modify the voucher details.');
+  };
+
+  // 3. PREVIOUS (<Previous)
   const handlePrevious = async () => {
     if (isDirty) {
       const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the previous voucher?');
@@ -667,7 +787,7 @@ export default function CombinedTransactionWorkspace() {
     }
   };
 
-  // NEXT NAVIGATION
+  // 4. NEXT (Next >)
   const handleNext = async () => {
     if (isDirty) {
       const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the next voucher?');
@@ -693,53 +813,145 @@ export default function CombinedTransactionWorkspace() {
     }
   };
 
-  // BUTTON 3: EDIT
-  const handleEdit = () => {
-    if (!currentBill) {
-      setErrorMsg('No saved sale voucher is currently loaded to edit.');
-      return;
+  // 5. FIRST
+  const handleFirst = async () => {
+    if (isDirty) {
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the first voucher?');
+      if (!confirmDiscard) return;
     }
-    setMode('EDIT');
-    setTransactionItems(prev => {
-      const padded = [...prev];
-      while (padded.length < DEFAULT_ROWS_COUNT) {
-        padded.push({ ...BLANK_TRANSACTION_ROW });
+
+    setActionLoading(true);
+    setErrorMsg('');
+    try {
+      const firstBill = await getFirstBill(effectiveOrgId);
+      if (firstBill) {
+        populateBillIntoState(firstBill);
+        setMode('VIEW');
+        setSuccessMsg(`Loaded first Sale Voucher #${firstBill.billNumber}.`);
+      } else {
+        setErrorMsg('No vouchers found for this office.');
       }
-      return padded;
-    });
-    setSuccessMsg('Edit mode active. You may now modify the voucher details.');
+    } catch (err) {
+      setErrorMsg('Could not load the first voucher.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-  // BUTTON 4: SAVE
-  const handleSave = async () => {
-    if (!selectedCustomerId) {
-      setErrorMsg('Please select a Customer before saving.');
-      return;
+  // 6. LAST
+  const handleLast = async () => {
+    if (isDirty) {
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the latest voucher?');
+      if (!confirmDiscard) return;
     }
 
-    // Filter out completely blank rows
-    const filledItems = transactionItems.filter(item => 
+    setActionLoading(true);
+    setErrorMsg('');
+    try {
+      const lastBill = await getLastBill(effectiveOrgId);
+      if (lastBill) {
+        populateBillIntoState(lastBill);
+        setMode('VIEW');
+        setSuccessMsg(`Loaded latest Sale Voucher #${lastBill.billNumber}.`);
+      } else {
+        setErrorMsg('No vouchers found for this office.');
+      }
+    } catch (err) {
+      setErrorMsg('Could not load the latest voucher.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 7. SEARCH
+  const handleOpenSearch = async () => {
+    setSearchModalOpen(true);
+    setSearchLoading(true);
+    try {
+      const res = await api.get(`/bills${effectiveOrgId ? `?organizationId=${effectiveOrgId}` : ''}`);
+      setAllOfficeBills(res.data || []);
+    } catch (err) {
+      console.error('Failed to load bills for search:', err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleSelectSearchResult = async (billId) => {
+    setSearchModalOpen(false);
+    setActionLoading(true);
+    try {
+      const billData = await getBillById(billId);
+      if (billData) {
+        populateBillIntoState(billData);
+        setMode('VIEW');
+        setSuccessMsg(`Loaded Sale Voucher #${billData.billNumber}.`);
+      }
+    } catch (err) {
+      setErrorMsg('Failed to load selected voucher.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 8. MOVE (Advance / Focus row)
+  const handleMove = () => {
+    setActiveRowIdx(prev => (prev + 1) % transactionItems.length);
+  };
+
+  // 9. PRINT
+  const handlePrintBill = () => {
+    if (!currentBill?.id) {
+      alert('Please save the sale voucher first before printing.');
+      return;
+    }
+    window.open(`/bills/${currentBill.id}/print`, '_blank');
+  };
+
+  // 10. VCH.PRN (Print Estimate / Voucher)
+  const handlePrintEstimate = () => {
+    const idToPrint = estimateId || currentBill?.estimateId;
+    if (!idToPrint) {
+      alert('Please save the transaction first to generate printable voucher.');
+      return;
+    }
+    window.open(`/estimates/${idToPrint}/print`, '_blank');
+  };
+
+  // 11. EXIT
+  const handleExit = () => {
+    if (isDirty) {
+      const confirmDiscard = window.confirm('You have unsaved changes. Do you want to exit without saving?');
+      if (!confirmDiscard) return;
+    }
+    navigate('/bills');
+  };
+
+  // Reusable core save function for both Save and Print & Save
+  const saveBillRecord = async () => {
+    if (!selectedCustomerId) {
+      setErrorMsg('Please select a Customer before saving.');
+      return null;
+    }
+
+    const filledItems = transactionItems.filter(item =>
       Boolean(item.productId || (item.productName && item.productName.trim()) || (item.description && item.description.trim()))
     );
 
     if (filledItems.length === 0) {
-      setErrorMsg('Voucher must contain at least one line item. Please select a product in at least one row.');
-      return;
+      setErrorMsg('Voucher must contain at least one product item.');
+      return null;
     }
 
     for (let i = 0; i < filledItems.length; i++) {
       const item = filledItems[i];
       if (!item.productName.trim() && !item.productId) {
         setErrorMsg(`Row #${i + 1}: Please select a product or enter description.`);
-        return;
+        return null;
       }
       if (parseFloat(item.quantity) <= 0 || isNaN(parseFloat(item.quantity))) {
         setErrorMsg(`Row #${i + 1} (${item.productName || 'Product'}): Quantity must be greater than zero.`);
-        return;
-      }
-      if (parseFloat(item.finalRate) < 0 || isNaN(parseFloat(item.finalRate))) {
-        setErrorMsg(`Row #${i + 1} (${item.productName || 'Product'}): Final rate cannot be negative.`);
-        return;
+        return null;
       }
     }
 
@@ -749,431 +961,421 @@ export default function CombinedTransactionWorkspace() {
     setSuccessMsg('');
 
     try {
-      // 1. Create or Update underlying Estimate record
-      let targetEstimateId = estimateId;
-      const estimateItemsPayload = filledItems.map(item => ({
-        productId: item.productId ? parseInt(item.productId, 10) : null,
-        productNameSnapshot: item.productName.trim(),
-        productSpecificationsSnapshot: item.description ? item.description.trim() : null,
-        description: item.description ? item.description.trim() : null,
-        quantity: parseFloat(item.quantity) || 1,
-        unit: item.unit || 'Ton',
-        negotiatedRate: parseFloat(item.finalRate) || 0
-      }));
-
-      const estimatePayload = {
-        organizationId: effectiveOrgId,
-        customerId: parseInt(selectedCustomerId, 10),
-        estimateDate: billDate,
-        basic: filledItems[0]?.basicRate || '0.00',
-        others: parseFloat(estimateOthers) || 0,
-        notes: billRemark || null,
-        status: 'GENERATED',
-        items: estimateItemsPayload
-      };
-
-      if (!targetEstimateId) {
-        try {
-          const estRes = await api.post('/estimates', estimatePayload);
-          if (estRes.data && estRes.data.estimate) {
-            targetEstimateId = estRes.data.estimate.id;
-            setEstimateId(targetEstimateId);
-            setEstimateNumber(estRes.data.estimate.estimateNumber);
-          }
-        } catch (estErr) {
-          console.warn('Note while creating estimate record:', estErr.message);
+      // 1. Prepare bill items strictly matching backend BillItem schema
+      const billItemsPayload = filledItems.map(item => {
+        let prod = products.find(p => String(p.id) === String(item.productId));
+        if (!prod && item.productName) {
+          prod = products.find(p => p.name.toLowerCase() === item.productName.trim().toLowerCase());
         }
-      } else {
-        try {
-          await api.put(`/estimates/${targetEstimateId}`, estimatePayload);
-        } catch (estErr) {
-          console.warn('Note while updating estimate record:', estErr.message);
-        }
-      }
+        const resolvedProdId = item.productId ? parseInt(item.productId, 10) : (prod ? prod.id : null);
+        return {
+          productId: resolvedProdId,
+          productNameSnapshot: item.productName.trim(),
+          productCategorySnapshot: prod?.category || null,
+          productSizeSnapshot: prod?.size || null,
+          productSpecificationsSnapshot: item.description ? item.description.trim() : (prod?.specifications || null),
+          btls: item.pcs ? String(item.pcs).trim() : null,
+          quantity: parseFloat(item.quantity) || 0,
+          unit: item.unit || prod?.unit || 'Ton',
+          rate: parseFloat(item.finalRate) || 0
+        };
+      });
 
-      // 2. Create or Update Bill record linked to this Estimate
-      const billItemsPayload = filledItems.map(item => ({
-        productId: item.productId ? parseInt(item.productId, 10) : null,
-        productNameSnapshot: item.productName.trim(),
-        productSpecificationsSnapshot: item.description ? item.description.trim() : null,
-        description: item.description ? item.description.trim() : null,
-        quantity: parseFloat(item.quantity) || 1,
-        unit: item.unit || 'Ton',
-        rate: parseFloat(item.finalRate) || 0
-      }));
-
+      // 2. Prepare bill payload strictly matching backend Bill model (marking completed sale as FINALIZED)
       const billPayload = {
         organizationId: effectiveOrgId,
         customerId: parseInt(selectedCustomerId, 10),
-        estimateId: targetEstimateId || null,
+        estimateId: estimateId || null,
         billDate: billDate,
         items: billItemsPayload,
         gstPercentage: parseFloat(billTaxRate) || 0,
-        transportCost: parseFloat(billTransportCost) || 0,
-        notes: billRemark || null
+        transportCost: parseFloat(expBeforeTax) || 0,
+        notes: billRemark ? billRemark.trim() : null,
+        status: 'FINALIZED'
       };
 
       let savedRecord = null;
       if (currentBill?.id) {
         const res = await updateBill(currentBill.id, billPayload);
         savedRecord = res.bill || res;
-        setSuccessMsg(`Sale Voucher #${savedRecord.billNumber || currentBill.billNumber} successfully updated.`);
       } else {
         const res = await createBill(billPayload);
         savedRecord = res.bill || res;
-        setSuccessMsg(`Sale Voucher #${savedRecord.billNumber} saved successfully.`);
       }
 
-      const freshBill = await getBillById(savedRecord.id);
-      populateBillIntoState(freshBill);
-      setMode('VIEW');
       setIsDirty(false);
+      populateBillIntoState(savedRecord);
+      setMode('VIEW');
+      return savedRecord;
     } catch (err) {
       console.error('Error saving transaction:', err);
       const msg = err.response?.data?.error || err.message || 'Failed to save voucher.';
       setErrorMsg(msg);
       setMode(currentBill?.id ? 'EDIT' : 'ADD');
+      return null;
     } finally {
       setActionLoading(false);
     }
   };
 
-  // PRINT HANDLERS
-  const handlePrintBill = () => {
-    if (!currentBill?.id) {
-      alert('Please save the sale voucher first before printing.');
-      return;
+  // SAVE ONLY: saves the sale voucher without printing
+  const handleSaveOnly = async () => {
+    const savedRecord = await saveBillRecord();
+    if (savedRecord) {
+      setSuccessMsg(`Sale Voucher #${savedRecord.billNumber} saved successfully.`);
     }
-    window.open(`/bills/${currentBill.id}/print`, '_blank');
   };
 
-  const handlePrintEstimate = () => {
-    const idToPrint = estimateId || currentBill?.estimateId;
-    if (!idToPrint) {
-      alert('Please save the transaction first to generate the printable estimate.');
+  // PRINT & SAVE: saves the sale voucher and redirects user to print receipt page
+  const handlePrintAndSave = async () => {
+    // If voucher is already saved as FINALIZED and has no unsaved changes, navigate directly to print
+    if (!isDirty && currentBill?.id && currentBill?.status === 'FINALIZED') {
+      navigate(`/bills/${currentBill.id}/print`);
       return;
     }
-    window.open(`/estimates/${idToPrint}/print`, '_blank');
+
+    const savedRecord = await saveBillRecord();
+    if (savedRecord) {
+      navigate(`/bills/${savedRecord.id}/print`);
+    }
   };
 
-  const isReadOnly = mode === 'VIEW' || mode === 'SAVING';
+  const isSaving = mode === 'SAVING' || actionLoading;
+
+  // Today Date & Day
+  const todayDateObj = new Date();
+  const todayDateStr = `${String(todayDateObj.getDate()).padStart(2, '0')}-${String(todayDateObj.getMonth() + 1).padStart(2, '0')}-${todayDateObj.getFullYear()}`;
+  const todayDayStr = todayDateObj.toLocaleDateString('en-US', { weekday: 'long' });
+
+  // Filtered bills for Search Modal
+  const filteredSearchBills = useMemo(() => {
+    if (!searchQuery.trim()) return allOfficeBills.slice(0, 20);
+    const q = searchQuery.toLowerCase().trim();
+    return allOfficeBills.filter(b =>
+      (b.billNumber && b.billNumber.toLowerCase().includes(q)) ||
+      (b.Customer?.name && b.Customer.name.toLowerCase().includes(q)) ||
+      (b.billDate && b.billDate.includes(q))
+    ).slice(0, 30);
+  }, [allOfficeBills, searchQuery]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-100 text-slate-800 font-sans text-xs">
+    <div className="w-full h-full flex flex-col bg-[#e6e9ed] border border-[#7f9db9] text-black text-xs select-none overflow-hidden font-sans">
       
-      {/* ─────────────────────────────────────────────────────────────────
-          TOP TITLE BAR
-         ───────────────────────────────────────────────────────────────── */}
-      <header className="bg-slate-800 text-white px-3 py-1.5 flex items-center justify-between shadow-sm border-b border-slate-700">
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-1.5 font-bold tracking-wide uppercase text-sm text-slate-100">
-            <Receipt className="w-4 h-4 text-amber-400" />
-            <span>Sale Voucher</span>
-          </div>
-
-          <span className={`px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase flex items-center gap-1 ${
-            mode === 'VIEW'
-              ? 'bg-blue-600 text-white'
-              : mode === 'ADD'
-              ? 'bg-emerald-600 text-white animate-pulse'
-              : mode === 'EDIT'
-              ? 'bg-amber-600 text-white'
-              : 'bg-indigo-600 text-white'
-          }`}>
-            {mode === 'VIEW' && <Eye className="w-3 h-3" />}
-            {mode === 'ADD' && <Plus className="w-3 h-3" />}
-            {mode === 'EDIT' && <Edit3 className="w-3 h-3" />}
-            {mode === 'SAVING' && <Loader2 className="w-3 h-3 animate-spin" />}
-            {mode} MODE
-          </span>
-        </div>
-
-        {/* Office Selection */}
-        <div className="flex items-center space-x-2">
-          {(user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') && organizations.length > 1 ? (
-            <div className="flex items-center space-x-1 bg-slate-900 px-2 py-1 rounded border border-slate-700">
-              <Building2 className="w-3.5 h-3.5 text-amber-400" />
-              <label className="text-slate-300 text-[10px] uppercase font-bold">Office:</label>
-              <select
-                value={selectedOrgId}
-                disabled={isDirty}
-                onChange={(e) => setSelectedOrgId(e.target.value)}
-                className="bg-slate-800 text-white font-semibold text-xs rounded px-1.5 py-0.5 border border-slate-600 focus:outline-none"
-              >
-                {organizations.map(org => (
-                  <option key={org.id} value={org.id}>{org.name}</option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="flex items-center space-x-1.5 bg-slate-900 px-2.5 py-1 rounded text-slate-300 border border-slate-700">
-              <Building2 className="w-3.5 h-3.5 text-amber-400" />
-              <span className="font-semibold text-white">
-                {user?.Organization?.name || organizations.find(o => String(o.id) === String(effectiveOrgId))?.name || 'Office'}
-              </span>
-            </div>
-          )}
-        </div>
-      </header>
-
-      {/* Notifications */}
+      {/* Notifications (if any) */}
       {errorMsg && (
-        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 px-3 py-1.5 flex items-center justify-between text-xs font-medium">
-          <div className="flex items-center space-x-1.5">
-            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-          <button onClick={() => setErrorMsg('')} className="text-red-700 font-bold hover:text-red-900 text-xs">✕</button>
+        <div className="shrink-0 bg-red-100 border-b border-red-300 text-red-800 px-3 py-0.5 flex items-center justify-between text-[11px] font-medium">
+          <span>⚠ {errorMsg}</span>
+          <button type="button" onClick={() => setErrorMsg('')} className="font-bold text-red-900 ml-2">✕</button>
         </div>
       )}
-
       {successMsg && (
-        <div className="bg-emerald-50 border-l-4 border-emerald-500 text-emerald-800 px-3 py-1.5 flex items-center justify-between text-xs font-medium">
-          <div className="flex items-center space-x-1.5">
-            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{successMsg}</span>
-          </div>
-          <button onClick={() => setSuccessMsg('')} className="text-emerald-800 font-bold hover:text-emerald-900 text-xs">✕</button>
+        <div className="shrink-0 bg-emerald-100 border-b border-emerald-300 text-emerald-900 px-3 py-0.5 flex items-center justify-between text-[11px] font-medium">
+          <span>✓ {successMsg}</span>
+          <button type="button" onClick={() => setSuccessMsg('')} className="font-bold text-emerald-900 ml-2">✕</button>
         </div>
       )}
 
       {/* ─────────────────────────────────────────────────────────────────
-          MAIN WORKSPACE BODY
+          VOUCHER BODY (LOCKED HEIGHT, ZERO VERTICAL SCROLLBAR)
          ───────────────────────────────────────────────────────────────── */}
-      <main className="flex-1 p-2.5 space-y-2.5 overflow-y-auto">
-        
-        {/* ==============================================================
-            1. SALE VOUCHER HEADER
-            Only Date, Bill Number (shown only), Customer Name (dropdown), City, TIN/GSTIN
-           ============================================================== */}
-        <section className="bg-white rounded border border-slate-300 shadow-sm p-3">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-            {/* 1. Date */}
-            <div className="md:col-span-2">
-              <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Date</label>
+      <div className="flex-1 flex flex-col p-1.5 space-y-1 bg-[#e6e9ed] overflow-hidden min-h-0">
+
+        {/* TOP SECTION: Date, Serial Number, Center Title, Mode Indicator, Right Info */}
+        <div className="shrink-0 grid grid-cols-12 gap-1 items-start">
+          
+          {/* Top Left: Date and Serial Number */}
+          <div className="col-span-12 md:col-span-4 space-y-0.5">
+            <div className="flex items-center space-x-1.5">
+              <span className="font-bold text-[11px] text-black w-22">Date</span>
               <input
-                type="date"
-                value={billDate}
-                disabled={isReadOnly}
+                type="text"
+                value={formatToDisplayDate(billDate)}
+                disabled={isSaving}
                 onChange={(e) => {
-                  setIsDirty(true);
-                  setBillDate(e.target.value);
+                  markDirtyAndEdit();
+                  setBillDate(parseDisplayDateToIso(e.target.value));
                 }}
-                className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-800 disabled:bg-slate-100 focus:ring-1 focus:ring-blue-500"
+                placeholder="DD-MM-YYYY"
+                className="w-24 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold focus:outline-none focus:bg-white"
               />
-            </div>
-
-            {/* 2. Bill Number (View-Only display of Next / Current Bill Number) */}
-            <div className="md:col-span-2">
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-[10px] font-bold text-slate-600 uppercase">
-                  Bill Number
-                </label>
-                <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wider">
-                  View Only
-                </span>
-              </div>
-              <input
-                type="text"
-                value={billNumber || 'Fetching...'}
-                readOnly
-                tabIndex={-1}
-                className="w-full bg-slate-100 border border-slate-300 rounded px-2 py-1.5 text-xs font-mono font-bold text-slate-800 cursor-not-allowed select-none focus:outline-none"
-                title="Bill Number is system-generated and view-only"
-              />
-            </div>
-
-            {/* 3. Customer Name (Dropdown) */}
-            <div className="md:col-span-4">
-              <label className="block text-[10px] font-bold text-blue-700 uppercase mb-1">
-                Customer Name <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={selectedCustomerId}
-                disabled={isReadOnly}
-                onChange={(e) => {
-                  if (mode === 'VIEW') return;
-                  setIsDirty(true);
-                  setSelectedCustomerId(e.target.value);
-                }}
-                className="w-full bg-white border-2 border-blue-400 rounded px-2.5 py-1.5 text-xs font-bold text-slate-900 disabled:bg-slate-100 disabled:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">-- Select Customer --</option>
-                {customers.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* 4. City */}
-            <div className="md:col-span-2">
-              <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">City</label>
-              <input
-                type="text"
-                value={selectedCustomer?.city || ''}
-                readOnly
-                placeholder="City"
-                className="w-full bg-slate-100 border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-700 cursor-not-allowed"
-              />
-            </div>
-
-            {/* 5. TIN / GSTIN */}
-            <div className="md:col-span-2">
-              <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">TIN / GSTIN</label>
-              <input
-                type="text"
-                value={selectedCustomer?.tin || ''}
-                readOnly
-                placeholder="TIN / GSTIN"
-                className="w-full bg-slate-100 border border-slate-300 rounded px-2 py-1.5 text-xs font-mono text-slate-700 cursor-not-allowed"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* ==============================================================
-            2. PRODUCT ITEMS GRID BOX
-            Columns:
-            - Select Product (dropdown)
-            - Description
-            - Basic Rate
-            - Difference (manual)
-            - Quantity (manual, Tons)
-            - Final Rate (Basic Rate + Difference)
-            - Amount (Final Rate * Quantity)
-           ============================================================== */}
-        {/* ==============================================================
-            2. PRODUCT ITEMS GRID BOX (RETRO EXCEL SPREADSHEET DESIGN)
-           ============================================================== */}
-        <section className="bg-white border-2 border-[#107c41] shadow-md rounded-none overflow-hidden my-3">
-          {/* Retro Excel Window Titlebar / Green Excel Header */}
-          <div className="bg-[#107c41] text-white px-3 py-1.5 flex items-center justify-between text-xs font-mono select-none">
-            <div className="flex items-center space-x-2">
-              <span className="bg-white text-[#107c41] font-black px-1.5 py-0.5 text-[10px] rounded-xs tracking-tighter">XLS</span>
-              <span className="font-bold text-[11px] tracking-wide">SALE_VOUCHER_SHEET.XLSX — [Spreadsheet Ledger View]</span>
-            </div>
-            <div className="flex items-center space-x-3 text-[10px] text-emerald-100">
-              <span className="hidden sm:inline">TYPE FOR AUTO-SUGGESTIONS</span>
-              <span className="bg-emerald-900/60 px-2 py-0.5 border border-emerald-500/40 font-semibold uppercase">
-                Retro Excel Mode
+              <span className="font-bold text-[11px] text-black">
+                {getDayOfWeekName(billDate) || 'Friday'}
               </span>
             </div>
+
+            <div className="flex items-center space-x-1.5">
+              <span className="font-bold text-[11px] text-black w-22">Serial Number</span>
+              <input
+                type="text"
+                readOnly
+                value={billNumber || ''}
+                placeholder="Serial No."
+                className="w-24 h-5 bg-[#e4ebf5] border border-[#7f9db9] px-1 text-[11px] text-black font-bold cursor-not-allowed select-none"
+                title="Serial Number is generated automatically and cannot be edited"
+              />
+            </div>
           </div>
 
-          {/* Excel Formula Bar */}
-          <div className="bg-[#f0f2f5] border-b border-slate-300 px-3 py-1 flex items-center space-x-2 text-xs font-mono text-slate-700">
-            <div className="bg-white border border-slate-400 px-2.5 py-0.5 text-[11px] font-bold text-slate-700 font-serif italic shadow-2xs">
-              fx
-            </div>
-            <div className="bg-white border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 flex-1 font-mono truncate shadow-2xs">
-              <span className="text-emerald-700 font-bold">= </span>
-              <span>FinalRate(BasicRate + Difference) × Quantity</span>
-              <span className="text-slate-400 ml-3 hidden md:inline">| Press Tab to move across cells</span>
+          {/* Top Center: "Sale Voucher" and Mode in RED */}
+          <div className="col-span-12 md:col-span-4 text-center">
+            <h1 className="font-serif text-[22px] leading-tight text-black font-normal tracking-wide">
+              Sale Voucher
+            </h1>
+            <div className="text-red-600 font-bold text-[12px] leading-tight">
+              {mode === 'VIEW' ? 'View' : mode === 'ADD' ? 'Add' : mode === 'EDIT' ? 'Edit' : 'Saving'}
             </div>
           </div>
 
-          {/* Spreadsheet Table with Excel Grid Lines */}
-          <div className="overflow-x-auto relative" ref={autocompleteContainerRef}>
-            <table className="w-full text-left border-collapse border-b border-slate-300 text-xs">
+          {/* Top Right: Setup, Option, Today Date & Day + Office Selector */}
+          <div className="col-span-12 md:col-span-4 flex flex-col items-end text-right space-y-0.5 text-[11px]">
+            <div className="flex items-center space-x-2 text-black font-medium">
+              {(user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') && organizations.length > 1 && (
+                <span className="text-[10px] font-normal bg-white/80 px-1.5 py-0.5 rounded border border-slate-300">
+                  Office:
+                  <select
+                    value={selectedOrgId}
+                    disabled={isDirty}
+                    onChange={(e) => setSelectedOrgId(e.target.value)}
+                    className="ml-1 bg-transparent text-[10px] font-bold outline-none cursor-pointer"
+                  >
+                    {organizations.map(org => (
+                      <option key={org.id} value={org.id}>{org.name}</option>
+                    ))}
+                  </select>
+                </span>
+              )}
+              <span className="cursor-pointer hover:underline">Setup</span>
+              <span className="cursor-pointer hover:underline">Option</span>
+            </div>
+            <div className="text-black font-medium leading-tight">
+              Today {todayDateStr}
+            </div>
+            <div className="text-black font-medium leading-tight">
+              {todayDayStr}
+            </div>
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            THREE-COLUMN MASTER HEADER GRID
+           ───────────────────────────────────────────────────────────── */}
+        <div className="shrink-0 grid grid-cols-1 md:grid-cols-12 gap-2 pt-0.5">
+          
+          {/* Column 1: Cust.Name, City, Tin */}
+          <div className="md:col-span-5 space-y-0.5">
+            <div className="flex items-center">
+              <label className="w-18 font-bold text-[11px] text-black">Cust.Name</label>
+              <div className="flex-1 relative">
+                <select
+                  value={selectedCustomerId}
+                  disabled={isSaving}
+                  onChange={(e) => {
+                    markDirtyAndEdit();
+                    setSelectedCustomerId(e.target.value);
+                  }}
+                  className="w-full h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-bold uppercase focus:outline-none focus:bg-white cursor-pointer"
+                >
+                  <option value="">-- SELECT CUSTOMER --</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center">
+              <label className="w-18 font-bold text-[11px] text-black">City</label>
+              <input
+                type="text"
+                readOnly
+                value={selectedCustomer?.city || ''}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black"
+              />
+            </div>
+
+            <div className="flex items-center">
+              <label className="w-18 font-bold text-[11px] text-black">Tin</label>
+              <input
+                type="text"
+                readOnly
+                value={selectedCustomer?.tin || ''}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black"
+              />
+            </div>
+          </div>
+
+          {/* Column 2: B.Rate, Terms (commented), Vehicle (commented) */}
+          <div className="md:col-span-3 space-y-0.5">
+            <div className="flex items-center">
+              <label className="w-14 font-bold text-[11px] text-black">B.Rate</label>
+              <input
+                type="number"
+                step="any"
+                value={headerBRate}
+                disabled={isSaving}
+                onChange={(e) => handleHeaderBRateChange(e.target.value)}
+                placeholder="0.00"
+                className="w-32 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-bold focus:outline-none focus:bg-white"
+              />
+            </div>
+
+            {/* Terms (Commented out per request)
+            <div className="flex items-center">
+              <label className="w-14 font-bold text-[11px] text-black">Terms</label>
+              <input
+                type="text"
+                value={terms}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setTerms(e.target.value);
+                }}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
+              />
+            </div>
+            */}
+
+            {/* Vehicle (Commented out per request)
+            <div className="flex items-center">
+              <label className="w-14 font-bold text-[11px] text-black">Vehicle</label>
+              <input
+                type="text"
+                value={vehicle}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setVehicle(e.target.value);
+                }}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
+              />
+            </div>
+            */}
+          </div>
+
+          {/* Column 3: Tax Type, Bill Cash, Mfg.Trd (Fixed to Vat Sale, Bill, Trading Sale) */}
+          <div className="md:col-span-4 space-y-0.5">
+            <div className="flex items-center">
+              <label className="w-16 font-bold text-[11px] text-black">Tax Type</label>
+              <input
+                type="text"
+                readOnly
+                value={taxType || "Vat Sale"}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold cursor-default select-none"
+                title="Tax Type is fixed to Vat Sale"
+              />
+            </div>
+
+            <div className="flex items-center">
+              <label className="w-16 font-bold text-[11px] text-black">Bill Cash</label>
+              <input
+                type="text"
+                readOnly
+                value={billCash || "Bill"}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold cursor-default select-none"
+                title="Bill Cash is fixed to Bill"
+              />
+            </div>
+
+            <div className="flex items-center">
+              <label className="w-16 font-bold text-[11px] text-black">Mfg.Trd</label>
+              <input
+                type="text"
+                readOnly
+                value={mfgTrd || "Trading Sale"}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold cursor-default select-none"
+                title="Mfg.Trd is fixed to Trading Sale"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            LEDGER PRODUCT TABLE (FLEXIBLE HEIGHT, INNER SCROLL ONLY)
+           ───────────────────────────────────────────────────────────── */}
+        <div className="flex-1 min-h-[140px] border border-[#7f9db9] bg-white flex flex-col overflow-hidden relative" ref={autocompleteContainerRef}>
+          
+          {/* Table Header Row (Locked) */}
+          <div className="bg-[#e4ebf5] border-b border-[#7f9db9] text-black font-bold select-none text-[11px] shrink-0">
+            <table className="w-full border-collapse">
               <thead>
-                {/* Excel Column Letters Row (A, B, C, D...) */}
-                <tr className="bg-[#e9edf4] border-b border-slate-300 text-[10px] font-mono font-bold text-slate-500 select-none">
-                  <th className="w-9 border-r border-slate-300 text-center py-0.5">#</th>
-                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">A</th>
-                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">B</th>
-                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">C</th>
-                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">D</th>
-                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">E</th>
-                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">F</th>
-                  <th className="border-r border-slate-300 px-2 py-0.5 text-center">G</th>
-                  {!isReadOnly && <th className="w-10 px-1 py-0.5 text-center">H</th>}
-                </tr>
-
-                {/* Column Headers */}
-                <tr className="bg-[#f1f4f9] border-b-2 border-slate-400 text-slate-800 text-[10px] uppercase font-bold tracking-wider font-mono">
-                  <th className="w-9 border-r border-slate-300 py-1.5 px-1 text-center bg-[#e4e8f0]">ROW</th>
-                  <th className="border-r border-slate-300 py-1.5 px-2.5 min-w-[240px]">Select / Type Product *</th>
-                  <th className="border-r border-slate-300 py-1.5 px-2 min-w-[180px]">Description</th>
-                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right">Basic Rate (₹)</th>
-                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right bg-amber-100/60 text-amber-900">Difference (₹)</th>
-                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right bg-blue-100/60 text-blue-900">Quantity (Ton)</th>
-                  <th className="border-r border-slate-300 py-1.5 px-2 w-28 text-right bg-emerald-100/60 text-emerald-900">Final Rate (₹)</th>
-                  <th className="border-r border-slate-300 py-1.5 px-2.5 w-32 text-right">Amount (₹)</th>
-                  {!isReadOnly && <th className="py-1.5 px-1 w-10 text-center">Act</th>}
+                <tr className="h-5">
+                  <th className="w-6 border-r border-[#7f9db9] py-0.5 text-center font-mono">▸</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[150px]">Product Name</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[150px]">Description</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">Difference</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-16">Pcs</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-20">Quantity</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">B.Rate</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">Rate</th>
+                  <th className="px-2 py-0.5 text-right w-28">Amount</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-300">
+            </table>
+          </div>
+
+          {/* Table Body (Scrolls internally if rows exceed height) */}
+          <div className="flex-1 overflow-y-auto">
+            <table className="w-full border-collapse text-xs">
+              <tbody>
                 {transactionItems.map((item, idx) => {
-                  const filteredProducts = getFilteredProducts(item.productName);
+                  const isActive = idx === activeRowIdx;
+                  const filtered = getFilteredProducts(item.productName);
+                  const hasProduct = Boolean(item.productId || (item.productName && item.productName.trim()));
 
                   return (
-                    <tr key={idx} className="hover:bg-emerald-50/20 transition-colors h-8">
-                      {/* Left Excel Row Number Header */}
-                      <td className="w-9 border-r border-slate-300 bg-[#f0f2f5] text-center text-slate-600 text-[11px] font-mono font-bold select-none p-0">
-                        <div className="w-full h-full flex items-center justify-center">
-                          {idx + 1}
-                        </div>
+                    <tr
+                      key={idx}
+                      onClick={() => setActiveRowIdx(idx)}
+                      className={`h-5 border-b border-[#c0c0c0] ${isActive ? 'bg-[#f4f7fc]' : 'bg-white hover:bg-slate-50'}`}
+                    >
+                      {/* Active Row Indicator */}
+                      <td className="w-6 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none">
+                        {isActive ? '▸' : ''}
                       </td>
 
-                      {/* 1. Product Name (Autocomplete / Type to search) */}
-                      <td className="border-r border-slate-300 p-0 relative focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset focus-within:z-30 bg-white">
+                      {/* Product Name */}
+                      <td className="border-r border-[#7f9db9] p-0 relative min-w-[150px]">
                         <input
                           type="text"
                           value={item.productName}
-                          disabled={isReadOnly}
+                          disabled={isSaving}
                           onChange={(e) => handleProductNameInputChange(idx, e.target.value)}
                           onFocus={() => {
-                            if (!isReadOnly) {
+                            setActiveRowIdx(idx);
+                            if (!isSaving) {
                               setActiveAutocompleteIdx(idx);
                               setHighlightedSuggestionIdx(0);
                             }
                           }}
-                          onKeyDown={(e) => handleProductInputKeyDown(e, idx, filteredProducts)}
-                          placeholder={isReadOnly ? '' : 'Type product name...'}
-                          className="w-full h-8 px-2 py-1 text-xs font-semibold text-slate-900 bg-transparent border-0 outline-none placeholder:text-slate-400 placeholder:font-normal disabled:text-slate-800"
+                          onKeyDown={(e) => handleProductInputKeyDown(e, idx, filtered)}
+                          className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none font-medium"
                         />
 
-                        {/* Suggestion Dropdown Popover */}
-                        {!isReadOnly && activeAutocompleteIdx === idx && (
-                          <div className="absolute top-full left-0 z-50 min-w-[340px] max-w-[420px] bg-white border-2 border-[#107c41] shadow-2xl mt-0.5 text-xs text-left">
-                            <div className="bg-[#107c41] text-white px-2.5 py-1 text-[10px] font-mono uppercase font-bold flex justify-between items-center select-none">
-                              <span>Product Catalogue Suggestions ({filteredProducts.length})</span>
-                              <span className="text-[9px] opacity-90">↑↓ to navigate, Enter to pick</span>
+                        {/* Autocomplete Suggestions Box */}
+                        {!isSaving && activeAutocompleteIdx === idx && (
+                          <div className="absolute top-full left-0 z-50 min-w-[280px] bg-white border border-[#7f9db9] shadow-lg text-xs">
+                            <div className="bg-[#b3d1f5] text-slate-900 px-2 py-0.5 text-[10px] font-bold border-b border-[#7f9db9]">
+                              Product Suggestions ({filtered.length})
                             </div>
-                            <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
-                              {filteredProducts.length === 0 ? (
-                                <div className="p-2.5 text-slate-500 text-xs italic bg-slate-50">
-                                  No catalog matches found. Custom name will be kept.
-                                </div>
+                            <div className="max-h-40 overflow-y-auto">
+                              {filtered.length === 0 ? (
+                                <div className="p-2 text-slate-500 italic">No products found</div>
                               ) : (
-                                filteredProducts.map((p, pIdx) => (
+                                filtered.map((p, pIdx) => (
                                   <div
                                     key={p.id}
                                     onMouseDown={(e) => {
                                       e.preventDefault();
                                       handleSelectProductSuggestion(idx, p);
                                     }}
-                                    className={`p-2 cursor-pointer flex items-center justify-between transition-colors ${
-                                      pIdx === highlightedSuggestionIdx ? 'bg-emerald-100 border-l-4 border-[#107c41]' : 'hover:bg-emerald-50'
+                                    className={`px-2 py-1 cursor-pointer flex justify-between items-center ${
+                                      pIdx === highlightedSuggestionIdx ? 'bg-[#cce4f7] font-bold' : 'hover:bg-slate-100'
                                     }`}
                                   >
-                                    <div>
-                                      <div className="font-semibold text-slate-900">{p.name}</div>
-                                      {p.specifications && (
-                                        <div className="text-[10px] text-slate-500 mt-0.5">
-                                          {p.specifications}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="text-right pl-3 shrink-0">
-                                      <div className="font-mono font-bold text-emerald-800 text-[11px]">
-                                        {(() => {
-                                          const diffVal = parseFloat(p.difference !== undefined && p.difference !== null ? p.difference : (p.price || 0));
-                                          return `Diff: ${diffVal >= 0 ? '+' : ''}₹${diffVal.toFixed(2)}`;
-                                        })()}
-                                      </div>
-                                      <div className="text-[9px] text-slate-400">/{p.unit || 'Ton'}</div>
-                                    </div>
+                                    <span>{p.name}</span>
+                                    <span className="font-mono text-[11px] text-slate-600">
+                                      Diff: {p.difference !== undefined ? p.difference : '0.00'}
+                                    </span>
                                   </div>
                                 ))
                               )}
@@ -1182,471 +1384,486 @@ export default function CombinedTransactionWorkspace() {
                         )}
                       </td>
 
-                      {/* 2. Description */}
-                      <td className="border-r border-slate-300 p-0 focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset bg-white">
+                      {/* Description */}
+                      <td className="border-r border-[#7f9db9] p-0 min-w-[150px]">
                         <input
                           type="text"
                           value={item.description}
-                          disabled={isReadOnly}
+                          disabled={isSaving}
                           onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
-                          placeholder={isReadOnly ? '' : 'Specifications'}
-                          className="w-full h-8 px-2 py-1 text-xs text-slate-700 bg-transparent border-0 outline-none disabled:text-slate-700 placeholder:text-slate-400"
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* 3. Basic Rate */}
-                      <td className="border-r border-slate-300 p-0 text-right focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset bg-white">
+                      {/* Difference */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
                         <input
                           type="number"
                           step="any"
-                          value={isReadOnly && !item.productId && !item.productName ? '' : item.basicRate}
-                          disabled={isReadOnly}
-                          onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
-                          placeholder={isReadOnly ? '' : '0.00'}
-                          className="w-full h-8 px-2 py-1 text-right font-mono text-xs text-slate-900 bg-transparent border-0 outline-none disabled:text-slate-800"
-                        />
-                      </td>
-
-                      {/* 4. Difference (Manual user entry) */}
-                      <td className="border-r border-slate-300 p-0 text-right bg-amber-50/30 focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset">
-                        <input
-                          type="number"
-                          step="any"
-                          value={isReadOnly && !item.productId && !item.productName ? '' : item.difference}
-                          disabled={isReadOnly}
+                          value={hasProduct || (item.difference && item.difference !== '0.00') ? item.difference : ''}
+                          disabled={isSaving}
                           onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
-                          placeholder={isReadOnly ? '' : '0.00'}
-                          className="w-full h-8 px-2 py-1 text-right font-mono font-bold text-amber-900 bg-transparent border-0 outline-none disabled:text-amber-900"
-                          title="Manual difference added to basic rate"
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* 5. Quantity */}
-                      <td className="border-r border-slate-300 p-0 text-right bg-blue-50/30 focus-within:ring-2 focus-within:ring-[#107c41] focus-within:ring-inset">
+                      {/* Pcs */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-16">
+                        <input
+                          type="number"
+                          value={hasProduct || (item.pcs && item.pcs !== '0') ? item.pcs : ''}
+                          disabled={isSaving}
+                          onChange={(e) => handleItemPcsChange(idx, e.target.value)}
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
+                        />
+                      </td>
+
+                      {/* Quantity */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-20">
                         <input
                           type="number"
                           step="any"
-                          min="0"
-                          value={isReadOnly && !item.productId && !item.productName ? '' : item.quantity}
-                          disabled={isReadOnly}
+                          value={item.quantity}
+                          disabled={isSaving}
                           onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
-                          placeholder={isReadOnly ? '' : '1.000'}
-                          className="w-full h-8 px-2 py-1 text-right font-mono font-bold text-blue-900 bg-transparent border-0 outline-none disabled:text-blue-900"
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* 6. Final Rate (Basic + Diff) */}
-                      <td className="border-r border-slate-300 p-0 text-right font-mono font-bold text-emerald-800 bg-emerald-50/40">
-                        <div className="w-full h-8 px-2 py-1 flex items-center justify-end">
-                          {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.finalRate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        </div>
+                      {/* B.Rate */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
+                        <input
+                          type="number"
+                          step="any"
+                          value={item.basicRate}
+                          disabled={isSaving}
+                          onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
+                        />
                       </td>
 
-                      {/* 7. Amount (Final Rate * Qty) */}
-                      <td className="border-r border-slate-300 p-0 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
-                        <div className="w-full h-8 px-2.5 py-1 flex items-center justify-end">
-                          {isReadOnly && !item.productId && !item.productName ? '—' : `₹${parseFloat(item.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        </div>
+                      {/* Rate (Calculated / Editable: B.Rate + Diff) */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
+                        <input
+                          type="number"
+                          step="any"
+                          value={hasProduct || (item.finalRate && item.finalRate !== '0.00') ? item.finalRate : ''}
+                          disabled={isSaving}
+                          onChange={(e) => handleItemRateChange(idx, e.target.value)}
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono font-medium text-black bg-transparent border-0 outline-none focus:bg-white"
+                        />
                       </td>
 
-                      {/* Action */}
-                      {!isReadOnly && (
-                        <td className="p-0 text-center bg-white">
-                          <button
-                            type="button"
-                            onClick={() => removeTransactionRow(idx)}
-                            className="w-full h-8 flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                            title="Clear / Reset Row"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      )}
+                      {/* Amount (Calculated / Editable: Rate * Qty) */}
+                      <td className="p-0 text-right w-28">
+                        <input
+                          type="number"
+                          step="any"
+                          value={hasProduct || (item.amount && item.amount !== '0.00') ? item.amount : ''}
+                          disabled={isSaving}
+                          onChange={(e) => handleItemAmountChange(idx, e.target.value)}
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono font-semibold text-black bg-transparent border-0 outline-none focus:bg-white"
+                        />
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
+        </div>
 
-          {/* Retro Excel Status Bar Footer */}
-          <div className="bg-[#e9edf4] border-t-2 border-slate-300 px-3 py-1 flex items-center justify-between text-xs font-mono text-slate-700 select-none">
-            <div className="flex items-center space-x-3 text-[11px]">
-              <span className="flex items-center space-x-1.5 text-emerald-800 font-bold">
-                <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block"></span>
-                <span>READY</span>
-              </span>
-              <span className="text-slate-400">|</span>
-              <span className="text-slate-600">SHEET 1: VOUCHER_ITEMS (12 ROWS)</span>
+        {/* TOTALS ROW DIRECTLY UNDER GRID COLUMNS */}
+        <div className="shrink-0 flex items-center justify-end space-x-2 text-xs pt-0.5">
+          <div className="flex items-center space-x-1">
+            <input
+              type="text"
+              readOnly
+              value={calculations.totalPcs}
+              className="w-16 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+              title="Total Pieces"
+            />
+          </div>
+          <div className="flex items-center space-x-1">
+            <input
+              type="text"
+              readOnly
+              value={calculations.totalQty}
+              className="w-20 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+              title="Total Quantity"
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="font-bold text-[11px] text-black">Value</span>
+            <input
+              type="text"
+              readOnly
+              value={calculations.value}
+              className="w-28 h-5 bg-white border border-[#7f9db9] px-2 text-right font-mono font-bold text-black text-[11px]"
+              title="Total Value"
+            />
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            LOWER SECTION: Left (Remark/Transport/Broker), Center (Due/VAT/Shortage), Right (Taxes/Grand Total)
+           ───────────────────────────────────────────────────────────── */}
+        <div className="shrink-0 grid grid-cols-1 md:grid-cols-12 gap-2 pt-0.5">
+          
+          {/* Lower Left: Remark (expanded width), Transport, Broker */}
+          <div className="md:col-span-7 space-y-1">
+            <div className="flex items-start w-full">
+              <label className="w-16 font-bold text-[11px] text-black pt-0.5">Remark:</label>
+              <textarea
+                ref={remarkTextareaRef}
+                rows={3}
+                value={billRemark}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setBillRemark(e.target.value);
+                }}
+                className="flex-1 h-20 bg-[#cce4f7] border border-[#7f9db9] px-1.5 py-1 text-xs text-black focus:outline-none focus:bg-white resize-none"
+              />
             </div>
 
-            <div className="flex items-center space-x-6 text-xs font-mono">
-              <div className="flex items-center space-x-1.5">
-                <span className="text-[10px] text-slate-500 font-sans uppercase font-bold">SUM(QTY):</span>
-                <span className="font-bold text-blue-900 bg-white px-2 py-0.5 border border-slate-300 shadow-2xs">
-                  {calculations.totalQty} Ton
-                </span>
+            {/* Transport (Commented out per request)
+            <div className="flex items-center">
+              <label className="w-16 font-bold text-[11px] text-black">Transport</label>
+              <input
+                type="text"
+                value={transportName}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setTransportName(e.target.value);
+                }}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
+              />
+            </div>
+            */}
+
+            {/* Broker (Commented out per request)
+            <div className="flex items-center">
+              <label className="w-16 font-bold text-[11px] text-black">Broker</label>
+              <input
+                type="text"
+                value={brokerName}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setBrokerName(e.target.value);
+                }}
+                className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
+              />
+            </div>
+            */}
+          </div>
+
+          {/* Lower Center: Due Date, Total VAT (red), Shortage */}
+          <div className="md:col-span-2 space-y-1">
+            {/* Due Date (Commented out per request)
+            <div className="flex items-center">
+              <label className="w-18 font-bold text-[11px] text-black">Due Date</label>
+              <input
+                type="text"
+                value={formatToDisplayDate(billDueDate)}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setBillDueDate(parseDisplayDateToIso(e.target.value));
+                }}
+                placeholder="DD-MM-YYYY"
+                className="w-24 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold focus:outline-none focus:bg-white"
+              />
+            </div>
+            */}
+
+            <div className="flex items-center">
+              <label className="w-16 font-bold text-[11px] text-red-700">Total VAT</label>
+              <input
+                type="text"
+                readOnly
+                value={calculations.totalVat}
+                className="w-20 h-5 bg-white border border-[#7f9db9] px-1 text-[11px] font-mono font-bold text-right text-black"
+              />
+            </div>
+
+            {/* Shortage (Commented out per request)
+            <div className="flex items-center">
+              <label className="w-18 font-bold text-[11px] text-black">Shortage</label>
+              <div className="flex items-center space-x-1">
+                <input
+                  type="number"
+                  step="any"
+                  value={shortageQty}
+                  disabled={isSaving}
+                  onChange={(e) => {
+                    markDirtyAndEdit();
+                    setShortageQty(e.target.value);
+                  }}
+                  placeholder="Qty"
+                  className="w-14 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] font-mono text-right text-black focus:outline-none focus:bg-white"
+                />
+                <input
+                  type="number"
+                  step="any"
+                  value={shortageAmt}
+                  disabled={isSaving}
+                  onChange={(e) => {
+                    markDirtyAndEdit();
+                    setShortageAmt(e.target.value);
+                  }}
+                  placeholder="0.00"
+                  className="w-18 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] font-mono text-right text-black focus:outline-none focus:bg-white"
+                />
               </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="text-[10px] text-slate-500 font-sans uppercase font-bold">SUBTOTAL:</span>
-                <span className="font-bold text-slate-900 bg-white px-2 py-0.5 border border-slate-300 shadow-2xs">
-                  ₹{parseFloat(calculations.subtotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
+            </div>
+            */}
+          </div>
+
+          {/* Lower Right: Value, Exp Before Tax, Vat/Cst, Sur @, Exp After Tax, Grand Total */}
+          <div className="md:col-span-3 space-y-0.5">
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-[11px] text-black">Value</label>
+              <input
+                type="text"
+                readOnly
+                value={calculations.value}
+                className="w-28 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+              />
+            </div>
+
+            {/* Exp Before Tax (Commented out per request)
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-[11px] text-black">Exp Before Tax</label>
+              <input
+                type="number"
+                step="any"
+                value={expBeforeTax}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setExpBeforeTax(e.target.value);
+                }}
+                placeholder="0.00"
+                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
+              />
+            </div>
+            */}
+
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-[11px] text-black">Vat/Cst</label>
+              <input
+                type="number"
+                step="any"
+                value={billTaxRate}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setBillTaxRate(e.target.value);
+                }}
+                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black font-semibold focus:outline-none focus:bg-white text-[11px]"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-[11px] text-black">Sur @</label>
+              <input
+                type="number"
+                step="any"
+                value={surchargeRate}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setSurchargeRate(e.target.value);
+                }}
+                placeholder="0.00"
+                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
+              />
+            </div>
+
+            {/* Exp After Tax (Commented out per request)
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-[11px] text-black">Exp After Tax</label>
+              <input
+                type="number"
+                step="any"
+                value={expAfterTax}
+                disabled={isSaving}
+                onChange={(e) => {
+                  markDirtyAndEdit();
+                  setExpAfterTax(e.target.value);
+                }}
+                placeholder="0.00"
+                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
+              />
+            </div>
+            */}
+
+            <div className="flex items-center justify-between pt-0.5">
+              <label className="font-black text-[12px] text-black uppercase">Grand Total</label>
+              <input
+                type="text"
+                readOnly
+                value={calculations.grandTotal}
+                className="w-32 h-5.5 bg-[#cce4f7] border border-[#7f9db9] px-1.5 text-right font-mono font-black text-[13px] text-black"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            BOTTOM ACTION BUTTON BAR: Add, Previous, Next, Print & Save
+           ───────────────────────────────────────────────────────────── */}
+        <div className="shrink-0 pt-1 border-t border-[#7f9db9]">
+          <div className="flex items-center justify-between gap-1">
+            
+            {/* Left: Add, < Previous, Next > */}
+            <div className="flex items-center gap-1.5">
+              {/* 1. Add */}
+              <button
+                type="button"
+                onClick={handleAdd}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer outline-dotted outline-1 outline-[#404040] outline-offset-[-3px]"
+              >
+                Add
+              </button>
+
+              {/* 2. Previous */}
+              <button
+                type="button"
+                onClick={handlePrevious}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+              >
+                &lt; Previous
+              </button>
+
+              {/* 3. Next */}
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+              >
+                Next &gt;
+              </button>
+
+              {/* 4. Save (Save only without printing) */}
+              <button
+                type="button"
+                onClick={handleSaveOnly}
+                disabled={actionLoading}
+                className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Save record only without printing"
+              >
+                {actionLoading && mode === 'SAVING' ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+
+            {/* Right: Print & Save */}
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={handlePrintAndSave}
+                disabled={actionLoading}
+                className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+              >
+                {actionLoading ? 'Saving...' : 'Print & Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────────
+          SEARCH MODAL
+         ───────────────────────────────────────────────────────────────── */}
+      {searchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-[#e6e9ed] border-2 border-[#7f9db9] shadow-2xl w-full max-w-xl text-black">
+            
+            {/* Modal Title Bar */}
+            <div className="bg-gradient-to-r from-[#b3d1f5] to-[#d4e4f7] px-3 py-1 flex items-center justify-between border-b border-[#7f9db9]">
+              <span className="font-bold text-xs">Search Sale Voucher</span>
+              <button
+                type="button"
+                onClick={() => setSearchModalOpen(false)}
+                className="w-4 h-4 bg-white/80 hover:bg-red-500 hover:text-white border border-[#7f9db9] text-[10px] font-bold flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-3 space-y-2">
+              <div>
+                <label className="block text-[11px] font-bold mb-1">Search by Bill Number, Customer Name, or Date:</label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Type to filter..."
+                  className="w-full bg-[#cce4f7] border border-[#7f9db9] px-2 py-1 text-xs text-black font-semibold focus:outline-none focus:bg-white"
+                />
+              </div>
+
+              <div className="border border-[#7f9db9] bg-white max-h-60 overflow-y-auto">
+                {searchLoading ? (
+                  <div className="p-4 text-center text-slate-500">Loading vouchers...</div>
+                ) : filteredSearchBills.length === 0 ? (
+                  <div className="p-4 text-center text-slate-500">No matching vouchers found</div>
+                ) : (
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-[#e4ebf5] border-b border-[#7f9db9] text-left font-bold text-[11px]">
+                        <th className="p-1.5 border-r border-[#7f9db9]">Bill #</th>
+                        <th className="p-1.5 border-r border-[#7f9db9]">Date</th>
+                        <th className="p-1.5 border-r border-[#7f9db9]">Customer</th>
+                        <th className="p-1.5 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSearchBills.map(b => (
+                        <tr
+                          key={b.id}
+                          onClick={() => handleSelectSearchResult(b.id)}
+                          className="hover:bg-[#cce4f7] cursor-pointer border-b border-slate-200"
+                        >
+                          <td className="p-1.5 font-bold border-r border-slate-200">{b.billNumber}</td>
+                          <td className="p-1.5 border-r border-slate-200">{formatToDisplayDate(b.billDate)}</td>
+                          <td className="p-1.5 border-r border-slate-200">{b.Customer?.name || '—'}</td>
+                          <td className="p-1.5 text-right font-mono font-bold">₹{parseFloat(b.finalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSearchModalOpen(false)}
+                  className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070]"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
-        </section>
-
-        {/* ==============================================================
-            3. ESTIMATE BOX & 4. BILLING BOX
-           ============================================================== */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-          
-          {/* ───────────────────────────────────────────────────────────
-              ESTIMATE BOX (Pre-tax quotation)
-             ─────────────────────────────────────────────────────────── */}
-          <section className="bg-sky-50/70 rounded border border-sky-300 shadow-sm p-3.5 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-1.5 mb-2.5 border-b border-sky-200">
-                <div className="flex items-center space-x-1.5">
-                  <FileText className="w-4 h-4 text-sky-700" />
-                  <h3 className="font-bold text-xs uppercase text-sky-900 tracking-wide">
-                    Estimate Quotation Box (Pre-Tax)
-                  </h3>
-                </div>
-                <span className="px-2 py-0.5 bg-sky-200 text-sky-800 rounded text-[10px] font-bold">
-                  {estimateNumber ? `Estimate #${estimateNumber}` : 'Quotation'}
-                </span>
-              </div>
-
-              <div className="space-y-2 font-mono text-xs">
-                <div className="flex justify-between items-center py-1 border-b border-sky-100">
-                  <span className="font-sans text-slate-600">Customer:</span>
-                  <span className="font-semibold text-slate-900">{selectedCustomer?.name || 'Not Selected'}</span>
-                </div>
-                <div className="flex justify-between items-center py-1 border-b border-sky-100">
-                  <span className="font-sans text-slate-600">Total Quantity:</span>
-                  <span className="font-bold text-blue-700">{calculations.totalQty} Ton</span>
-                </div>
-                <div className="flex justify-between items-center py-1 border-b border-sky-100">
-                  <span className="font-sans text-slate-600">Basic Subtotal:</span>
-                  <span className="font-bold text-slate-900">
-                    ₹{parseFloat(calculations.subtotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center py-1 border-b border-sky-100">
-                  <span className="font-sans text-slate-600">Others / Freight Adjustment:</span>
-                  <div className="flex items-center space-x-1">
-                    <span>₹</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={estimateOthers}
-                      disabled={isReadOnly}
-                      onChange={(e) => {
-                        setIsDirty(true);
-                        setEstimateOthers(e.target.value);
-                      }}
-                      className="w-24 text-right font-mono bg-white border border-sky-300 rounded px-1.5 py-0.5 text-xs text-slate-800 disabled:bg-transparent disabled:border-none focus:ring-1 focus:ring-sky-500"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-2.5 border-t border-sky-200">
-              <div className="flex justify-between items-center bg-sky-100 p-2.5 rounded border border-sky-300">
-                <span className="font-sans font-bold text-xs text-sky-900 uppercase">
-                  Estimate Amount:
-                </span>
-                <span className="font-mono font-bold text-lg text-sky-900">
-                  ₹{parseFloat(calculations.estimateTotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-
-              <div className="mt-2.5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={handlePrintEstimate}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-sky-100 text-sky-800 border border-sky-300 rounded text-xs font-semibold shadow-2xs transition-colors"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Estimate</span>
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {/* ───────────────────────────────────────────────────────────
-              BILLING BOX
-              Exact required fields:
-              - GST rate (dropdown or custom amount in percent)
-              - Transport cost
-              - Due date
-              - Remarks or note (manual)
-              - Final bill amount
-             ─────────────────────────────────────────────────────────── */}
-          <section className="bg-emerald-50/70 rounded border border-emerald-300 shadow-sm p-3.5 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-1.5 mb-2.5 border-b border-emerald-200">
-                <div className="flex items-center space-x-1.5">
-                  <Receipt className="w-4 h-4 text-emerald-700" />
-                  <h3 className="font-bold text-xs uppercase text-emerald-900 tracking-wide">
-                    Bill Box (Tax & Final Amount)
-                  </h3>
-                </div>
-                <span className="px-2 py-0.5 bg-emerald-200 text-emerald-800 rounded text-[10px] font-bold">
-                  Official Bill
-                </span>
-              </div>
-
-              {/* Exact requested fields */}
-              <div className="space-y-2.5 text-xs">
-                
-                {/* 1. GST Rate (Dropdown or Custom in Percent) */}
-                <div>
-                  <label className="block text-[10px] font-bold text-emerald-900 uppercase mb-1">
-                    GST Rate (%) <span className="text-slate-500 font-normal">(Select preset or enter custom %)</span>
-                  </label>
-                  <div className="grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-7">
-                      <select
-                        value={gstPreset}
-                        disabled={isReadOnly}
-                        onChange={(e) => handleGstPresetChange(e.target.value)}
-                        className="w-full bg-white border border-emerald-400 rounded px-2 py-1 text-xs font-semibold text-emerald-900 disabled:bg-slate-100"
-                      >
-                        <option value="18">18% GST (Standard)</option>
-                        <option value="12">12% GST</option>
-                        <option value="5">5% GST</option>
-                        <option value="0">0% (Exempt)</option>
-                        <option value="custom">Custom Percent...</option>
-                      </select>
-                    </div>
-                    <div className="col-span-5 relative">
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={billTaxRate}
-                        disabled={isReadOnly}
-                        onChange={(e) => handleCustomGstChange(e.target.value)}
-                        placeholder="%"
-                        className="w-full font-mono font-bold text-right bg-white border-2 border-emerald-400 rounded px-2 pr-6 py-1 text-xs text-emerald-900 disabled:bg-slate-100 focus:ring-1 focus:ring-emerald-500"
-                        title="Custom GST rate in percent"
-                      />
-                      <span className="absolute inset-y-0 right-0 pr-2 flex items-center text-emerald-700 font-bold text-xs pointer-events-none">
-                        %
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. Transport Cost */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                    Transport Cost (₹)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-slate-500 font-bold text-xs pointer-events-none">
-                      ₹
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={billTransportCost}
-                      disabled={isReadOnly}
-                      onChange={(e) => {
-                        setIsDirty(true);
-                        setBillTransportCost(e.target.value);
-                      }}
-                      placeholder="0.00"
-                      className="w-full font-mono pl-6 pr-2.5 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 disabled:bg-slate-100 focus:ring-1 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                {/* 3. Due Date */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                    Due Date
-                  </label>
-                  <input
-                    type="date"
-                    value={billDueDate}
-                    disabled={isReadOnly}
-                    onChange={(e) => {
-                      setIsDirty(true);
-                      setBillDueDate(e.target.value);
-                    }}
-                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 disabled:bg-slate-100 focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-
-                {/* 4. Remarks or Notes (Manual) */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                    Remarks / Notes
-                  </label>
-                  <textarea
-                    rows="2"
-                    value={billRemark}
-                    disabled={isReadOnly}
-                    onChange={(e) => {
-                      setIsDirty(true);
-                      setBillRemark(e.target.value);
-                    }}
-                    placeholder="Enter manual delivery notes, vehicle, or payment terms..."
-                    className="w-full bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 disabled:bg-slate-100 focus:ring-1 focus:ring-emerald-500"
-                  ></textarea>
-                </div>
-
-                {/* Breakdown Summary */}
-                <div className="bg-white/90 p-2 rounded border border-emerald-200 font-mono text-xs space-y-1">
-                  <div className="flex justify-between items-center text-slate-600">
-                    <span className="font-sans">Subtotal:</span>
-                    <span>₹{parseFloat(calculations.subtotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-emerald-800 font-semibold">
-                    <span className="font-sans">GST Amount ({billTaxRate}%):</span>
-                    <span>+ ₹{parseFloat(calculations.gstAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  {parseFloat(billTransportCost) > 0 && (
-                    <div className="flex justify-between items-center text-slate-600">
-                      <span className="font-sans">Transport Cost:</span>
-                      <span>+ ₹{parseFloat(billTransportCost).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Final Bill Amount */}
-            <div className="mt-3 pt-2.5 border-t border-emerald-200">
-              <div className="flex justify-between items-center bg-emerald-700 text-white p-2.5 rounded shadow-sm">
-                <div>
-                  <span className="block text-[10px] uppercase tracking-wider font-semibold opacity-90">
-                    Final Bill Amount:
-                  </span>
-                  <span className="text-[11px] opacity-75 font-sans">Subtotal + GST + Transport</span>
-                </div>
-                <span className="font-mono font-bold text-xl text-white">
-                  ₹{parseFloat(calculations.finalBillAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-
-              <div className="mt-2.5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={handlePrintBill}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-semibold shadow-xs transition-colors"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Bill</span>
-                </button>
-              </div>
-            </div>
-          </section>
         </div>
-      </main>
-
-      {/* ─────────────────────────────────────────────────────────────────
-          BOTTOM ACTION TOOLBAR
-          Functional Buttons: Add, Previous, Edit, Save (+ Next, Print Bill)
-         ───────────────────────────────────────────────────────────────── */}
-      <footer className="bg-slate-200 border-t-2 border-slate-300 p-2 flex items-center justify-between shadow-inner">
-        <div className="flex items-center space-x-2">
-          {/* 1. ADD */}
-          <button
-            type="button"
-            onClick={handleAdd}
-            disabled={actionLoading}
-            className="px-4 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-400 rounded text-xs font-bold shadow-xs active:translate-y-0.5 transition-all flex items-center space-x-1.5 disabled:opacity-50"
-          >
-            <Plus className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Add</span>
-          </button>
-
-          {/* 3. EDIT */}
-          <button
-            type="button"
-            onClick={handleEdit}
-            disabled={actionLoading || mode === 'EDIT' || mode === 'SAVING'}
-            className="px-4 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-400 rounded text-xs font-bold shadow-xs active:translate-y-0.5 transition-all flex items-center space-x-1.5 disabled:opacity-50"
-          >
-            <Edit3 className="w-3.5 h-3.5 text-blue-600" />
-            <span>Edit</span>
-          </button>
-
-          {/* 2. PREVIOUS */}
-          <button
-            type="button"
-            onClick={handlePrevious}
-            disabled={actionLoading}
-            className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-400 rounded text-xs font-bold shadow-xs active:translate-y-0.5 transition-all flex items-center space-x-1 disabled:opacity-50"
-          >
-            <ChevronLeft className="w-3.5 h-3.5 text-slate-600" />
-            <span>&lt; Previous</span>
-          </button>
-
-          {/* NEXT */}
-          <button
-            type="button"
-            onClick={handleNext}
-            disabled={actionLoading}
-            className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-400 rounded text-xs font-bold shadow-xs active:translate-y-0.5 transition-all flex items-center space-x-1 disabled:opacity-50"
-          >
-            <span>Next &gt;</span>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
-          </button>
-        </div>
-
-        {/* Status Indicator */}
-        <div className="hidden sm:flex items-center space-x-2 text-[11px] text-slate-600 font-medium">
-          {isDirty && (
-            <span className="text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-bold animate-pulse">
-              ● Unsaved changes
-            </span>
-          )}
-          <span>{billNumber ? `Voucher: ${billNumber}` : 'New Voucher'}</span>
-        </div>
-
-        {/* Right Action Buttons */}
-        <div className="flex items-center space-x-2">
-          {/* PRINT BILL */}
-          <button
-            type="button"
-            onClick={handlePrintBill}
-            disabled={!currentBill?.id || actionLoading}
-            className="px-3.5 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-400 rounded text-xs font-bold shadow-xs flex items-center space-x-1.5 disabled:opacity-40"
-            title="Print official Bill"
-          >
-            <Printer className="w-3.5 h-3.5 text-slate-700" />
-            <span>Print Bill</span>
-          </button>
-
-          {/* 4. SAVE */}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isReadOnly || actionLoading}
-            className="px-6 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shadow-sm active:translate-y-0.5 transition-all flex items-center space-x-1.5 disabled:opacity-50 disabled:bg-slate-400"
-          >
-            {actionLoading ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Saving...</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-3.5 h-3.5" />
-                <span>Save</span>
-              </>
-            )}
-          </button>
-        </div>
-      </footer>
+      )}
     </div>
   );
 }
