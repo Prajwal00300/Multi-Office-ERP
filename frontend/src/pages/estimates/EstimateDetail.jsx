@@ -99,7 +99,7 @@ const EstimateDetail = () => {
 
           {/* Edit Estimate */}
           <Link
-            to={`/estimates/${estimate.id}/edit`}
+            to={`/estimate-voucher?estimateId=${estimate.id}&mode=edit`}
             className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium flex items-center shadow-xs transition-colors"
           >
             <Edit3 size={16} className="mr-1.5" />

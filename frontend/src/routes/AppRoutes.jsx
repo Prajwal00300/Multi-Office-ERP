@@ -22,6 +22,7 @@ import EstimatesList from '../pages/estimates/EstimatesList';
 import EstimateForm from '../pages/estimates/EstimateForm';
 import EstimateDetail from '../pages/estimates/EstimateDetail';
 import EstimatePrint from '../pages/estimates/EstimatePrint';
+import EstimateVoucherWorkspace from '../pages/estimates/EstimateVoucherWorkspace';
 import BillsList from '../pages/billing/BillsList';
 import BillForm from '../pages/billing/BillForm';
 import BillDetail from '../pages/billing/BillDetail';
@@ -126,7 +127,8 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="ESTIMATES" />}>
         <Route element={<Layout />}>
           <Route path="/estimates" element={<EstimatesList />} />
-          <Route path="/estimates/new" element={<EstimateForm />} />
+          <Route path="/estimate-voucher" element={<EstimateVoucherWorkspace />} />
+          <Route path="/estimates/new" element={<Navigate to="/estimate-voucher" replace />} />
           <Route path="/estimates/:id" element={<EstimateDetail />} />
           <Route path="/estimates/:id/edit" element={<EstimateForm />} />
           <Route path="/estimates/:id/print" element={<EstimatePrint />} />

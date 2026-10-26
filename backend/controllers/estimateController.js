@@ -159,6 +159,148 @@ exports.getEstimateById = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/estimates/navigation/previous - Retrieve immediately preceding estimate within authorized office
+ * Query params: currentId (optional), organizationId (optional)
+ */
+exports.getPreviousEstimate = async (req, res) => {
+  try {
+    const { currentId, organizationId } = req.query;
+
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    if (currentId) {
+      whereClause.id = { [Op.lt]: parseInt(currentId, 10) };
+    }
+
+    const estimate = await Estimate.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Customer,
+          attributes: ['id', 'name', 'address', 'city', 'phone', 'tin']
+        },
+        {
+          model: Organization,
+          attributes: ['id', 'name', 'address', 'phone']
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'locker',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'overrider',
+          attributes: ['id', 'username']
+        },
+        {
+          model: EstimateItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'DESC']]
+    });
+
+    if (!estimate) {
+      return res.status(404).json({ error: 'No previous estimate found for this office' });
+    }
+
+    await verifyRecordOwnership(estimate, req.user);
+
+    res.status(200).json(estimate);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching previous estimate:', error);
+    res.status(500).json({ error: 'Internal server error while fetching previous estimate' });
+  }
+};
+
+/**
+ * GET /api/estimates/navigation/next - Retrieve immediately following estimate within authorized office
+ * Query params: currentId (optional), organizationId (optional)
+ */
+exports.getNextEstimate = async (req, res) => {
+  try {
+    const { currentId, organizationId } = req.query;
+
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    if (currentId) {
+      whereClause.id = { [Op.gt]: parseInt(currentId, 10) };
+    }
+
+    const estimate = await Estimate.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Customer,
+          attributes: ['id', 'name', 'address', 'city', 'phone', 'tin']
+        },
+        {
+          model: Organization,
+          attributes: ['id', 'name', 'address', 'phone']
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'locker',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'overrider',
+          attributes: ['id', 'username']
+        },
+        {
+          model: EstimateItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'ASC']]
+    });
+
+    if (!estimate) {
+      return res.status(404).json({ error: 'No subsequent estimate found for this office' });
+    }
+
+    await verifyRecordOwnership(estimate, req.user);
+
+    res.status(200).json(estimate);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching next estimate:', error);
+    res.status(500).json({ error: 'Internal server error while fetching next estimate' });
+  }
+};
+
 // GET /api/estimates/by-number/:estimateNumber - Lookup for future Gate Pass integration
 exports.getEstimateByNumber = async (req, res) => {
   try {

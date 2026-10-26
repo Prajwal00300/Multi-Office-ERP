@@ -479,6 +479,11 @@ export default function CombinedTransactionWorkspace() {
 
     setTransactionItems(prev => {
       const updated = [...prev];
+      if (!text.trim()) {
+        updated[index] = { ...BLANK_TRANSACTION_ROW };
+        return updated;
+      }
+
       const match = products.find(p => p.name.toLowerCase() === text.trim().toLowerCase());
 
       const bRate = updated[index].isCustomBRate
@@ -1321,6 +1326,12 @@ export default function CombinedTransactionWorkspace() {
                   const isActive = idx === activeRowIdx;
                   const filtered = getFilteredProducts(item.productName);
                   const hasProduct = Boolean(item.productId || (item.productName && item.productName.trim()));
+                  const hasRowData = Boolean(
+                    hasProduct ||
+                    (item.quantity && item.quantity !== '') ||
+                    (item.difference && item.difference !== '0.00' && item.difference !== '') ||
+                    (item.pcs && item.pcs !== '0' && item.pcs !== '')
+                  );
 
                   return (
                     <tr
@@ -1401,7 +1412,7 @@ export default function CombinedTransactionWorkspace() {
                         <input
                           type="number"
                           step="any"
-                          value={hasProduct || (item.difference && item.difference !== '0.00') ? item.difference : ''}
+                          value={hasRowData ? item.difference : ''}
                           disabled={isSaving}
                           onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}
@@ -1413,7 +1424,7 @@ export default function CombinedTransactionWorkspace() {
                       <td className="border-r border-[#7f9db9] p-0 text-right w-16">
                         <input
                           type="number"
-                          value={hasProduct || (item.pcs && item.pcs !== '0') ? item.pcs : ''}
+                          value={hasRowData ? item.pcs : ''}
                           disabled={isSaving}
                           onChange={(e) => handleItemPcsChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}
@@ -1439,7 +1450,7 @@ export default function CombinedTransactionWorkspace() {
                         <input
                           type="number"
                           step="any"
-                          value={item.basicRate}
+                          value={hasProduct ? (item.basicRate || headerBRate || '') : (item.basicRate || '')}
                           disabled={isSaving}
                           onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}
@@ -1452,7 +1463,7 @@ export default function CombinedTransactionWorkspace() {
                         <input
                           type="number"
                           step="any"
-                          value={hasProduct || (item.finalRate && item.finalRate !== '0.00') ? item.finalRate : ''}
+                          value={hasProduct ? (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : (item.finalRate || '')) : (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : '')}
                           disabled={isSaving}
                           onChange={(e) => handleItemRateChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}
@@ -1465,7 +1476,7 @@ export default function CombinedTransactionWorkspace() {
                         <input
                           type="number"
                           step="any"
-                          value={hasProduct || (item.amount && item.amount !== '0.00') ? item.amount : ''}
+                          value={hasProduct ? (item.amount && item.amount !== '0.00' ? item.amount : '') : (item.amount && item.amount !== '0.00' ? item.amount : '')}
                           disabled={isSaving}
                           onChange={(e) => handleItemAmountChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}

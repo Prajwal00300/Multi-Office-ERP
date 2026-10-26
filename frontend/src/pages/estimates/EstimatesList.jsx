@@ -306,9 +306,9 @@ const EstimatesList = () => {
 
                       {/* Edit */}
                       <Link
-                        to={`/estimates/${est.id}/edit`}
+                        to={`/estimate-voucher?estimateId=${est.id}&mode=edit`}
                         className="text-amber-600 hover:text-amber-800 p-1.5 rounded hover:bg-amber-50 inline-block transition-colors"
-                        title="Edit Estimate"
+                        title="Edit Estimate in Voucher Workspace"
                       >
                         <Edit3 size={17} />
                       </Link>
