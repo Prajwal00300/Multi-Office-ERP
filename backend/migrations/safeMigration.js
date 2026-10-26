@@ -153,14 +153,45 @@ async function runSafeHierarchyMigration() {
         ALTER TABLE products 
         ADD COLUMN difference DECIMAL(15, 2) NOT NULL DEFAULT 0.00
       `);
-      try {
-        await sequelize.query(`
-          UPDATE products SET difference = price WHERE difference = 0.00 AND price != 0.00
-        `);
-      } catch (syncErr) {
-        // Ignore if no records
+      console.log("   ✅ products.difference added.");
+    }
+
+    // 3d. Safely drop 'category' and 'price' columns from products table if they exist
+    try {
+      const [prodColsNow] = await sequelize.query(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products'
+      `);
+      const prodColNamesNow = prodColsNow.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+
+      const [prodIdxs] = await sequelize.query(`SHOW INDEX FROM products`);
+      const indexNames = new Set(prodIdxs.map(idx => idx.Key_name || idx.key_name));
+
+      if (indexNames.has('products_category')) {
+        await sequelize.query('ALTER TABLE products DROP INDEX products_category');
       }
-      console.log("   ✅ products.difference added and synced.");
+      if (indexNames.has('products_organization_id_name_category_size')) {
+        await sequelize.query('ALTER TABLE products DROP INDEX products_organization_id_name_category_size');
+      }
+
+      if (prodColNamesNow.includes('category')) {
+        await sequelize.query('ALTER TABLE products DROP COLUMN category');
+        console.log("   ✅ products.category dropped successfully.");
+      }
+      if (prodColNamesNow.includes('price')) {
+        await sequelize.query('ALTER TABLE products DROP COLUMN price');
+        console.log("   ✅ products.price dropped successfully.");
+      }
+      if (prodColNamesNow.includes('size')) {
+        await sequelize.query('ALTER TABLE products DROP COLUMN size');
+        console.log("   ✅ products.size dropped successfully.");
+      }
+      if (!indexNames.has('products_org_name')) {
+        await sequelize.query('ALTER TABLE products ADD INDEX products_org_name (organizationId, name)');
+      }
+    } catch (dropErr) {
+      console.warn('   ⚠️ Note on dropping product category/price:', dropErr.message);
     }
 
     // 4. Remove bill_audits and estimate_audits tables as requested

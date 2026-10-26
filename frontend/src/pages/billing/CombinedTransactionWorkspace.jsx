@@ -386,8 +386,6 @@ export default function CombinedTransactionWorkspace() {
     const q = query.toLowerCase().trim();
     return products.filter(p =>
       (p.name && p.name.toLowerCase().includes(q)) ||
-      (p.category && p.category.toLowerCase().includes(q)) ||
-      (p.size && p.size.toLowerCase().includes(q)) ||
       (p.specifications && p.specifications.toLowerCase().includes(q))
     ).slice(0, 15);
   };
@@ -1161,9 +1159,9 @@ export default function CombinedTransactionWorkspace() {
                                   >
                                     <div>
                                       <div className="font-semibold text-slate-900">{p.name}</div>
-                                      {(p.size || p.category || p.specifications) && (
+                                      {p.specifications && (
                                         <div className="text-[10px] text-slate-500 mt-0.5">
-                                          {[p.size, p.category, p.specifications].filter(Boolean).join(' • ')}
+                                          {p.specifications}
                                         </div>
                                       )}
                                     </div>

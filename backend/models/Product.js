@@ -23,16 +23,6 @@ const Product = sequelize.define('Product', {
       notEmpty: true,
     }
   },
-  category: {
-    type: DataTypes.STRING,
-    allowNull: true,
-    defaultValue: 'General'
-  },
-  size: {
-    type: DataTypes.STRING,
-    allowNull: true,
-    defaultValue: '-'
-  },
   unit: {
     type: DataTypes.STRING,
     allowNull: false,
@@ -46,12 +36,6 @@ const Product = sequelize.define('Product', {
     allowNull: false,
     defaultValue: 0.00,
     comment: 'Product rate difference per Ton (can be positive, zero, or negative)'
-  },
-  price: {
-    type: DataTypes.DECIMAL(15, 2),
-    allowNull: false,
-    defaultValue: 0.00,
-    comment: 'Product price / rate difference (default per Ton)'
   },
   description: {
     type: DataTypes.TEXT,
@@ -82,15 +66,11 @@ const Product = sequelize.define('Product', {
     },
     {
       unique: false,
-      fields: ['category']
-    },
-    {
-      unique: false,
       fields: ['name']
     },
     {
       unique: false,
-      fields: ['organizationId', 'name', 'category', 'size']
+      fields: ['organizationId', 'name']
     }
   ]
 });

@@ -19,15 +19,10 @@ const {
 // GET /api/products
 exports.getProducts = async (req, res) => {
   try {
-    const { search, category, status, organizationId } = req.query;
+    const { search, status, organizationId } = req.query;
 
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
     let whereClause = buildOfficeWhereClause(targetOfficeIds);
-
-    // Category filter
-    if (category && category.trim() !== '' && category !== 'ALL') {
-      whereClause.category = category.trim();
-    }
 
     // Status filter
     if (status && status.trim() !== '' && status !== 'ALL') {
@@ -41,8 +36,6 @@ exports.getProducts = async (req, res) => {
         ...whereClause,
         [Op.or]: [
           { name: { [Op.like]: searchTerm } },
-          { category: { [Op.like]: searchTerm } },
-          { size: { [Op.like]: searchTerm } },
           { description: { [Op.like]: searchTerm } },
           { specifications: { [Op.like]: searchTerm } }
         ]
@@ -106,10 +99,7 @@ exports.createProduct = async (req, res) => {
   try {
     const {
       name,
-      category,
-      size,
       unit,
-      price,
       difference,
       quantity,
       currentStock,
@@ -125,19 +115,13 @@ exports.createProduct = async (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Product name is required' });
     }
-    const productCategory = (category && category.trim()) ? category.trim() : 'General';
-    const productSize = (size && size.trim()) ? size.trim() : '-';
     const productUnit = (unit && unit.trim()) ? unit.trim() : 'Ton';
 
-    // Difference / Price: accept either difference or price, support positive, zero, and negative values
-    const rawDiff = (difference !== undefined && difference !== null && difference !== '')
-      ? difference
-      : price;
-
-    if (rawDiff === undefined || rawDiff === null || rawDiff === '') {
+    // Difference: rate difference per Ton (supports positive, zero, and negative values)
+    if (difference === undefined || difference === null || difference === '') {
       return res.status(400).json({ error: 'Product difference is required' });
     }
-    const parsedDiff = parseFloat(rawDiff);
+    const parsedDiff = parseFloat(difference);
     if (isNaN(parsedDiff)) {
       return res.status(400).json({ error: 'Product difference must be a valid number' });
     }
@@ -183,10 +167,7 @@ exports.createProduct = async (req, res) => {
     const newProduct = await Product.create({
       organizationId: targetOrgId,
       name: name.trim(),
-      category: productCategory,
-      size: productSize,
       unit: productUnit,
-      price: parsedDiff,
       difference: parsedDiff,
       currentStock: parsedStock,
       description: description ? description.trim() : null,
@@ -240,10 +221,7 @@ exports.updateProduct = async (req, res) => {
     const { id } = req.params;
     const {
       name,
-      category,
-      size,
       unit,
-      price,
       difference,
       quantity,
       currentStock,
@@ -271,10 +249,9 @@ exports.updateProduct = async (req, res) => {
       return res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
     }
 
-    let targetDiff = product.difference !== undefined ? product.difference : product.price;
-    const rawDiff = difference !== undefined ? difference : price;
-    if (rawDiff !== undefined && rawDiff !== null && rawDiff !== '') {
-      const parsedDiff = parseFloat(rawDiff);
+    let targetDiff = product.difference;
+    if (difference !== undefined && difference !== null && difference !== '') {
+      const parsedDiff = parseFloat(difference);
       if (isNaN(parsedDiff)) {
         return res.status(400).json({ error: 'Product difference must be a valid number' });
       }
@@ -292,8 +269,6 @@ exports.updateProduct = async (req, res) => {
     }
 
     const targetName = name !== undefined ? name.trim() : product.name;
-    const targetCategory = category !== undefined ? (category.trim() || 'General') : product.category;
-    const targetSize = size !== undefined ? (size.trim() || '-') : product.size;
 
     // Check duplicate in same organization if name changed
     if (targetName.toLowerCase() !== product.name.toLowerCase()) {
@@ -325,11 +300,8 @@ exports.updateProduct = async (req, res) => {
 
     await product.update({
       name: targetName,
-      category: targetCategory,
-      size: targetSize,
       unit: unit !== undefined ? unit.trim() : product.unit,
       difference: targetDiff,
-      price: targetDiff,
       currentStock: targetStock,
       description: description !== undefined ? (description ? description.trim() : null) : product.description,
       specifications: formattedSpecs,

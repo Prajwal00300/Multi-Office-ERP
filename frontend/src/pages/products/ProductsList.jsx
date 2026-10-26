@@ -18,13 +18,6 @@ import {
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
 
-const CATEGORIES = [
-  'Reinforcing Steel Bar',
-  'Pipe',
-  'Other'
-];
-
-
 const ProductsList = () => {
   const { user } = useContext(AuthContext);
 
@@ -36,7 +29,6 @@ const ProductsList = () => {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [selectedOrgId, setSelectedOrgId] = useState('');
 
@@ -81,7 +73,6 @@ const ProductsList = () => {
 
       const params = new URLSearchParams();
       if (searchTerm.trim()) params.append('search', searchTerm.trim());
-      if (selectedCategory !== 'ALL') params.append('category', selectedCategory);
       if (selectedStatus !== 'ALL') params.append('status', selectedStatus);
 
       if (user?.role === 'SUPER_ADMIN') {
@@ -101,7 +92,7 @@ const ProductsList = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, selectedCategory, selectedStatus, selectedOrgId, user]);
+  }, [searchTerm, selectedStatus, selectedOrgId, user]);
 
   // Debounced search & filter trigger
   useEffect(() => {
@@ -263,7 +254,6 @@ const ProductsList = () => {
         name: formData.name.trim(),
         unit: 'Ton',
         difference: parsedDiff,
-        price: parsedDiff, // Synchronized for backward compatibility
         quantity: parsedQty,
         currentStock: parsedQty,
         description: formData.description?.trim() || null,
@@ -433,35 +423,21 @@ const ProductsList = () => {
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
         {/* Search */}
-        <div className={`relative ${user?.role === 'SUPER_ADMIN' ? 'md:col-span-5' : 'md:col-span-6'}`}>
+        <div className={`relative ${user?.role === 'SUPER_ADMIN' ? 'md:col-span-6' : 'md:col-span-8'}`}>
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Search className="h-4 w-4 text-gray-400" />
           </div>
           <input
             type="text"
             className="block w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            placeholder="Search by name, size, category, or specs..."
+            placeholder="Search by product name or specifications..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
 
-        {/* Category Filter */}
-        <div className="md:col-span-2">
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="block w-full py-2 px-3 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="ALL">All Categories</option>
-            <option value="Reinforcing Steel Bar">Steel Bars</option>
-            <option value="Pipe">Pipes</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
-
         {/* Status Filter */}
-        <div className="md:col-span-2">
+        <div className={user?.role === 'SUPER_ADMIN' ? 'md:col-span-3' : 'md:col-span-4'}>
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
@@ -499,9 +475,6 @@ const ProductsList = () => {
             <thead>
               <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100 font-semibold">
                 <th className="px-6 py-4">Product Name</th>
-                <th className="px-6 py-4">Category</th>
-                <th className="px-6 py-4">Size / Diameter</th>
-                <th className="px-6 py-4">Unit</th>
                 <th className="px-6 py-4 text-right">Stock Left</th>
                 <th className="px-6 py-4">Difference (₹)</th>
                 <th className="px-6 py-4">Specifications & Details</th>
@@ -512,7 +485,7 @@ const ProductsList = () => {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
                     <div className="flex justify-center items-center space-x-2">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                       <span className="text-sm font-medium">Loading catalogue...</span>
@@ -521,16 +494,16 @@ const ProductsList = () => {
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="px-6 py-14 text-center">
+                  <td colSpan="6" className="px-6 py-14 text-center">
                     <div className="flex flex-col items-center justify-center space-y-3">
                       <div className="bg-blue-50 text-blue-600 p-3.5 rounded-full">
                         <Package className="h-7 w-7" />
                       </div>
                       <p className="text-gray-700 font-medium text-base">No products found.</p>
                       <p className="text-gray-400 text-sm max-w-sm">
-                        {searchTerm || selectedCategory !== 'ALL' || selectedStatus !== 'ALL'
+                        {searchTerm || selectedStatus !== 'ALL'
                           ? 'Try adjusting your search query or filter options.'
-                          : 'Get started by cataloguing your first reinforcing steel bar or pipe.'}
+                          : 'Get started by cataloguing your first product.'}
                       </p>
                       <button
                         onClick={handleOpenCreate}
@@ -551,13 +524,7 @@ const ProductsList = () => {
                     {/* Product Name */}
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
-                        <div className={`p-2 rounded-lg shrink-0 ${
-                          product.category === 'Reinforcing Steel Bar'
-                            ? 'bg-amber-100 text-amber-700'
-                            : product.category === 'Pipe'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}>
+                        <div className="p-2 rounded-lg shrink-0 bg-blue-100 text-blue-700">
                           <Package size={18} />
                         </div>
                         <div>
@@ -574,34 +541,6 @@ const ProductsList = () => {
                       </div>
                     </td>
 
-                    {/* Category Badge */}
-                    <td className="px-6 py-4 text-sm">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                        product.category === 'Reinforcing Steel Bar'
-                          ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                          : product.category === 'Pipe'
-                          ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                          : 'bg-gray-100 text-gray-700 border border-gray-200'
-                      }`}>
-                        {product.category}
-                      </span>
-                    </td>
-
-                    {/* Size / Diameter */}
-                    <td className="px-6 py-4 text-sm font-medium text-gray-800">
-                      <div className="flex items-center space-x-1">
-                        <Ruler size={14} className="text-gray-400 shrink-0" />
-                        <span>{product.size}</span>
-                      </div>
-                    </td>
-
-                    {/* Unit */}
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      <span className="bg-gray-100 px-2 py-0.5 rounded text-xs font-medium text-gray-700">
-                        {product.unit}
-                      </span>
-                    </td>
-
                     {/* Stock Left */}
                     <td className="px-6 py-4 text-right">
                       <div className="flex flex-col items-end">
@@ -613,7 +552,7 @@ const ProductsList = () => {
                           {parseFloat(product.currentStock || 0).toFixed(3)}
                         </span>
                         <span className="text-[11px] text-gray-400 font-medium">
-                          {product.unit || 'Ton'}
+                          Tons
                         </span>
                       </div>
                     </td>
@@ -621,9 +560,7 @@ const ProductsList = () => {
                     {/* Difference */}
                     <td className="px-6 py-4 text-sm font-semibold font-mono text-slate-900 whitespace-nowrap">
                       {(() => {
-                        const val = product.difference !== undefined && product.difference !== null
-                          ? parseFloat(product.difference)
-                          : parseFloat(product.price || 0);
+                        const val = parseFloat(product.difference || 0);
                         const sign = val > 0 ? '+' : '';
                         return `${sign}₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                       })()}

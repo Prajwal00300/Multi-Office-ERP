@@ -144,7 +144,7 @@ exports.getPreviousBill = async (req, res) => {
               include: [
                 {
                   model: Product,
-                  attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+                  attributes: ['id', 'name', 'unit', 'difference', 'specifications']
                 }
               ]
             }
@@ -171,7 +171,7 @@ exports.getPreviousBill = async (req, res) => {
           include: [
             {
               model: Product,
-              attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
             }
           ]
         }
@@ -232,7 +232,7 @@ exports.getNextBill = async (req, res) => {
               include: [
                 {
                   model: Product,
-                  attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+                  attributes: ['id', 'name', 'unit', 'difference', 'specifications']
                 }
               ]
             }
@@ -259,7 +259,7 @@ exports.getNextBill = async (req, res) => {
           include: [
             {
               model: Product,
-              attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
             }
           ]
         }
@@ -327,7 +327,7 @@ exports.getBillById = async (req, res) => {
               include: [
                 {
                   model: Product,
-                  attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+                  attributes: ['id', 'name', 'unit', 'difference', 'specifications']
                 }
               ]
             }
@@ -354,7 +354,7 @@ exports.getBillById = async (req, res) => {
           include: [
             {
               model: Product,
-              attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
             }
           ]
         }

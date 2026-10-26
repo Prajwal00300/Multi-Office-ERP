@@ -135,7 +135,7 @@ exports.getEstimateById = async (req, res) => {
           include: [
             {
               model: Product,
-              attributes: ['id', 'name', 'category', 'size', 'unit', 'specifications']
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
             }
           ]
         }
@@ -283,10 +283,10 @@ exports.createEstimate = async (req, res) => {
 
         if (product) {
           if (!productNameSnapshot) {
-            productNameSnapshot = `${product.name} (${product.size})`;
+            productNameSnapshot = product.name;
           }
-          productCategorySnapshot = product.category;
-          productSizeSnapshot = product.size;
+          productCategorySnapshot = product.category || 'General';
+          productSizeSnapshot = product.size || '-';
           if (!productSpecificationsSnapshot) {
             productSpecificationsSnapshot = product.specifications;
           }
@@ -461,10 +461,10 @@ exports.updateEstimate = async (req, res) => {
 
         if (product) {
           if (!productNameSnapshot) {
-            productNameSnapshot = `${product.name} (${product.size})`;
+            productNameSnapshot = product.name;
           }
-          productCategorySnapshot = product.category;
-          productSizeSnapshot = product.size;
+          productCategorySnapshot = product.category || 'General';
+          productSizeSnapshot = product.size || '-';
           if (!productSpecificationsSnapshot) {
             productSpecificationsSnapshot = product.specifications;
           }
@@ -732,10 +732,10 @@ exports.overrideEstimate = async (req, res) => {
 
         if (product) {
           if (!productNameSnapshot) {
-            productNameSnapshot = `${product.name} (${product.size})`;
+            productNameSnapshot = product.name;
           }
-          productCategorySnapshot = product.category;
-          productSizeSnapshot = product.size;
+          productCategorySnapshot = product.category || 'General';
+          productSizeSnapshot = product.size || '-';
           if (!productSpecificationsSnapshot) {
             productSpecificationsSnapshot = product.specifications;
           }
