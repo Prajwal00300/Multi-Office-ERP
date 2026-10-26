@@ -214,6 +214,55 @@ async function runSafeHierarchyMigration() {
       console.warn("   ⚠️ Note altering purchases status:", purErr.message);
     }
 
+    // 5b. Drop global unique constraint on purchases.purchaseNumber to allow office-scoped serials (1, 2, 3...)
+    try {
+      const [indices] = await sequelize.query(`
+        SHOW INDEX FROM purchases WHERE Column_name = 'purchaseNumber' AND Non_unique = 0
+      `);
+      for (const idx of indices) {
+        if (idx.Key_name && idx.Key_name !== 'PRIMARY') {
+          await sequelize.query(`ALTER TABLE purchases DROP INDEX \`${idx.Key_name}\``);
+          console.log(`   ✅ Dropped global unique index ${idx.Key_name} on purchases.purchaseNumber.`);
+        }
+      }
+    } catch (dropIdxErr) {
+      // index may not exist
+    }
+
+    // 5c. Convert any legacy non-numeric purchase numbers (e.g. PUR-...) to sequential integers (1, 2, 3...)
+    try {
+      const [legacyPurchases] = await sequelize.query(`
+        SELECT id, purchaseNumber, organizationId
+        FROM purchases
+        WHERE purchaseNumber NOT REGEXP '^[0-9]+$'
+        ORDER BY organizationId ASC, id ASC
+      `);
+      if (legacyPurchases && legacyPurchases.length > 0) {
+        for (const lp of legacyPurchases) {
+          const orgId = lp.organizationId;
+          const [maxRes] = await sequelize.query(
+            "SELECT MAX(CAST(purchaseNumber AS UNSIGNED)) AS maxNum FROM purchases WHERE organizationId = ? AND purchaseNumber REGEXP '^[0-9]+$'",
+            { replacements: [orgId] }
+          );
+          let nextNum = 1;
+          if (maxRes && maxRes[0] && maxRes[0].maxNum !== null && maxRes[0].maxNum !== undefined) {
+            nextNum = parseInt(maxRes[0].maxNum, 10) + 1;
+          }
+          await sequelize.query(
+            "UPDATE purchases SET purchaseNumber = ? WHERE id = ?",
+            { replacements: [String(nextNum), lp.id] }
+          );
+          await sequelize.query(
+            "UPDATE goods_receipts SET purchaseNumber = ? WHERE purchaseId = ?",
+            { replacements: [String(nextNum), lp.id] }
+          );
+          console.log(`   ✅ Renumbered legacy purchase #${lp.id} (${lp.purchaseNumber}) -> Serial Number ${nextNum}`);
+        }
+      }
+    } catch (legacyErr) {
+      console.warn("   ⚠️ Note checking legacy purchases:", legacyErr.message);
+    }
+
     // 6. Inspect 'purchase_items' columns for carbonType and receivedQuantity
     const [purchaseItemColumns] = await sequelize.query(`
       SELECT COLUMN_NAME 

@@ -14,10 +14,24 @@ import {
   Inbox,
   FileText,
   Layers,
-  Calendar
+  Calendar,
+  Printer
 } from 'lucide-react';
 import { AuthContext } from '../../context/AuthContext';
 import { getPurchaseById } from '../../services/purchaseService';
+
+const cleanSerialNumber = (val) => {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (/^[0-9]+$/.test(str)) {
+    return String(parseInt(str, 10));
+  }
+  const match = str.match(/\d+$/);
+  if (match) {
+    return String(parseInt(match[0], 10));
+  }
+  return str;
+};
 
 const PurchaseDetail = () => {
   const { id } = useParams();
@@ -128,7 +142,7 @@ const PurchaseDetail = () => {
           </Link>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold font-mono text-gray-900">{purchase.purchaseNumber}</h1>
+              <h1 className="text-2xl font-bold font-mono text-gray-900">{cleanSerialNumber(purchase.purchaseNumber)}</h1>
               {renderStatusBadge(purchase.status)}
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -149,9 +163,18 @@ const PurchaseDetail = () => {
             </Link>
           )}
 
+          {/* Print Slip */}
+          <Link
+            to={`/purchases/${purchase.id}/print`}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+          >
+            <Printer className="w-4 h-4" />
+            Print Order Slip
+          </Link>
+
           {totalReceived === 0 && purchase.status !== 'CANCELLED' && (
             <Link
-              to={`/purchases/${purchase.id}/edit`}
+              to={`/purchase-order?purchaseId=${purchase.id}&mode=edit`}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
             >
               <Edit3 className="w-4 h-4" />

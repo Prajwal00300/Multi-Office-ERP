@@ -12,7 +12,6 @@ const Purchase = sequelize.define('Purchase', {
   purchaseNumber: {
     type: DataTypes.STRING,
     allowNull: false,
-    unique: true,
     validate: {
       notEmpty: true,
     }
@@ -114,8 +113,12 @@ const Purchase = sequelize.define('Purchase', {
   timestamps: true,
   indexes: [
     {
-      unique: true,
+      unique: false,
       fields: ['purchaseNumber']
+    },
+    {
+      unique: true,
+      fields: ['purchaseNumber', 'organizationId']
     },
     {
       unique: false,

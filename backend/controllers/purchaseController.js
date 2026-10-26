@@ -173,7 +173,10 @@ exports.getPurchases = async (req, res) => {
  */
 exports.getNextPurchaseNumber = async (req, res) => {
   try {
-    const nextPurchaseNumber = await generateUniquePurchaseNumber();
+    const { organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : req.user.organizationId;
+    const nextPurchaseNumber = await generateUniquePurchaseNumber(effectiveOrgId);
     res.status(200).json({ nextPurchaseNumber });
   } catch (error) {
     console.error('Error generating next purchase number preview:', error);
@@ -271,6 +274,114 @@ exports.getPurchaseById = async (req, res) => {
     }
     console.error('Error fetching purchase details:', error);
     res.status(500).json({ error: 'Internal server error while fetching purchase details' });
+  }
+};
+
+/**
+ * GET /api/purchases/navigation/previous - Fetch previous purchase order in sequence
+ */
+exports.getPreviousPurchase = async (req, res) => {
+  try {
+    const { currentId, organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    if (currentId && !isNaN(Number(currentId))) {
+      whereClause.id = { [Op.lt]: parseInt(currentId, 10) };
+    }
+
+    const purchase = await Purchase.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Organization,
+          attributes: ['id', 'name']
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: PurchaseItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'DESC']]
+    });
+
+    if (!purchase) {
+      return res.status(404).json({ error: 'No preceding purchase order found for this office' });
+    }
+
+    await verifyRecordOwnership(purchase, req.user);
+    res.status(200).json(purchase);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching previous purchase:', error);
+    res.status(500).json({ error: 'Internal server error while fetching previous purchase' });
+  }
+};
+
+/**
+ * GET /api/purchases/navigation/next - Fetch next purchase order in sequence
+ */
+exports.getNextPurchase = async (req, res) => {
+  try {
+    const { currentId, organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    if (currentId && !isNaN(Number(currentId))) {
+      whereClause.id = { [Op.gt]: parseInt(currentId, 10) };
+    }
+
+    const purchase = await Purchase.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Organization,
+          attributes: ['id', 'name']
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: PurchaseItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'ASC']]
+    });
+
+    if (!purchase) {
+      return res.status(404).json({ error: 'No subsequent purchase order found for this office' });
+    }
+
+    await verifyRecordOwnership(purchase, req.user);
+    res.status(200).json(purchase);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching next purchase:', error);
+    res.status(500).json({ error: 'Internal server error while fetching next purchase' });
   }
 };
 
@@ -502,19 +613,21 @@ exports.createPurchase = async (req, res) => {
       });
     }
 
-    // 3. Resolve Order ID (purchaseNumber)
-    let finalOrderNumber = purchaseNumber ? purchaseNumber.trim() : null;
+    // 3. Resolve Serial Number (purchaseNumber: sequential integer 1, 2, 3, 4...)
+    let finalOrderNumber = (purchaseNumber && /^[0-9]+$/.test(String(purchaseNumber).trim()))
+      ? String(parseInt(purchaseNumber, 10))
+      : null;
+
     if (finalOrderNumber) {
       const existing = await Purchase.findOne({
-        where: { purchaseNumber: finalOrderNumber },
+        where: { purchaseNumber: finalOrderNumber, organizationId: targetOrgId },
         transaction
       });
       if (existing) {
-        await transaction.rollback();
-        return res.status(409).json({ error: `Purchase Order ID "${finalOrderNumber}" already exists. Please choose a unique Order ID.` });
+        finalOrderNumber = await generateUniquePurchaseNumber(targetOrgId, transaction);
       }
     } else {
-      finalOrderNumber = await generateUniquePurchaseNumber(transaction);
+      finalOrderNumber = await generateUniquePurchaseNumber(targetOrgId, transaction);
     }
 
     // 4. Create Parent Purchase Order

@@ -32,6 +32,8 @@ import PurchasesList from '../pages/purchases/PurchasesList';
 import PurchaseForm from '../pages/purchases/PurchaseForm';
 import OrderReceived from '../pages/purchases/OrderReceived';
 import PurchaseDetail from '../pages/purchases/PurchaseDetail';
+import PurchaseOrderWorkspace from '../pages/purchases/PurchaseOrderWorkspace';
+import PurchasePrint from '../pages/purchases/PurchasePrint';
 import WeighbridgeList from '../pages/weighbridge/WeighbridgeList';
 import WeighbridgeForm from '../pages/weighbridge/WeighbridgeForm';
 import WeighbridgeDetail from '../pages/weighbridge/WeighbridgeDetail';
@@ -152,10 +154,14 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="PURCHASES" />}>
         <Route element={<Layout />}>
           <Route path="/purchases" element={<PurchasesList />} />
-          <Route path="/purchases/new" element={<PurchaseForm />} />
+          <Route path="/purchase-order" element={<PurchaseOrderWorkspace />} />
+          <Route path="/place-order" element={<Navigate to="/purchase-order" replace />} />
+          <Route path="/purchases/place-order" element={<Navigate to="/purchase-order" replace />} />
+          <Route path="/purchases/new" element={<Navigate to="/purchase-order" replace />} />
           <Route path="/purchases/receive" element={<OrderReceived />} />
           <Route path="/purchases/:id" element={<PurchaseDetail />} />
           <Route path="/purchases/:id/edit" element={<PurchaseForm />} />
+          <Route path="/purchases/:id/print" element={<PurchasePrint />} />
         </Route>
       </Route>
 

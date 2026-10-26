@@ -27,6 +27,24 @@ export const getPurchaseById = async (id) => {
   return res.data;
 };
 
+export const getPreviousPurchase = async (currentId = null, organizationId = null) => {
+  const query = new URLSearchParams();
+  if (currentId) query.append('currentId', currentId);
+  if (organizationId) query.append('organizationId', organizationId);
+  const queryString = query.toString();
+  const res = await api.get(`/purchases/navigation/previous${queryString ? `?${queryString}` : ''}`);
+  return res.data;
+};
+
+export const getNextPurchase = async (currentId = null, organizationId = null) => {
+  const query = new URLSearchParams();
+  if (currentId) query.append('currentId', currentId);
+  if (organizationId) query.append('organizationId', organizationId);
+  const queryString = query.toString();
+  const res = await api.get(`/purchases/navigation/next${queryString ? `?${queryString}` : ''}`);
+  return res.data;
+};
+
 export const getPurchaseAudits = async (id) => {
   const res = await api.get(`/purchases/${id}/audit`);
   return res.data;
@@ -77,6 +95,8 @@ export default {
   getNextPurchaseNumber,
   lookupPurchaseByNumber,
   getPurchaseById,
+  getPreviousPurchase,
+  getNextPurchase,
   getPurchaseAudits,
   createPurchase,
   receiveGoods,

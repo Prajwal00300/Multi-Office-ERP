@@ -19,11 +19,25 @@ import {
   Inbox,
   Package,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Printer
 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
 import { getPurchases } from '../../services/purchaseService';
+
+const cleanSerialNumber = (val) => {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (/^[0-9]+$/.test(str)) {
+    return String(parseInt(str, 10));
+  }
+  const match = str.match(/\d+$/);
+  if (match) {
+    return String(parseInt(match[0], 10));
+  }
+  return str;
+};
 
 const PurchasesList = () => {
   const navigate = useNavigate();
@@ -170,13 +184,13 @@ const PurchasesList = () => {
             Order Received
           </Link>
 
-          {/* Place Order Button */}
+          {/* Purchase Order Button */}
           <Link
-            to="/purchases/new"
+            to="/purchase-order"
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            Place Order
+            Purchase Order
           </Link>
         </div>
       </div>
@@ -360,11 +374,11 @@ const PurchasesList = () => {
             </p>
             <div className="flex justify-center gap-3 pt-2">
               <Link
-                to="/purchases/new"
+                to="/purchase-order"
                 className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-4 h-4" />
-                Place Order
+                Purchase Order
               </Link>
               <Link
                 to="/purchases/receive"
@@ -380,7 +394,7 @@ const PurchasesList = () => {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  <th className="py-3.5 px-4">Order ID & Date</th>
+                  <th className="py-3.5 px-4">Serial No. & Date</th>
                   <th className="py-3.5 px-4">Party / Supplier</th>
                   <th className="py-3.5 px-4 min-w-[220px]">Products & Carbon Types</th>
                   <th className="py-3.5 px-4 text-right">Ordered</th>
@@ -406,7 +420,7 @@ const PurchasesList = () => {
                           to={`/purchases/${purchase.id}`} 
                           className="font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline"
                         >
-                          {purchase.purchaseNumber}
+                          {cleanSerialNumber(purchase.purchaseNumber)}
                         </Link>
                         <div className="text-xs text-gray-500 mt-0.5">
                           {purchase.purchaseDate}
@@ -507,12 +521,21 @@ const PurchasesList = () => {
                             <Eye className="w-4 h-4" />
                           </Link>
 
+                          {/* Print Purchase Order Slip */}
+                          <Link
+                            to={`/purchases/${purchase.id}/print`}
+                            className="p-1.5 text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
+                            title="Print Purchase Order Slip"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </Link>
+
                           {/* Edit (if no receipts yet) */}
                           {totalRec === 0 && purchase.status !== 'CANCELLED' && (
                             <Link
-                              to={`/purchases/${purchase.id}/edit`}
+                              to={`/purchase-order?purchaseId=${purchase.id}&mode=edit`}
                               className="p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors"
-                              title="Edit Purchase Order"
+                              title="Edit Purchase Order in Workspace"
                             >
                               <Edit3 className="w-4 h-4" />
                             </Link>
