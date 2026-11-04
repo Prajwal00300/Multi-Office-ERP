@@ -119,10 +119,10 @@ const EstimatePrint = () => {
          ───────────────────────────────────────────────────────────── */}
       <div className="slip-container w-[138mm] max-w-full bg-white text-black p-2 border-2 border-black shadow-lg">
         
-        {/* 1. TOP HEADER BOX: Rounded box with "Estimate (K)" */}
+        {/* 1. TOP HEADER BOX: Rounded box with "Rough Estimate" */}
         <div className="border-2 border-black rounded-lg py-1 px-4 text-center mb-1 bg-white">
           <h1 className="text-xl md:text-2xl font-bold tracking-wide text-black uppercase">
-            Estimate (K)
+            Rough Estimate
           </h1>
         </div>
 

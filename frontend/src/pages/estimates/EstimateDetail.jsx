@@ -99,11 +99,11 @@ const EstimateDetail = () => {
 
           {/* Edit Estimate */}
           <Link
-            to={`/estimate-voucher?estimateId=${estimate.id}&mode=edit`}
+            to={`/rough-estimate?estimateId=${estimate.id}&mode=edit`}
             className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium flex items-center shadow-xs transition-colors"
           >
             <Edit3 size={16} className="mr-1.5" />
-            Edit Estimate
+            Edit Rough Estimate
           </Link>
         </div>
       </div>
@@ -187,7 +187,7 @@ const EstimateDetail = () => {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 border-b border-gray-100 bg-gray-50/50">
           <h3 className="text-sm font-bold uppercase tracking-wider text-gray-700">
-            Product Goods List (Estimate K)
+            Product Goods List (Rough Estimate)
           </h3>
         </div>
 

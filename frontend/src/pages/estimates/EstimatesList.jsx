@@ -99,7 +99,7 @@ const EstimatesList = () => {
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Estimate Management</h2>
           <p className="text-sm text-gray-500 mt-1">
-            View customer estimates, generate print-ready slips (Estimate K), and manage records.
+            View customer estimates, generate print-ready slips (Rough Estimate), and manage records.
           </p>
         </div>
       </div>
@@ -306,9 +306,9 @@ const EstimatesList = () => {
 
                       {/* Edit */}
                       <Link
-                        to={`/estimate-voucher?estimateId=${est.id}&mode=edit`}
+                        to={`/rough-estimate?estimateId=${est.id}&mode=edit`}
                         className="text-amber-600 hover:text-amber-800 p-1.5 rounded hover:bg-amber-50 inline-block transition-colors"
-                        title="Edit Estimate in Voucher Workspace"
+                        title="Edit Rough Estimate"
                       >
                         <Edit3 size={17} />
                       </Link>

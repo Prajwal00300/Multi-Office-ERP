@@ -43,20 +43,14 @@ export const getNextEstimateNumber = async (organizationId) => {
 
 export const getFirstEstimate = async (organizationId) => {
   const query = organizationId ? `?organizationId=${organizationId}` : '';
-  const res = await api.get(`/estimates${query}`);
-  const list = res.data || [];
-  if (list.length === 0) return null;
-  const first = list[list.length - 1];
-  return getEstimateById(first.id);
+  const res = await api.get(`/estimates/navigation/first${query}`);
+  return res.data;
 };
 
 export const getLastEstimate = async (organizationId) => {
   const query = organizationId ? `?organizationId=${organizationId}` : '';
-  const res = await api.get(`/estimates${query}`);
-  const list = res.data || [];
-  if (list.length === 0) return null;
-  const last = list[0];
-  return getEstimateById(last.id);
+  const res = await api.get(`/estimates/navigation/last${query}`);
+  return res.data;
 };
 
 export const createEstimate = async (data) => {

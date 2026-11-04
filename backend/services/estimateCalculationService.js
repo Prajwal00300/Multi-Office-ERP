@@ -44,9 +44,10 @@ const roundTo3Decimals = (num) => {
  * Calculates authoritative values for estimate line items and overall totals.
  * @param {Array} items - Array of raw item rows { quantity, negotiatedRate, btls, ... }
  * @param {number|string} others - Additional charges or adjustments
- * @returns {Object} - Calculated items, totalQuantity, total, grandTotal
+ * @param {Object} taxOptions - { expBeforeTax, taxRate, surchargeRate, expAfterTax }
+ * @returns {Object} - Calculated items, totalQuantity, total, taxAmount, grandTotal
  */
-const calculateEstimateTotals = (items = [], others = 0) => {
+const calculateEstimateTotals = (items = [], others = 0, taxOptions = {}) => {
   let totalQuantity = 0;
   let totalAmount = 0;
 
@@ -75,14 +76,26 @@ const calculateEstimateTotals = (items = [], others = 0) => {
   const parsedOthers = parseFloat(others);
   const validatedOthers = isNaN(parsedOthers) ? 0 : roundTo2Decimals(parsedOthers);
 
+  const expBefore = parseFloat(taxOptions.expBeforeTax) || 0;
+  const taxRate = parseFloat(taxOptions.taxRate) || 0;
+  const surRate = parseFloat(taxOptions.surchargeRate) || 0;
+  const expAfter = parseFloat(taxOptions.expAfterTax) || 0;
+
   const finalTotalQuantity = roundTo3Decimals(totalQuantity);
   const finalTotal = roundTo2Decimals(totalAmount);
-  const finalGrandTotal = roundTo2Decimals(finalTotal + validatedOthers);
+  const taxAmount = roundTo2Decimals((finalTotal * taxRate) / 100);
+  const surchargeAmt = roundTo2Decimals((taxAmount * surRate) / 100);
+  const finalGrandTotal = roundTo2Decimals(finalTotal + expBefore + taxAmount + surchargeAmt + expAfter + validatedOthers);
 
   return {
     calculatedItems,
     totalQuantity: finalTotalQuantity,
     total: finalTotal,
+    expBeforeTax: roundTo2Decimals(expBefore),
+    taxRate: roundTo2Decimals(taxRate),
+    taxAmount,
+    surchargeRate: roundTo2Decimals(surRate),
+    expAfterTax: roundTo2Decimals(expAfter),
     others: validatedOthers,
     grandTotal: finalGrandTotal
   };

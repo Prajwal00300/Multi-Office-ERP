@@ -43,6 +43,26 @@ const Estimate = sequelize.define('Estimate', {
     allowNull: true,
     comment: 'Client Estimate (K) header field: Basic'
   },
+  terms: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Client Estimate (K) header field: Terms'
+  },
+  vehicle: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Client Estimate (K) header field: Vehicle'
+  },
+  transport: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Client Estimate (K) bottom field: Transport'
+  },
+  broker: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Client Estimate (K) bottom field: Broker'
+  },
   totalQuantity: {
     type: DataTypes.DECIMAL(15, 3),
     allowNull: false,
@@ -53,6 +73,53 @@ const Estimate = sequelize.define('Estimate', {
     allowNull: false,
     defaultValue: 0,
     comment: 'Subtotal of product line item amounts'
+  },
+  expBeforeTax: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Client Estimate (K) bottom field: Exp Before Tax'
+  },
+  taxRate: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Vat/Cst tax rate %'
+  },
+  taxAmount: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Total VAT amount'
+  },
+  surchargeRate: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Sur @ rate %'
+  },
+  expAfterTax: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Client Estimate (K) bottom field: Exp After Tax'
+  },
+  dueDate: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    comment: 'Due date'
+  },
+  shortageQty: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Shortage quantity'
+  },
+  shortageAmt: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Shortage amount'
   },
   others: {
     type: DataTypes.DECIMAL(15, 2),

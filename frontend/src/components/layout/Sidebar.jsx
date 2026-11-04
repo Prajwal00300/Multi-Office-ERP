@@ -52,7 +52,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     { name: 'Customers', icon: Users, path: '/customers', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN'], moduleKey: 'CUSTOMER_MASTER' },
     { name: 'Products', icon: Package, path: '/products', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN'], moduleKey: 'PRODUCT_MASTER' },
     { name: 'Estimates', icon: FileText, path: '/estimates', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
-    { name: 'Estimate Voucher', icon: FileText, path: '/estimate-voucher', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
+    { name: 'Rough Estimate', icon: FileText, path: '/rough-estimate', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
     { name: 'Billing', icon: Receipt, path: '/bills', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
     { name: 'Sale Voucher', icon: Receipt, path: '/sale-voucher', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
     { name: 'Purchases', icon: ShoppingCart, path: '/purchases', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },

@@ -129,8 +129,9 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="ESTIMATES" />}>
         <Route element={<Layout />}>
           <Route path="/estimates" element={<EstimatesList />} />
-          <Route path="/estimate-voucher" element={<EstimateVoucherWorkspace />} />
-          <Route path="/estimates/new" element={<Navigate to="/estimate-voucher" replace />} />
+          <Route path="/rough-estimate" element={<EstimateVoucherWorkspace />} />
+          <Route path="/estimate-voucher" element={<Navigate to="/rough-estimate" replace />} />
+          <Route path="/estimates/new" element={<Navigate to="/rough-estimate" replace />} />
           <Route path="/estimates/:id" element={<EstimateDetail />} />
           <Route path="/estimates/:id/edit" element={<EstimateForm />} />
           <Route path="/estimates/:id/print" element={<EstimatePrint />} />

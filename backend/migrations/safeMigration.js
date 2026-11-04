@@ -372,6 +372,126 @@ async function runSafeHierarchyMigration() {
       console.warn('   ⚠️ Note checking CEO conflicts:', confErr.message);
     }
 
+    // 11. Add transport, broker, vehicle, terms columns to estimates table if not exist
+    try {
+      const [estColumns] = await sequelize.query(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'estimates'
+      `);
+      const estColNames = estColumns.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+
+      if (!estColNames.includes('transport')) {
+        console.log("   -> Adding 'transport' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN transport VARCHAR(255) NULL
+        `);
+        console.log("   ✅ estimates.transport added.");
+      }
+
+      if (!estColNames.includes('broker')) {
+        console.log("   -> Adding 'broker' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN broker VARCHAR(255) NULL
+        `);
+        console.log("   ✅ estimates.broker added.");
+      }
+
+      if (!estColNames.includes('vehicle')) {
+        console.log("   -> Adding 'vehicle' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN vehicle VARCHAR(255) NULL
+        `);
+        console.log("   ✅ estimates.vehicle added.");
+      }
+
+      if (!estColNames.includes('terms')) {
+        console.log("   -> Adding 'terms' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN terms VARCHAR(255) NULL
+        `);
+        console.log("   ✅ estimates.terms added.");
+      }
+
+      if (!estColNames.includes('expbeforetax')) {
+        console.log("   -> Adding 'expBeforeTax' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN expBeforeTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.expBeforeTax added.");
+      }
+
+      if (!estColNames.includes('taxrate')) {
+        console.log("   -> Adding 'taxRate' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN taxRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.taxRate added.");
+      }
+
+      if (!estColNames.includes('taxamount')) {
+        console.log("   -> Adding 'taxAmount' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN taxAmount DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.taxAmount added.");
+      }
+
+      if (!estColNames.includes('surchargerate')) {
+        console.log("   -> Adding 'surchargeRate' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN surchargeRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.surchargeRate added.");
+      }
+
+      if (!estColNames.includes('expaftertax')) {
+        console.log("   -> Adding 'expAfterTax' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN expAfterTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.expAfterTax added.");
+      }
+
+      if (!estColNames.includes('duedate')) {
+        console.log("   -> Adding 'dueDate' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN dueDate DATE NULL
+        `);
+        console.log("   ✅ estimates.dueDate added.");
+      }
+
+      if (!estColNames.includes('shortageqty')) {
+        console.log("   -> Adding 'shortageQty' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN shortageQty DECIMAL(15, 3) NOT NULL DEFAULT 0.000
+        `);
+        console.log("   ✅ estimates.shortageQty added.");
+      }
+
+      if (!estColNames.includes('shortageamt')) {
+        console.log("   -> Adding 'shortageAmt' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN shortageAmt DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.shortageAmt added.");
+      }
+    } catch (estErr) {
+      console.warn('   ⚠️ Note adding columns to estimates:', estErr.message);
+    }
+
     console.log('✅ Safe hierarchy migration completed successfully.');
   } catch (error) {
     console.error('⚠️ Safe migration note (can be ignored if columns already up-to-date):', error.message);

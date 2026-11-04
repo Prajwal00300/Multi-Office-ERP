@@ -25,6 +25,8 @@ router.use(checkModulePermission('ESTIMATES'));
 router.get('/', estimateController.getEstimates);
 router.get('/navigation/previous', estimateController.getPreviousEstimate);
 router.get('/navigation/next', estimateController.getNextEstimate);
+router.get('/navigation/first', estimateController.getFirstEstimate);
+router.get('/navigation/last', estimateController.getLastEstimate);
 router.get('/by-number/:estimateNumber', estimateController.getEstimateByNumber);
 router.get('/next-number', estimateController.getNextEstimateNumber);
 router.get('/:id', estimateController.getEstimateById);

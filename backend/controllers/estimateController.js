@@ -301,6 +301,124 @@ exports.getNextEstimate = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/estimates/navigation/first - Retrieve the very first estimate for this office
+ */
+exports.getFirstEstimate = async (req, res) => {
+  try {
+    const { organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    const estimate = await Estimate.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Customer,
+          attributes: ['id', 'name', 'address', 'city', 'phone', 'tin']
+        },
+        {
+          model: Organization,
+          attributes: ['id', 'name', 'address', 'phone']
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'overrider',
+          attributes: ['id', 'username']
+        },
+        {
+          model: EstimateItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'ASC']]
+    });
+
+    if (!estimate) {
+      return res.status(404).json({ error: 'No estimates found for this office' });
+    }
+
+    await verifyRecordOwnership(estimate, req.user);
+    res.status(200).json(estimate);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching first estimate:', error);
+    res.status(500).json({ error: 'Internal server error while fetching first estimate' });
+  }
+};
+
+/**
+ * GET /api/estimates/navigation/last - Retrieve the latest/last estimate for this office
+ */
+exports.getLastEstimate = async (req, res) => {
+  try {
+    const { organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    const estimate = await Estimate.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: Customer,
+          attributes: ['id', 'name', 'address', 'city', 'phone', 'tin']
+        },
+        {
+          model: Organization,
+          attributes: ['id', 'name', 'address', 'phone']
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'username']
+        },
+        {
+          model: User,
+          as: 'overrider',
+          attributes: ['id', 'username']
+        },
+        {
+          model: EstimateItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              attributes: ['id', 'name', 'unit', 'difference', 'specifications']
+            }
+          ]
+        }
+      ],
+      order: [['id', 'DESC']]
+    });
+
+    if (!estimate) {
+      return res.status(404).json({ error: 'No estimates found for this office' });
+    }
+
+    await verifyRecordOwnership(estimate, req.user);
+    res.status(200).json(estimate);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error fetching last estimate:', error);
+    res.status(500).json({ error: 'Internal server error while fetching last estimate' });
+  }
+};
+
 // GET /api/estimates/by-number/:estimateNumber - Lookup for future Gate Pass integration
 exports.getEstimateByNumber = async (req, res) => {
   try {
@@ -367,6 +485,18 @@ exports.createEstimate = async (req, res) => {
       organizationId,
       estimateDate,
       basic,
+      terms,
+      vehicle,
+      transport,
+      broker,
+      dueDate,
+      shortageQty,
+      shortageAmt,
+      expBeforeTax,
+      taxRate,
+      taxAmount,
+      surchargeRate,
+      expAfterTax,
       items,
       others,
       notes,
@@ -471,9 +601,19 @@ exports.createEstimate = async (req, res) => {
       calculatedItems,
       totalQuantity,
       total,
+      expBeforeTax: validatedExpBefore,
+      taxRate: validatedTaxRate,
+      taxAmount: validatedTaxAmount,
+      surchargeRate: validatedSurchargeRate,
+      expAfterTax: validatedExpAfter,
       others: validatedOthers,
       grandTotal
-    } = calculateEstimateTotals(preparedItems, others);
+    } = calculateEstimateTotals(preparedItems, others, {
+      expBeforeTax,
+      taxRate,
+      surchargeRate,
+      expAfterTax
+    });
 
     // 5. Generate persistent unique estimate number scoped to this office
     const estimateNumber = await generateUniqueEstimateNumber(targetOrgId, t);
@@ -487,6 +627,18 @@ exports.createEstimate = async (req, res) => {
       customerId,
       estimateDate: estimateDate || new Date(),
       basic: basic ? basic.trim() : null,
+      terms: terms ? terms.trim() : null,
+      vehicle: vehicle ? vehicle.trim() : null,
+      transport: transport ? transport.trim() : null,
+      broker: broker ? broker.trim() : null,
+      dueDate: dueDate || null,
+      shortageQty: parseFloat(shortageQty) || 0,
+      shortageAmt: parseFloat(shortageAmt) || 0,
+      expBeforeTax: validatedExpBefore,
+      taxRate: validatedTaxRate,
+      taxAmount: validatedTaxAmount,
+      surchargeRate: validatedSurchargeRate,
+      expAfterTax: validatedExpAfter,
       totalQuantity,
       total,
       others: validatedOthers,
@@ -547,6 +699,18 @@ exports.updateEstimate = async (req, res) => {
       customerId,
       estimateDate,
       basic,
+      terms,
+      vehicle,
+      transport,
+      broker,
+      dueDate,
+      shortageQty,
+      shortageAmt,
+      expBeforeTax,
+      taxRate,
+      taxAmount,
+      surchargeRate,
+      expAfterTax,
       items,
       others,
       notes
@@ -649,15 +813,37 @@ exports.updateEstimate = async (req, res) => {
       calculatedItems,
       totalQuantity,
       total,
+      expBeforeTax: validatedExpBefore,
+      taxRate: validatedTaxRate,
+      taxAmount: validatedTaxAmount,
+      surchargeRate: validatedSurchargeRate,
+      expAfterTax: validatedExpAfter,
       others: validatedOthers,
       grandTotal
-    } = calculateEstimateTotals(preparedItems, others);
+    } = calculateEstimateTotals(preparedItems, others, {
+      expBeforeTax: expBeforeTax !== undefined ? expBeforeTax : estimate.expBeforeTax,
+      taxRate: taxRate !== undefined ? taxRate : estimate.taxRate,
+      surchargeRate: surchargeRate !== undefined ? surchargeRate : estimate.surchargeRate,
+      expAfterTax: expAfterTax !== undefined ? expAfterTax : estimate.expAfterTax
+    });
 
     // Update Estimate
     await estimate.update({
       customerId: customerId || estimate.customerId,
       estimateDate: estimateDate || estimate.estimateDate,
       basic: basic !== undefined ? (basic ? basic.trim() : null) : estimate.basic,
+      terms: terms !== undefined ? (terms ? terms.trim() : null) : estimate.terms,
+      vehicle: vehicle !== undefined ? (vehicle ? vehicle.trim() : null) : estimate.vehicle,
+      transport: transport !== undefined ? (transport ? transport.trim() : null) : estimate.transport,
+      broker: broker !== undefined ? (broker ? broker.trim() : null) : estimate.broker,
+      dueDate: dueDate !== undefined ? (dueDate || null) : estimate.dueDate,
+      shortageQty: shortageQty !== undefined ? (parseFloat(shortageQty) || 0) : estimate.shortageQty,
+      shortageAmt: shortageAmt !== undefined ? (parseFloat(shortageAmt) || 0) : estimate.shortageAmt,
+      expBeforeTax: validatedExpBefore,
+      taxRate: validatedTaxRate,
+      taxAmount: validatedTaxAmount,
+      surchargeRate: validatedSurchargeRate,
+      expAfterTax: validatedExpAfter,
       totalQuantity,
       total,
       others: validatedOthers,
