@@ -158,10 +158,12 @@ const AppRoutes = () => {
           <Route path="/purchases" element={<PurchasesList />} />
           <Route path="/purchase-estimate" element={<PurchaseEstimateVoucherWorkspace />} />
           <Route path="/purchase-order" element={<PurchaseOrderWorkspace />} />
+          <Route path="/receive-order" element={<OrderReceived />} />
           <Route path="/place-order" element={<Navigate to="/purchase-order" replace />} />
           <Route path="/purchases/place-order" element={<Navigate to="/purchase-order" replace />} />
           <Route path="/purchases/new" element={<Navigate to="/purchase-order" replace />} />
           <Route path="/purchases/receive" element={<OrderReceived />} />
+          <Route path="/order-received" element={<Navigate to="/receive-order" replace />} />
           <Route path="/purchases/:id" element={<PurchaseDetail />} />
           <Route path="/purchases/:id/edit" element={<PurchaseForm />} />
           <Route path="/purchases/:id/print" element={<PurchasePrint />} />

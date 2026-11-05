@@ -27,6 +27,9 @@ router.get('/next-number', purchaseController.getNextPurchaseNumber);
 router.get('/navigation/previous', purchaseController.getPreviousPurchase);
 router.get('/navigation/next', purchaseController.getNextPurchase);
 
+// Order lookup by Order ID or Purchase Number (declared before /:id)
+router.get('/lookup/:orderId', purchaseController.lookupPurchaseByNumber);
+
 router.get('/:id', purchaseController.getPurchaseById);
 
 // Order Placement & Modification

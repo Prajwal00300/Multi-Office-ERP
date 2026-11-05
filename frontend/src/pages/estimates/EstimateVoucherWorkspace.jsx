@@ -265,7 +265,7 @@ export default function EstimateVoucherWorkspace() {
           populateEstimateIntoState(estData);
           if (searchParams.get('mode') === 'edit') {
             setMode('EDIT');
-            setSuccessMsg(`Loaded Rough Estimate #${estData.estimateNumber} in Edit mode.`);
+            setSuccessMsg(`Loaded Sale Voucher Estimate #${estData.estimateNumber} in Edit mode.`);
           } else {
             setMode('VIEW');
           }
@@ -938,7 +938,7 @@ export default function EstimateVoucherWorkspace() {
       if (prevEst) {
         populateEstimateIntoState(prevEst);
         setMode('VIEW');
-        setSuccessMsg(`Loaded previous Rough Estimate #${prevEst.estimateNumber}.`);
+        setSuccessMsg(`Loaded previous Sale Voucher Estimate #${prevEst.estimateNumber}.`);
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'No earlier estimate found for this office.';
@@ -951,7 +951,7 @@ export default function EstimateVoucherWorkspace() {
   // 3. NEXT (Next >)
   const handleNext = async () => {
     if (isDirty) {
-      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the next rough estimate?');
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the next sale voucher estimate?');
       if (!confirmDiscard) return;
     }
 
@@ -964,7 +964,7 @@ export default function EstimateVoucherWorkspace() {
       if (nextEst) {
         populateEstimateIntoState(nextEst);
         setMode('VIEW');
-        setSuccessMsg(`Loaded Rough Estimate #${nextEst.estimateNumber}.`);
+        setSuccessMsg(`Loaded Sale Voucher Estimate #${nextEst.estimateNumber}.`);
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'No subsequent estimate found for this office.';
@@ -977,7 +977,7 @@ export default function EstimateVoucherWorkspace() {
   // 4. FIRST
   const handleFirst = async () => {
     if (isDirty) {
-      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the first rough estimate?');
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the first sale voucher estimate?');
       if (!confirmDiscard) return;
     }
 
@@ -990,12 +990,12 @@ export default function EstimateVoucherWorkspace() {
       if (firstEst) {
         populateEstimateIntoState(firstEst);
         setMode('VIEW');
-        setSuccessMsg(`Loaded first Rough Estimate #${firstEst.estimateNumber}.`);
+        setSuccessMsg(`Loaded first Sale Voucher Estimate #${firstEst.estimateNumber}.`);
       } else {
-        setErrorMsg('No rough estimates found for this office.');
+        setErrorMsg('No sale voucher estimates found for this office.');
       }
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to load first rough estimate.';
+      const msg = err.response?.data?.error || 'Failed to load first sale voucher estimate.';
       setErrorMsg(msg);
     } finally {
       setActionLoading(false);
@@ -1005,7 +1005,7 @@ export default function EstimateVoucherWorkspace() {
   // 5. LAST
   const handleLast = async () => {
     if (isDirty) {
-      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the latest rough estimate?');
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and navigate to the latest sale voucher estimate?');
       if (!confirmDiscard) return;
     }
 
@@ -1018,12 +1018,12 @@ export default function EstimateVoucherWorkspace() {
       if (lastEst) {
         populateEstimateIntoState(lastEst);
         setMode('VIEW');
-        setSuccessMsg(`Loaded latest Rough Estimate #${lastEst.estimateNumber}.`);
+        setSuccessMsg(`Loaded latest Sale Voucher Estimate #${lastEst.estimateNumber}.`);
       } else {
-        setErrorMsg('No rough estimates found for this office.');
+        setErrorMsg('No sale voucher estimates found for this office.');
       }
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to load latest rough estimate.';
+      const msg = err.response?.data?.error || 'Failed to load latest sale voucher estimate.';
       setErrorMsg(msg);
     } finally {
       setActionLoading(false);
@@ -1061,7 +1061,7 @@ export default function EstimateVoucherWorkspace() {
       if (estData) {
         populateEstimateIntoState(estData);
         setMode('VIEW');
-        setSuccessMsg(`Loaded Rough Estimate #${estData.estimateNumber}.`);
+        setSuccessMsg(`Loaded Sale Voucher Estimate #${estData.estimateNumber}.`);
       }
     } catch (err) {
       setErrorMsg('Failed to load selected estimate.');
@@ -1172,7 +1172,7 @@ export default function EstimateVoucherWorkspace() {
   const handleSaveOnly = async () => {
     const savedRecord = await saveEstimateRecord();
     if (savedRecord) {
-      setSuccessMsg(`Rough Estimate #${savedRecord.estimateNumber} saved successfully.`);
+      setSuccessMsg(`Sale Voucher Estimate #${savedRecord.estimateNumber} saved successfully.`);
     }
   };
 
@@ -1274,10 +1274,10 @@ export default function EstimateVoucherWorkspace() {
             </div>
           </div>
 
-          {/* Top Center: "Rough Estimate" and Mode in RED */}
+          {/* Top Center: "Sale Voucher Estimate" and Mode in RED */}
           <div className="col-span-12 md:col-span-4 text-center">
             <h1 className="font-serif text-[22px] leading-tight text-black font-normal tracking-wide">
-              Rough Estimate
+              Sale Voucher Estimate
             </h1>
             <div className="text-red-600 font-bold text-[12px] leading-tight">
               {mode === 'VIEW' ? 'View' : mode === 'ADD' ? 'Add' : mode === 'EDIT' ? 'Edit' : 'Saving'}
@@ -2308,7 +2308,7 @@ export default function EstimateVoucherWorkspace() {
                 onClick={handleFirst}
                 disabled={actionLoading}
                 className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
-                title="Go to first Rough Estimate"
+                title="Go to first Sale Voucher Estimate"
               >
                 First
               </button>
@@ -2319,7 +2319,7 @@ export default function EstimateVoucherWorkspace() {
                 onClick={handleLast}
                 disabled={actionLoading}
                 className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
-                title="Go to latest Rough Estimate"
+                title="Go to latest Sale Voucher Estimate"
               >
                 Last
               </button>
@@ -2330,7 +2330,7 @@ export default function EstimateVoucherWorkspace() {
                 onClick={handleOpenSearch}
                 disabled={actionLoading}
                 className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
-                title="Search Rough Estimates"
+                title="Search Sale Voucher Estimates"
               >
                 Search
               </button>
@@ -2341,7 +2341,7 @@ export default function EstimateVoucherWorkspace() {
                 onClick={handleExit}
                 disabled={actionLoading}
                 className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
-                title="Exit Rough Estimate module"
+                title="Exit Sale Voucher Estimate module"
               >
                 Exit
               </button>
@@ -2366,7 +2366,7 @@ export default function EstimateVoucherWorkspace() {
                 onClick={handlePrintAndSave}
                 disabled={actionLoading}
                 className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
-                title="Print Rough Estimate"
+                title="Print Sale Voucher Estimate"
               >
                 {actionLoading && mode === 'SAVING' ? 'Printing...' : 'Print'}
               </button>
@@ -2384,7 +2384,7 @@ export default function EstimateVoucherWorkspace() {
             
             {/* Modal Title Bar */}
             <div className="bg-gradient-to-r from-[#b3d1f5] to-[#d4e4f7] px-3 py-1 flex items-center justify-between border-b border-[#7f9db9]">
-              <span className="font-bold text-xs">Search Rough Estimate</span>
+              <span className="font-bold text-xs">Search Sale Voucher Estimate</span>
               <button
                 type="button"
                 onClick={() => setSearchModalOpen(false)}

@@ -398,13 +398,25 @@ exports.lookupPurchaseByNumber = async (req, res) => {
 
     const cleanOrderId = orderId.trim();
 
+    const orConditions = [
+      { purchaseNumber: cleanOrderId },
+      { purchaseNumber: { [Op.like]: `%${cleanOrderId}%` } }
+    ];
+    if (!isNaN(Number(cleanOrderId))) {
+      orConditions.push({ id: Number(cleanOrderId) });
+    }
+
+    const whereClause = {
+      [Op.or]: orConditions
+    };
+
+    const targetOrgId = req.query.organizationId || (req.user && req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'CEO' ? req.user.organizationId : null);
+    if (targetOrgId) {
+      whereClause.organizationId = targetOrgId;
+    }
+
     const purchase = await Purchase.findOne({
-      where: {
-        [Op.or]: [
-          { purchaseNumber: cleanOrderId },
-          { purchaseNumber: { [Op.like]: `%${cleanOrderId}%` } }
-        ]
-      },
+      where: whereClause,
       include: [
         {
           model: Organization,
@@ -728,6 +740,16 @@ exports.receiveGoods = async (req, res) => {
       whereCondition = { [Op.or]: [{ id: Number(targetIdOrNumber) }, { purchaseNumber: String(targetIdOrNumber).trim() }] };
     } else {
       whereCondition = { purchaseNumber: String(targetIdOrNumber).trim() };
+    }
+
+    const receiveOrgId = req.body.organizationId || (req.user && req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'CEO' ? req.user.organizationId : null);
+    if (receiveOrgId) {
+      whereCondition = {
+        [Op.and]: [
+          whereCondition,
+          { organizationId: receiveOrgId }
+        ]
+      };
     }
 
     const purchase = await Purchase.findOne({
