@@ -858,25 +858,16 @@ export default function OrderReceived() {
             />
           </div>
 
-          {/* Lower Right: Grand Total Received */}
+          {/* Lower Right: Total Inward Qty */}
           <div className="md:col-span-4 flex flex-col justify-end space-y-1 text-right">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-[11px] text-black">Total Inward Qty</span>
+              <span className="font-bold text-[11px] text-black uppercase">Total Inward Qty</span>
               <input
                 type="text"
                 readOnly
                 value={calculations.totalReceiveNow}
-                className="w-32 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-0.5 border-t border-[#7f9db9]">
-              <span className="font-black text-[12px] text-black uppercase">GRAND TOTAL (TONS)</span>
-              <input
-                type="text"
-                readOnly
-                value={calculations.grandTotal}
                 className="w-32 h-6 bg-[#cce4f7] border border-[#7f9db9] px-1.5 text-right font-mono font-black text-[13px] text-black"
+                title="Total Inward Quantity (Tons)"
               />
             </div>
           </div>

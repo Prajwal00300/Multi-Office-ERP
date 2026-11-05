@@ -481,10 +481,13 @@ export default function PurchaseOrderWorkspace() {
       }
     });
 
+    const averagePrice = totalQty > 0 ? (totalVal / totalQty).toFixed(2) : '0.00';
+
     return {
       validRows,
       totalQty: totalQty.toFixed(3),
       value: totalVal.toFixed(2),
+      averagePrice,
       grandTotal: totalVal.toFixed(2)
     };
   }, [orderItems]);
@@ -999,13 +1002,13 @@ export default function PurchaseOrderWorkspace() {
             />
           </div>
           <div className="flex items-center space-x-2">
-            <span className="font-bold text-[11px] text-black">Value</span>
+            <span className="font-bold text-[11px] text-black">Average Price</span>
             <input
               type="text"
               readOnly
-              value={calculations.value}
+              value={calculations.averagePrice}
               className="w-36 h-5 bg-white border border-[#7f9db9] px-2 text-right font-mono font-bold text-black text-[11px]"
-              title="Total Order Value"
+              title="Average Price"
             />
           </div>
         </div>
@@ -1031,25 +1034,16 @@ export default function PurchaseOrderWorkspace() {
             />
           </div>
 
-          {/* Lower Right: Grand Total */}
+          {/* Lower Right: Average Price */}
           <div className="md:col-span-4 flex flex-col justify-end space-y-1 text-right">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-[11px] text-black">Value</span>
+              <span className="font-black text-[12px] text-black uppercase">Average Price</span>
               <input
                 type="text"
                 readOnly
-                value={calculations.value}
-                className="w-32 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-0.5 border-t border-[#7f9db9]">
-              <span className="font-black text-[12px] text-black uppercase">GRAND TOTAL</span>
-              <input
-                type="text"
-                readOnly
-                value={calculations.grandTotal}
+                value={calculations.averagePrice}
                 className="w-32 h-6 bg-[#cce4f7] border border-[#7f9db9] px-1.5 text-right font-mono font-black text-[13px] text-black"
+                title="Average Price"
               />
             </div>
           </div>
