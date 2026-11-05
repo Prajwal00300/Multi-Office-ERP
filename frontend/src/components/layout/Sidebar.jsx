@@ -53,6 +53,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     { name: 'Products', icon: Package, path: '/products', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN'], moduleKey: 'PRODUCT_MASTER' },
     { name: 'Estimates', icon: FileText, path: '/estimates', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
     { name: 'Sale Estimate Voucher', icon: FileText, path: '/rough-estimate', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
+    { name: 'Purchase Estimate Voucher', icon: ShoppingCart, path: '/purchase-estimate', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
     { name: 'Billing', icon: Receipt, path: '/bills', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
     { name: 'Billing Voucher', icon: Receipt, path: '/sale-voucher', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
     { name: 'Purchases', icon: ShoppingCart, path: '/purchases', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },

@@ -23,6 +23,7 @@ import EstimateForm from '../pages/estimates/EstimateForm';
 import EstimateDetail from '../pages/estimates/EstimateDetail';
 import EstimatePrint from '../pages/estimates/EstimatePrint';
 import EstimateVoucherWorkspace from '../pages/estimates/EstimateVoucherWorkspace';
+import PurchaseEstimateVoucherWorkspace from '../pages/estimates/PurchaseEstimateVoucherWorkspace';
 import BillsList from '../pages/billing/BillsList';
 import BillForm from '../pages/billing/BillForm';
 import BillDetail from '../pages/billing/BillDetail';
@@ -155,6 +156,7 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="PURCHASES" />}>
         <Route element={<Layout />}>
           <Route path="/purchases" element={<PurchasesList />} />
+          <Route path="/purchase-estimate" element={<PurchaseEstimateVoucherWorkspace />} />
           <Route path="/purchase-order" element={<PurchaseOrderWorkspace />} />
           <Route path="/place-order" element={<Navigate to="/purchase-order" replace />} />
           <Route path="/purchases/place-order" element={<Navigate to="/purchase-order" replace />} />

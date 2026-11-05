@@ -8,6 +8,7 @@ const Layout = () => {
   const isWorkspace = 
     location.pathname.startsWith('/sale-voucher') || 
     location.pathname.startsWith('/rough-estimate') || 
+    location.pathname.startsWith('/purchase-estimate') || 
     location.pathname.startsWith('/estimate-voucher') || 
     location.pathname.startsWith('/purchase-order') ||
     location.pathname.startsWith('/place-order');

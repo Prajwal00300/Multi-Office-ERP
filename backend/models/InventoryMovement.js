@@ -37,7 +37,7 @@ const InventoryMovement = sequelize.define('InventoryMovement', {
     comment: 'Quantity in Tons (positive magnitude)'
   },
   referenceType: {
-    type: DataTypes.ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE'),
+    type: DataTypes.ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE', 'PURCHASE_ESTIMATE'),
     allowNull: false,
   },
   referenceId: {

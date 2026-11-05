@@ -337,7 +337,7 @@ async function runSafeHierarchyMigration() {
         productId INT NOT NULL,
         movementType ENUM('IN', 'OUT') NOT NULL,
         quantity DECIMAL(15, 3) NOT NULL,
-        referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE') NOT NULL,
+        referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE', 'PURCHASE_ESTIMATE') NOT NULL,
         referenceId INT NULL,
         referenceNumber VARCHAR(255) NULL,
         purchaseItemId INT NULL,
@@ -621,15 +621,82 @@ async function runSafeHierarchyMigration() {
       console.warn('   ⚠️ Note adding columns to bills:', billErr.message);
     }
 
-    // 13. Ensure inventory_movements.referenceType supports 'ESTIMATE'
+    // 13. Ensure inventory_movements.referenceType supports 'ESTIMATE' and 'PURCHASE_ESTIMATE'
     try {
       await sequelize.query(`
         ALTER TABLE inventory_movements 
-        MODIFY COLUMN referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE') NOT NULL
+        MODIFY COLUMN referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE', 'PURCHASE_ESTIMATE') NOT NULL
       `);
-      console.log("   ✅ inventory_movements.referenceType updated to include 'ESTIMATE'.");
+      console.log("   ✅ inventory_movements.referenceType updated to include 'ESTIMATE' and 'PURCHASE_ESTIMATE'.");
     } catch (invErr) {
       console.warn('   ⚠️ Note updating inventory_movements.referenceType:', invErr.message);
+    }
+
+    // 14. Create purchase_estimates and purchase_estimate_items tables
+    try {
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS purchase_estimates (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          estimateNumber VARCHAR(255) NOT NULL,
+          organizationId INT NOT NULL,
+          customerId INT NULL,
+          partyName VARCHAR(255) NULL,
+          estimateDate DATE NOT NULL,
+          basic VARCHAR(255) NULL,
+          terms VARCHAR(255) NULL,
+          vehicle VARCHAR(255) NULL,
+          transport VARCHAR(255) NULL,
+          broker VARCHAR(255) NULL,
+          dueDate DATE NULL,
+          shortageQty DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+          shortageAmt DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          expBeforeTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          taxRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+          taxAmount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          surchargeRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+          expAfterTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          totalQuantity DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+          total DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          others DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          grandTotal DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          status ENUM('DRAFT', 'GENERATED', 'OVERRIDDEN') NOT NULL DEFAULT 'DRAFT',
+          createdBy INT NOT NULL,
+          lockedAt DATETIME NULL,
+          lockedBy INT NULL,
+          lastOverriddenBy INT NULL,
+          lastOverriddenAt DATETIME NULL,
+          notes TEXT NULL,
+          createdAt DATETIME NOT NULL,
+          updatedAt DATETIME NOT NULL,
+          INDEX idx_pe_orgId (organizationId),
+          INDEX idx_pe_num (estimateNumber),
+          INDEX idx_pe_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS purchase_estimate_items (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          purchaseEstimateId INT NOT NULL,
+          productId INT NULL,
+          productNameSnapshot VARCHAR(255) NOT NULL,
+          productCategorySnapshot VARCHAR(255) NULL,
+          productSizeSnapshot VARCHAR(255) NULL,
+          productSpecificationsSnapshot TEXT NULL,
+          btls VARCHAR(50) NULL,
+          quantity DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+          unit VARCHAR(50) NOT NULL DEFAULT 'Ton',
+          negotiatedRate DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          createdAt DATETIME NOT NULL,
+          updatedAt DATETIME NOT NULL,
+          INDEX idx_pei_estId (purchaseEstimateId),
+          INDEX idx_pei_productId (productId)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+      console.log("   ✅ purchase_estimates and purchase_estimate_items tables verified/created.");
+    } catch (peErr) {
+      console.warn('   ⚠️ Note verifying purchase_estimates tables:', peErr.message);
     }
 
     console.log('✅ Safe hierarchy migration completed successfully.');
