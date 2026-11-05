@@ -337,7 +337,7 @@ async function runSafeHierarchyMigration() {
         productId INT NOT NULL,
         movementType ENUM('IN', 'OUT') NOT NULL,
         quantity DECIMAL(15, 3) NOT NULL,
-        referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL') NOT NULL,
+        referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE') NOT NULL,
         referenceId INT NULL,
         referenceNumber VARCHAR(255) NULL,
         purchaseItemId INT NULL,
@@ -619,6 +619,17 @@ async function runSafeHierarchyMigration() {
       }
     } catch (billErr) {
       console.warn('   ⚠️ Note adding columns to bills:', billErr.message);
+    }
+
+    // 13. Ensure inventory_movements.referenceType supports 'ESTIMATE'
+    try {
+      await sequelize.query(`
+        ALTER TABLE inventory_movements 
+        MODIFY COLUMN referenceType ENUM('GOODS_RECEIPT', 'BILL', 'MANUAL', 'ESTIMATE') NOT NULL
+      `);
+      console.log("   ✅ inventory_movements.referenceType updated to include 'ESTIMATE'.");
+    } catch (invErr) {
+      console.warn('   ⚠️ Note updating inventory_movements.referenceType:', invErr.message);
     }
 
     console.log('✅ Safe hierarchy migration completed successfully.');

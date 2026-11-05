@@ -19,44 +19,31 @@ const {
 } = require('../utils/scopeFilter');
 
 /**
- * Deducts stock from Product.currentStock and logs InventoryMovement OUT
+ * Note: Billing vouchers do not deduct product inventory quantities.
+ * Quantity deduction is handled exclusively by Sale Estimate Vouchers.
  */
 async function deductInventoryForBillItems(items, bill, userId, transaction, actionNote) {
-  if (!items || !Array.isArray(items)) return;
-  for (const item of items) {
-    if (item.productId) {
-      const product = await Product.findByPk(item.productId, {
-        transaction,
-        lock: transaction.LOCK.UPDATE
-      });
-      if (product && product.organizationId === bill.organizationId) {
-        const deductQty = parseFloat(item.quantity) || 0;
-        if (deductQty > 0) {
-          const currentStock = parseFloat(product.currentStock) || 0;
-          const newStock = parseFloat((currentStock - deductQty).toFixed(3));
-          await product.update({ currentStock: newStock }, { transaction });
-
-          await InventoryMovement.create({
-            organizationId: bill.organizationId,
-            productId: product.id,
-            movementType: 'OUT',
-            quantity: deductQty,
-            referenceType: 'BILL',
-            referenceId: bill.id,
-            referenceNumber: bill.billNumber,
-            notes: actionNote || `Bill finalized #${bill.billNumber}`,
-            performedBy: userId
-          }, { transaction });
-        }
-      }
-    }
-  }
+  // Billing vouchers do not deduct product inventory quantity
+  return;
 }
 
 /**
- * Reverts previously deducted stock from Product.currentStock and removes previous BILL InventoryMovements
+ * Reverts previously deducted stock from Product.currentStock and removes previous BILL InventoryMovements (if any exist from earlier records)
  */
 async function revertInventoryForBillItems(items, bill, transaction) {
+  const existingMovements = await InventoryMovement.findAll({
+    where: {
+      referenceType: 'BILL',
+      referenceId: bill.id
+    },
+    transaction
+  });
+
+  // If no prior inventory movements were recorded for this bill, nothing to revert
+  if (!existingMovements || existingMovements.length === 0) {
+    return;
+  }
+
   if (items && Array.isArray(items)) {
     for (const item of items) {
       if (item.productId) {

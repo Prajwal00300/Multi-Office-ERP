@@ -6,6 +6,7 @@ const Customer = require('../models/Customer');
 const Product = require('../models/Product');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
+const InventoryMovement = require('../models/InventoryMovement');
 const { calculateEstimateTotals } = require('../services/estimateCalculationService');
 const { generateUniqueEstimateNumber } = require('../utils/estimateNumberGenerator');
 const {
@@ -14,6 +15,72 @@ const {
   verifyRecordOwnership,
   buildOfficeWhereClause
 } = require('../utils/scopeFilter');
+
+/**
+ * Deducts stock from Product.currentStock and logs InventoryMovement OUT for estimate items
+ */
+async function deductInventoryForEstimateItems(items, estimate, userId, transaction, actionNote) {
+  if (!items || !Array.isArray(items)) return;
+  for (const item of items) {
+    if (item.productId) {
+      const product = await Product.findByPk(item.productId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      });
+      if (product && product.organizationId === estimate.organizationId) {
+        const deductQty = parseFloat(item.quantity) || 0;
+        if (deductQty > 0) {
+          const currentStock = parseFloat(product.currentStock) || 0;
+          const newStock = parseFloat((currentStock - deductQty).toFixed(3));
+          await product.update({ currentStock: newStock }, { transaction });
+
+          await InventoryMovement.create({
+            organizationId: estimate.organizationId,
+            productId: product.id,
+            movementType: 'OUT',
+            quantity: deductQty,
+            referenceType: 'ESTIMATE',
+            referenceId: estimate.id,
+            referenceNumber: estimate.estimateNumber,
+            notes: actionNote || `Sale estimate voucher #${estimate.estimateNumber}`,
+            performedBy: userId
+          }, { transaction });
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Reverts previously deducted stock from Product.currentStock and removes previous ESTIMATE InventoryMovements
+ */
+async function revertInventoryForEstimateItems(items, estimate, transaction) {
+  if (items && Array.isArray(items)) {
+    for (const item of items) {
+      if (item.productId) {
+        const product = await Product.findByPk(item.productId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+        if (product && product.organizationId === estimate.organizationId) {
+          const revertQty = parseFloat(item.quantity) || 0;
+          if (revertQty > 0) {
+            const currentStock = parseFloat(product.currentStock) || 0;
+            const newStock = parseFloat((currentStock + revertQty).toFixed(3));
+            await product.update({ currentStock: newStock }, { transaction });
+          }
+        }
+      }
+    }
+  }
+  await InventoryMovement.destroy({
+    where: {
+      referenceType: 'ESTIMATE',
+      referenceId: estimate.id
+    },
+    transaction
+  });
+}
 
 // GET /api/estimates - List estimates with filters
 exports.getEstimates = async (req, res) => {
@@ -667,6 +734,15 @@ exports.createEstimate = async (req, res) => {
       }, { transaction: t });
     }
 
+    // 8. Deduct inventory stock for estimate items
+    await deductInventoryForEstimateItems(
+      calculatedItems,
+      newEstimate,
+      req.user.userId,
+      t,
+      `Sale estimate created #${newEstimate.estimateNumber}`
+    );
+
     await t.commit();
 
     // Fetch complete estimate to return
@@ -851,6 +927,10 @@ exports.updateEstimate = async (req, res) => {
       notes: notes !== undefined ? (notes ? notes.trim() : null) : estimate.notes
     }, { transaction: t });
 
+    // Revert previously deducted stock for this estimate's existing items
+    const existingItems = await EstimateItem.findAll({ where: { estimateId: estimate.id }, transaction: t });
+    await revertInventoryForEstimateItems(existingItems, estimate, t);
+
     // Replace items
     await EstimateItem.destroy({ where: { estimateId: estimate.id }, transaction: t });
 
@@ -869,6 +949,15 @@ exports.updateEstimate = async (req, res) => {
         amount: item.amount
       }, { transaction: t });
     }
+
+    // Deduct inventory stock for updated estimate items
+    await deductInventoryForEstimateItems(
+      calculatedItems,
+      estimate,
+      req.user.userId,
+      t,
+      `Sale estimate updated #${estimate.estimateNumber}`
+    );
 
     await t.commit();
 
@@ -930,6 +1019,24 @@ exports.generateEstimate = async (req, res) => {
       lockedAt: new Date(),
       lockedBy: req.user.userId
     }, { transaction: t });
+
+    // Ensure inventory stock is deducted if not already deducted
+    const existingMovement = await InventoryMovement.findOne({
+      where: {
+        referenceType: 'ESTIMATE',
+        referenceId: estimate.id
+      },
+      transaction: t
+    });
+    if (!existingMovement) {
+      await deductInventoryForEstimateItems(
+        estimate.items,
+        estimate,
+        req.user.userId,
+        t,
+        `Sale estimate generated #${estimate.estimateNumber}`
+      );
+    }
 
     await t.commit();
 
@@ -1125,6 +1232,9 @@ exports.overrideEstimate = async (req, res) => {
       notes: notes !== undefined ? (notes ? notes.trim() : null) : estimate.notes
     }, { transaction: t });
 
+    // Revert previously deducted stock for this estimate's existing items
+    await revertInventoryForEstimateItems(estimate.items, estimate, t);
+
     // Replace items
     await EstimateItem.destroy({ where: { estimateId: estimate.id }, transaction: t });
 
@@ -1143,6 +1253,15 @@ exports.overrideEstimate = async (req, res) => {
         amount: item.amount
       }, { transaction: t });
     }
+
+    // Deduct stock for the new overridden items
+    await deductInventoryForEstimateItems(
+      calculatedItems,
+      estimate,
+      req.user.userId,
+      t,
+      `Sale estimate overridden #${estimate.estimateNumber}`
+    );
 
     const newValuesSnapshot = {
       customerId: estimate.customerId,
