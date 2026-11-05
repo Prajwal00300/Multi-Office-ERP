@@ -47,6 +47,78 @@ const Bill = sequelize.define('Bill', {
     allowNull: false,
     defaultValue: DataTypes.NOW,
   },
+  basic: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Sale Voucher header field: Basic rate'
+  },
+  terms: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Sale Voucher header field: Terms'
+  },
+  vehicle: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Sale Voucher header field: Vehicle'
+  },
+  transport: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Sale Voucher bottom field: Transport'
+  },
+  broker: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Sale Voucher bottom field: Broker'
+  },
+  dueDate: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    comment: 'Sale Voucher bottom field: Due Date'
+  },
+  shortageQty: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Shortage quantity'
+  },
+  shortageAmt: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Shortage amount'
+  },
+  expBeforeTax: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Sale Voucher bottom field: Exp Before Tax'
+  },
+  taxRate: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Vat/Cst tax rate %'
+  },
+  taxAmount: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Total VAT amount'
+  },
+  surchargeRate: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Sur @ rate %'
+  },
+  expAfterTax: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Sale Voucher bottom field: Exp After Tax'
+  },
   productSubtotal: {
     type: DataTypes.DECIMAL(15, 2),
     allowNull: false,

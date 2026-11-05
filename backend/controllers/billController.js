@@ -455,6 +455,19 @@ exports.createBill = async (req, res) => {
       estimateId,
       billDate,
       items,
+      basic,
+      terms,
+      vehicle,
+      transport,
+      broker,
+      dueDate,
+      shortageQty,
+      shortageAmt,
+      expBeforeTax,
+      taxRate,
+      taxAmount,
+      surchargeRate,
+      expAfterTax,
       gstPercentage,
       transportCost,
       notes,
@@ -572,7 +585,13 @@ exports.createBill = async (req, res) => {
     }
 
     // Authoritative calculation
-    const calculated = calculateBillTotals(enrichedItems, gstPercentage, transportCost);
+    const taxOptions = {
+      expBeforeTax: expBeforeTax !== undefined && expBeforeTax !== '' ? expBeforeTax : transportCost,
+      taxRate: taxRate !== undefined && taxRate !== '' ? taxRate : gstPercentage,
+      surchargeRate,
+      expAfterTax
+    };
+    const calculated = calculateBillTotals(enrichedItems, gstPercentage, transportCost, taxOptions);
 
     // Generate unique sequential bill number scoped to this office
     const billNumber = await generateUniqueBillNumber(targetOrgId, transaction);
@@ -587,6 +606,19 @@ exports.createBill = async (req, res) => {
       customerId: customer.id,
       estimateId: validEstimateId,
       billDate: billDate || new Date(),
+      basic: basic ? basic.trim() : null,
+      terms: terms ? terms.trim() : null,
+      vehicle: vehicle ? vehicle.trim() : null,
+      transport: transport ? transport.trim() : null,
+      broker: broker ? broker.trim() : null,
+      dueDate: dueDate || null,
+      shortageQty: parseFloat(shortageQty) || 0,
+      shortageAmt: parseFloat(shortageAmt) || 0,
+      expBeforeTax: calculated.expBeforeTax,
+      taxRate: calculated.taxRate,
+      taxAmount: calculated.taxAmount,
+      surchargeRate: calculated.surchargeRate,
+      expAfterTax: calculated.expAfterTax,
       productSubtotal: calculated.productSubtotal,
       gstPercentage: calculated.gstPercentage,
       gstAmount: calculated.gstAmount,
@@ -654,6 +686,19 @@ exports.updateBill = async (req, res) => {
       estimateId,
       billDate,
       items,
+      basic,
+      terms,
+      vehicle,
+      transport,
+      broker,
+      dueDate,
+      shortageQty,
+      shortageAmt,
+      expBeforeTax,
+      taxRate,
+      taxAmount,
+      surchargeRate,
+      expAfterTax,
       gstPercentage,
       transportCost,
       notes,
@@ -768,7 +813,13 @@ exports.updateBill = async (req, res) => {
     }
 
     // Authoritative calculation
-    const calculated = calculateBillTotals(enrichedItems, gstPercentage, transportCost);
+    const taxOptions = {
+      expBeforeTax: expBeforeTax !== undefined && expBeforeTax !== '' ? expBeforeTax : transportCost,
+      taxRate: taxRate !== undefined && taxRate !== '' ? taxRate : gstPercentage,
+      surchargeRate,
+      expAfterTax
+    };
+    const calculated = calculateBillTotals(enrichedItems, gstPercentage, transportCost, taxOptions);
 
     const wasFinalized = bill.status === 'FINALIZED' || bill.status === 'OVERRIDDEN';
     const willBeFinalized = status === 'FINALIZED' || wasFinalized;
@@ -784,6 +835,19 @@ exports.updateBill = async (req, res) => {
       customerId: targetCustomerId,
       estimateId: targetEstimateId,
       billDate: billDate || bill.billDate,
+      basic: basic !== undefined ? (basic ? basic.trim() : null) : bill.basic,
+      terms: terms !== undefined ? (terms ? terms.trim() : null) : bill.terms,
+      vehicle: vehicle !== undefined ? (vehicle ? vehicle.trim() : null) : bill.vehicle,
+      transport: transport !== undefined ? (transport ? transport.trim() : null) : bill.transport,
+      broker: broker !== undefined ? (broker ? broker.trim() : null) : bill.broker,
+      dueDate: dueDate !== undefined ? (dueDate || null) : bill.dueDate,
+      shortageQty: shortageQty !== undefined ? (parseFloat(shortageQty) || 0) : bill.shortageQty,
+      shortageAmt: shortageAmt !== undefined ? (parseFloat(shortageAmt) || 0) : bill.shortageAmt,
+      expBeforeTax: calculated.expBeforeTax,
+      taxRate: calculated.taxRate,
+      taxAmount: calculated.taxAmount,
+      surchargeRate: calculated.surchargeRate,
+      expAfterTax: calculated.expAfterTax,
       productSubtotal: calculated.productSubtotal,
       gstPercentage: calculated.gstPercentage,
       gstAmount: calculated.gstAmount,

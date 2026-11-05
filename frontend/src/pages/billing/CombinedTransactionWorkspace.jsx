@@ -156,6 +156,23 @@ export default function CombinedTransactionWorkspace() {
   const [successMsg, setSuccessMsg] = useState('');
 
   const remarkTextareaRef = useRef(null);
+  const refDate = useRef(null);
+  const refCustomer = useRef(null);
+  const refHeaderBRate = useRef(null);
+  const refTerms = useRef(null);
+  const refVehicle = useRef(null);
+  const refTransport = useRef(null);
+  const refBroker = useRef(null);
+  const refDueDate = useRef(null);
+  const refShortageQty = useRef(null);
+  const refShortageAmt = useRef(null);
+  const refExpBeforeTax = useRef(null);
+  const refBillTaxRate = useRef(null);
+  const refSurchargeRate = useRef(null);
+  const refExpAfterTax = useRef(null);
+  const refSaveBtn = useRef(null);
+  const cellRefs = useRef({});
+  const currentFocusedCol = useRef(0);
 
   useEffect(() => {
     const handleKeyStatus = (e) => {
@@ -301,6 +318,11 @@ export default function CombinedTransactionWorkspace() {
       setEstimateId(bill.estimateId || null);
     }
 
+    // Header Basic Rate, Terms, Vehicle
+    setHeaderBRate(bill.basic || '');
+    setTerms(bill.terms || '');
+    setVehicle(bill.vehicle || '');
+
     // Notes / Remark (clean text)
     if (bill.notes && bill.notes.includes('---METADATA---')) {
       const [pureRemark] = bill.notes.split('---METADATA---');
@@ -309,12 +331,20 @@ export default function CombinedTransactionWorkspace() {
       setBillRemark(bill.notes || '');
     }
 
+    setTransportName(bill.transport || '');
+    setBrokerName(bill.broker || '');
+    setBillDueDate(bill.dueDate || bill.billDate || '');
+    setShortageQty(bill.shortageQty ? String(bill.shortageQty) : '');
+    setShortageAmt(bill.shortageAmt ? String(bill.shortageAmt) : '');
+
     // Financial totals from backend
     const transportVal = parseFloat(bill.transportCost) || 0;
-    setExpBeforeTax(transportVal > 0 ? transportVal.toFixed(2) : '');
+    setExpBeforeTax(bill.expBeforeTax ? String(bill.expBeforeTax) : (transportVal > 0 ? transportVal.toFixed(2) : ''));
 
     const gstVal = parseFloat(bill.gstPercentage) || 0;
-    setBillTaxRate(gstVal.toFixed(2));
+    setBillTaxRate(bill.taxRate !== undefined && bill.taxRate !== null ? String(bill.taxRate) : (gstVal > 0 ? gstVal.toFixed(2) : '18.00'));
+    setSurchargeRate(bill.surchargeRate ? String(bill.surchargeRate) : '');
+    setExpAfterTax(bill.expAfterTax ? String(bill.expAfterTax) : '');
 
     if (bill.items && bill.items.length > 0) {
       const mapped = bill.items.map(item => {
@@ -322,7 +352,7 @@ export default function CombinedTransactionWorkspace() {
         const qVal = parseFloat(item.quantity) || 0;
         const prod = (products && products.find(p => String(p.id) === String(item.productId))) || item.Product;
         const diffVal = prod && prod.difference !== undefined ? parseFloat(prod.difference) : 0;
-        const bRateVal = finalRateVal - diffVal > 0 ? (finalRateVal - diffVal) : (finalRateVal > 0 ? finalRateVal : '');
+        const bRateVal = bill.basic || (finalRateVal - diffVal > 0 ? (finalRateVal - diffVal) : (finalRateVal > 0 ? finalRateVal : ''));
 
         return {
           productId: item.productId ? String(item.productId) : '',
@@ -399,6 +429,12 @@ export default function CombinedTransactionWorkspace() {
     } catch (err) {
       console.warn('Could not fetch next number preview:', err);
     }
+
+    setTimeout(() => {
+      if (refCustomer.current) {
+        refCustomer.current.focus();
+      }
+    }, 50);
   };
 
   // ==========================================
@@ -425,11 +461,14 @@ export default function CombinedTransactionWorkspace() {
       }
     });
 
-    // Align with backend billingCalculationService
     const expBefore = parseFloat(expBeforeTax) || 0;
     const taxPercent = parseFloat(billTaxRate) || 0;
+    const surPercent = parseFloat(surchargeRate) || 0;
+    const expAfter = parseFloat(expAfterTax) || 0;
+
     const totalVat = (value * taxPercent) / 100;
-    const grandTotalVal = value + totalVat + expBefore;
+    const surchargeAmount = (totalVat * surPercent) / 100;
+    const grandTotalVal = value + expBefore + totalVat + surchargeAmount + expAfter;
 
     return {
       totalPcs,
@@ -445,7 +484,9 @@ export default function CombinedTransactionWorkspace() {
   }, [
     transactionItems,
     expBeforeTax,
-    billTaxRate
+    billTaxRate,
+    surchargeRate,
+    expAfterTax
   ]);
 
   // ==========================================
@@ -519,6 +560,54 @@ export default function CombinedTransactionWorkspace() {
     });
   };
 
+  const focusCell = (rowIdx, colIdx) => {
+    if (rowIdx < 0) {
+      if (refVehicle.current) {
+        refVehicle.current.focus();
+        refVehicle.current.select?.();
+      }
+      return;
+    }
+
+    const boundedRow = Math.max(0, Math.min(rowIdx, transactionItems.length - 1));
+    const boundedCol = Math.max(0, Math.min(colIdx, 7));
+
+    setActiveRowIdx(boundedRow);
+    currentFocusedCol.current = boundedCol;
+
+    const key = `${boundedRow}-${boundedCol}`;
+    const target = cellRefs.current[key];
+    if (target) {
+      target.focus();
+      if (target.select) {
+        target.select();
+      }
+      target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+  };
+
+  const handleDeleteRow = (indexToDelete, colIdx = 0) => {
+    if (actionLoading || mode === 'SAVING') return;
+    markDirtyAndEdit();
+
+    setTransactionItems(prev => {
+      const updated = prev.filter((_, i) => i !== indexToDelete);
+      while (updated.length < DEFAULT_ROWS_COUNT) {
+        updated.push({ ...BLANK_TRANSACTION_ROW });
+      }
+      return updated;
+    });
+
+    setActiveAutocompleteIdx(null);
+
+    const targetRow = Math.max(0, Math.min(indexToDelete, transactionItems.length - 2));
+    setActiveRowIdx(targetRow);
+
+    setTimeout(() => {
+      focusCell(targetRow, colIdx);
+    }, 20);
+  };
+
   const handleSelectProductSuggestion = (index, prod) => {
     if (actionLoading || mode === 'SAVING') return;
     markDirtyAndEdit();
@@ -552,32 +641,158 @@ export default function CombinedTransactionWorkspace() {
     });
     setActiveAutocompleteIdx(null);
     setHighlightedSuggestionIdx(0);
+    setTimeout(() => {
+      focusCell(index, 1);
+    }, 20);
   };
 
-  const handleProductInputKeyDown = (e, idx, filtered) => {
-    if (activeAutocompleteIdx !== idx || filtered.length === 0) {
-      if (e.key === 'ArrowDown') {
-        setActiveAutocompleteIdx(idx);
-        setHighlightedSuggestionIdx(0);
+  const handleCellKeyDown = (e, rowIdx, colIdx) => {
+    // 1. Delete Row with Control + Delete (or Ctrl+Del, Ctrl+Backspace, Cmd+Backspace)
+    const isCtrlDelete =
+      (e.ctrlKey && (e.key === 'Delete' || e.key === 'Del' || e.code === 'Delete' || e.key === 'Backspace')) ||
+      (e.metaKey && (e.key === 'Delete' || e.key === 'Del' || e.code === 'Delete' || e.key === 'Backspace'));
+
+    if (isCtrlDelete) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleDeleteRow(rowIdx, colIdx);
+      return;
+    }
+
+    // 2. Col 0 (Product Name) with Autocomplete open
+    if (colIdx === 0) {
+      const filtered = getFilteredProducts(transactionItems[rowIdx]?.productName || '');
+      const isDropdownOpen = activeAutocompleteIdx === rowIdx && filtered.length > 0;
+
+      if (isDropdownOpen) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setHighlightedSuggestionIdx(prev => (prev + 1) % filtered.length);
+          return;
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setHighlightedSuggestionIdx(prev => (prev - 1 + filtered.length) % filtered.length);
+          return;
+        } else if (e.key === 'Enter' || e.key === 'Tab') {
+          if (highlightedSuggestionIdx >= 0 && highlightedSuggestionIdx < filtered.length) {
+            e.preventDefault();
+            handleSelectProductSuggestion(rowIdx, filtered[highlightedSuggestionIdx]);
+            return;
+          } else {
+            setActiveAutocompleteIdx(null);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setActiveAutocompleteIdx(null);
+          return;
+        }
+      }
+    }
+
+    // 3. ENTER KEY navigation
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // If pressing Enter on an empty product name in col 0, navigate directly down to Remarks
+      if (colIdx === 0 && !transactionItems[rowIdx]?.productName?.trim()) {
+        if (remarkTextareaRef.current) {
+          remarkTextareaRef.current.focus();
+          remarkTextareaRef.current.select?.();
+        }
+        return;
+      }
+
+      if (colIdx < 7) {
+        focusCell(rowIdx, colIdx + 1);
+      } else {
+        if (rowIdx === transactionItems.length - 1) {
+          setTransactionItems(prev => [...prev, { ...BLANK_TRANSACTION_ROW }]);
+        }
+        focusCell(rowIdx + 1, 0);
       }
       return;
     }
 
+    // 4. ARROW DOWN
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightedSuggestionIdx(prev => (prev + 1) % filtered.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlightedSuggestionIdx(prev => (prev - 1 + filtered.length) % filtered.length);
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      if (highlightedSuggestionIdx >= 0 && highlightedSuggestionIdx < filtered.length) {
-        e.preventDefault();
-        handleSelectProductSuggestion(idx, filtered[highlightedSuggestionIdx]);
-      } else {
-        setActiveAutocompleteIdx(null);
+      if (rowIdx === transactionItems.length - 1) {
+        if (remarkTextareaRef.current) {
+          remarkTextareaRef.current.focus();
+        }
+        return;
       }
-    } else if (e.key === 'Escape') {
-      setActiveAutocompleteIdx(null);
+      focusCell(rowIdx + 1, colIdx);
+      return;
+    }
+
+    // 5. ARROW UP
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (rowIdx === 0) {
+        if (refVehicle.current) {
+          refVehicle.current.focus();
+          refVehicle.current.select?.();
+        }
+      } else {
+        focusCell(rowIdx - 1, colIdx);
+      }
+      return;
+    }
+
+    // 6. ARROW RIGHT
+    if (e.key === 'ArrowRight') {
+      if (colIdx === 0 || colIdx === 1) {
+        const atEnd = e.target.selectionStart === e.target.value.length;
+        if (atEnd) {
+          e.preventDefault();
+          if (colIdx < 7) {
+            focusCell(rowIdx, colIdx + 1);
+          } else {
+            focusCell(rowIdx + 1, 0);
+          }
+        }
+      } else {
+        e.preventDefault();
+        if (colIdx < 7) {
+          focusCell(rowIdx, colIdx + 1);
+        } else {
+          focusCell(rowIdx + 1, 0);
+        }
+      }
+      return;
+    }
+
+    // 7. ARROW LEFT
+    if (e.key === 'ArrowLeft') {
+      if (colIdx === 0 || colIdx === 1) {
+        const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
+        if (atStart) {
+          e.preventDefault();
+          if (colIdx > 0) {
+            focusCell(rowIdx, colIdx - 1);
+          } else {
+            if (rowIdx === 0 && refVehicle.current) {
+              refVehicle.current.focus();
+              refVehicle.current.select?.();
+            } else if (rowIdx > 0) {
+              focusCell(rowIdx - 1, 7);
+            }
+          }
+        }
+      } else {
+        e.preventDefault();
+        if (colIdx > 0) {
+          focusCell(rowIdx, colIdx - 1);
+        } else {
+          if (rowIdx === 0 && refVehicle.current) {
+            refVehicle.current.focus();
+            refVehicle.current.select?.();
+          } else if (rowIdx > 0) {
+            focusCell(rowIdx - 1, 7);
+          }
+        }
+      }
+      return;
     }
   };
 
@@ -992,6 +1207,19 @@ export default function CombinedTransactionWorkspace() {
         customerId: parseInt(selectedCustomerId, 10),
         estimateId: estimateId || null,
         billDate: billDate,
+        basic: headerBRate || null,
+        terms: terms ? terms.trim() : null,
+        vehicle: vehicle ? vehicle.trim() : null,
+        transport: transportName ? transportName.trim() : null,
+        broker: brokerName ? brokerName.trim() : null,
+        dueDate: billDueDate || null,
+        shortageQty: parseFloat(shortageQty) || 0,
+        shortageAmt: parseFloat(shortageAmt) || 0,
+        expBeforeTax: parseFloat(expBeforeTax) || 0,
+        taxRate: parseFloat(billTaxRate) || 0,
+        taxAmount: parseFloat(calculations.totalVat) || 0,
+        surchargeRate: parseFloat(surchargeRate) || 0,
+        expAfterTax: parseFloat(expAfterTax) || 0,
         items: billItemsPayload,
         gstPercentage: parseFloat(billTaxRate) || 0,
         transportCost: parseFloat(expBeforeTax) || 0,
@@ -1093,12 +1321,21 @@ export default function CombinedTransactionWorkspace() {
             <div className="flex items-center space-x-1.5">
               <span className="font-bold text-[11px] text-black w-22">Date</span>
               <input
+                ref={refDate}
                 type="text"
                 value={formatToDisplayDate(billDate)}
                 disabled={isSaving}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setBillDate(parseDisplayDateToIso(e.target.value));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refCustomer.current) {
+                      refCustomer.current.focus();
+                    }
+                  }
                 }}
                 placeholder="DD-MM-YYYY"
                 className="w-24 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold focus:outline-none focus:bg-white"
@@ -1172,11 +1409,27 @@ export default function CombinedTransactionWorkspace() {
               <label className="w-18 font-bold text-[11px] text-black">Cust.Name</label>
               <div className="flex-1 relative">
                 <select
+                  ref={refCustomer}
                   value={selectedCustomerId}
                   disabled={isSaving}
                   onChange={(e) => {
                     markDirtyAndEdit();
                     setSelectedCustomerId(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === 'ArrowRight') {
+                      e.preventDefault();
+                      if (refHeaderBRate.current) {
+                        refHeaderBRate.current.focus();
+                        refHeaderBRate.current.select?.();
+                      }
+                    } else if (e.key === 'ArrowLeft') {
+                      e.preventDefault();
+                      if (refDate.current) {
+                        refDate.current.focus();
+                        refDate.current.select?.();
+                      }
+                    }
                   }}
                   className="w-full h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-bold uppercase focus:outline-none focus:bg-white cursor-pointer"
                 >
@@ -1209,25 +1462,40 @@ export default function CombinedTransactionWorkspace() {
             </div>
           </div>
 
-          {/* Column 2: B.Rate, Terms (commented), Vehicle (commented) */}
+          {/* Column 2: B.Rate, Terms, Vehicle */}
           <div className="md:col-span-3 space-y-0.5">
             <div className="flex items-center">
               <label className="w-14 font-bold text-[11px] text-black">B.Rate</label>
               <input
+                ref={refHeaderBRate}
                 type="number"
                 step="any"
                 value={headerBRate}
                 disabled={isSaving}
                 onChange={(e) => handleHeaderBRateChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refTerms.current) {
+                      refTerms.current.focus();
+                      refTerms.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (refCustomer.current) {
+                      refCustomer.current.focus();
+                    }
+                  }
+                }}
                 placeholder="0.00"
                 className="w-32 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-bold focus:outline-none focus:bg-white"
               />
             </div>
 
-            {/* Terms (Commented out per request)
             <div className="flex items-center">
               <label className="w-14 font-bold text-[11px] text-black">Terms</label>
               <input
+                ref={refTerms}
                 type="text"
                 value={terms}
                 disabled={isSaving}
@@ -1235,15 +1503,34 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setTerms(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refVehicle.current) {
+                      refVehicle.current.focus();
+                      refVehicle.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (refHeaderBRate.current) {
+                      refHeaderBRate.current.focus();
+                      refHeaderBRate.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (refCustomer.current) {
+                      refCustomer.current.focus();
+                    }
+                  }
+                }}
                 className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
               />
             </div>
-            */}
 
-            {/* Vehicle (Commented out per request)
             <div className="flex items-center">
               <label className="w-14 font-bold text-[11px] text-black">Vehicle</label>
               <input
+                ref={refVehicle}
                 type="text"
                 value={vehicle}
                 disabled={isSaving}
@@ -1251,10 +1538,26 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setVehicle(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    focusCell(0, 0);
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (refTerms.current) {
+                      refTerms.current.focus();
+                      refTerms.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (refCustomer.current) {
+                      refCustomer.current.focus();
+                    }
+                  }
+                }}
                 className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
               />
             </div>
-            */}
           </div>
 
           {/* Column 3: Tax Type, Bill Cash, Mfg.Trd (Fixed to Vat Sale, Bill, Trading Sale) */}
@@ -1336,29 +1639,48 @@ export default function CombinedTransactionWorkspace() {
                   return (
                     <tr
                       key={idx}
+                      tabIndex={-1}
                       onClick={() => setActiveRowIdx(idx)}
+                      onKeyDown={(e) => {
+                        const isCtrlDelete =
+                          (e.ctrlKey && (e.key === 'Delete' || e.key === 'Del' || e.code === 'Delete' || e.key === 'Backspace')) ||
+                          (e.metaKey && (e.key === 'Delete' || e.key === 'Del' || e.code === 'Delete' || e.key === 'Backspace'));
+                        if (isCtrlDelete) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDeleteRow(idx, currentFocusedCol.current);
+                        }
+                      }}
                       className={`h-5 border-b border-[#c0c0c0] ${isActive ? 'bg-[#f4f7fc]' : 'bg-white hover:bg-slate-50'}`}
                     >
                       {/* Active Row Indicator */}
-                      <td className="w-6 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none">
+                      <td
+                        className="w-6 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none cursor-pointer"
+                        title="Press Ctrl+Delete to remove this row"
+                      >
                         {isActive ? '▸' : ''}
                       </td>
 
-                      {/* Product Name */}
+                      {/* Product Name (Col 0) */}
                       <td className="border-r border-[#7f9db9] p-0 relative min-w-[150px]">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-0`] = el;
+                            else delete cellRefs.current[`${idx}-0`];
+                          }}
                           type="text"
                           value={item.productName}
                           disabled={isSaving}
                           onChange={(e) => handleProductNameInputChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
+                            currentFocusedCol.current = 0;
                             if (!isSaving) {
                               setActiveAutocompleteIdx(idx);
                               setHighlightedSuggestionIdx(0);
                             }
                           }}
-                          onKeyDown={(e) => handleProductInputKeyDown(e, idx, filtered)}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 0)}
                           className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none font-medium"
                         />
 
@@ -1395,91 +1717,147 @@ export default function CombinedTransactionWorkspace() {
                         )}
                       </td>
 
-                      {/* Description */}
+                      {/* Description (Col 1) */}
                       <td className="border-r border-[#7f9db9] p-0 min-w-[150px]">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-1`] = el;
+                            else delete cellRefs.current[`${idx}-1`];
+                          }}
                           type="text"
                           value={item.description}
                           disabled={isSaving}
                           onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 1;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 1)}
                           className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* Difference */}
+                      {/* Difference (Col 2) */}
                       <td className="border-r border-[#7f9db9] p-0 text-right w-24">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-2`] = el;
+                            else delete cellRefs.current[`${idx}-2`];
+                          }}
                           type="number"
                           step="any"
                           value={hasRowData ? item.difference : ''}
                           disabled={isSaving}
                           onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 2;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 2)}
                           className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* Pcs */}
+                      {/* Pcs (Col 3) */}
                       <td className="border-r border-[#7f9db9] p-0 text-right w-16">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-3`] = el;
+                            else delete cellRefs.current[`${idx}-3`];
+                          }}
                           type="number"
                           value={hasRowData ? item.pcs : ''}
                           disabled={isSaving}
                           onChange={(e) => handleItemPcsChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 3;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 3)}
                           className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* Quantity */}
+                      {/* Quantity (Col 4) */}
                       <td className="border-r border-[#7f9db9] p-0 text-right w-20">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-4`] = el;
+                            else delete cellRefs.current[`${idx}-4`];
+                          }}
                           type="number"
                           step="any"
                           value={item.quantity}
                           disabled={isSaving}
                           onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 4;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 4)}
                           className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* B.Rate */}
+                      {/* B.Rate (Col 5) */}
                       <td className="border-r border-[#7f9db9] p-0 text-right w-24">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-5`] = el;
+                            else delete cellRefs.current[`${idx}-5`];
+                          }}
                           type="number"
                           step="any"
                           value={hasProduct ? (item.basicRate || headerBRate || '') : (item.basicRate || '')}
                           disabled={isSaving}
                           onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 5;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 5)}
                           className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* Rate (Calculated / Editable: B.Rate + Diff) */}
+                      {/* Rate (Col 6) */}
                       <td className="border-r border-[#7f9db9] p-0 text-right w-24">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-6`] = el;
+                            else delete cellRefs.current[`${idx}-6`];
+                          }}
                           type="number"
                           step="any"
                           value={hasProduct ? (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : (item.finalRate || '')) : (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : '')}
                           disabled={isSaving}
                           onChange={(e) => handleItemRateChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 6;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 6)}
                           className="w-full h-5 px-1 text-right text-xs font-mono font-medium text-black bg-transparent border-0 outline-none focus:bg-white"
                         />
                       </td>
 
-                      {/* Amount (Calculated / Editable: Rate * Qty) */}
+                      {/* Amount (Col 7) */}
                       <td className="p-0 text-right w-28">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-7`] = el;
+                            else delete cellRefs.current[`${idx}-7`];
+                          }}
                           type="number"
                           step="any"
                           value={hasProduct ? (item.amount && item.amount !== '0.00' ? item.amount : '') : (item.amount && item.amount !== '0.00' ? item.amount : '')}
                           disabled={isSaving}
                           onChange={(e) => handleItemAmountChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 7;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 7)}
                           className="w-full h-5 px-1 text-right text-xs font-mono font-semibold text-black bg-transparent border-0 outline-none focus:bg-white"
                         />
                       </td>
@@ -1524,31 +1902,60 @@ export default function CombinedTransactionWorkspace() {
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
-            LOWER SECTION: Left (Remark/Transport/Broker), Center (Due/VAT/Shortage), Right (Taxes/Grand Total)
+            LOWER SECTION: Left (Remark, Transport, Broker), Center (Due Date, Shortage), Right (Totals without GST)
            ───────────────────────────────────────────────────────────── */}
         <div className="shrink-0 grid grid-cols-1 md:grid-cols-12 gap-2 pt-0.5">
           
-          {/* Lower Left: Remark (expanded width), Transport, Broker */}
-          <div className="md:col-span-7 space-y-1">
+          {/* Lower Left: Remark, Transport, Broker */}
+          <div className="md:col-span-5 space-y-1">
             <div className="flex items-start w-full">
               <label className="w-16 font-bold text-[11px] text-black pt-0.5">Remark:</label>
               <textarea
                 ref={remarkTextareaRef}
-                rows={3}
+                rows={2}
                 value={billRemark}
                 disabled={isSaving}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setBillRemark(e.target.value);
                 }}
-                className="flex-1 h-20 bg-[#cce4f7] border border-[#7f9db9] px-1.5 py-1 text-xs text-black focus:outline-none focus:bg-white resize-none"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (!e.shiftKey) {
+                      e.preventDefault();
+                      if (refTransport.current) {
+                        refTransport.current.focus();
+                        refTransport.current.select?.();
+                      }
+                    }
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refTransport.current) {
+                      refTransport.current.focus();
+                      refTransport.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    focusCell(activeRowIdx, currentFocusedCol.current);
+                  } else if (e.key === 'ArrowRight') {
+                    const atEnd = e.target.selectionStart === e.target.value.length;
+                    if (atEnd) {
+                      e.preventDefault();
+                      if (refDueDate.current) {
+                        refDueDate.current.focus();
+                        refDueDate.current.select?.();
+                      }
+                    }
+                  }
+                }}
+                className="flex-1 h-11 bg-[#cce4f7] border border-[#7f9db9] px-1.5 py-0.5 text-xs text-black focus:outline-none focus:bg-white resize-none"
               />
             </div>
 
-            {/* Transport (Commented out per request)
             <div className="flex items-center">
               <label className="w-16 font-bold text-[11px] text-black">Transport</label>
               <input
+                ref={refTransport}
                 type="text"
                 value={transportName}
                 disabled={isSaving}
@@ -1556,15 +1963,45 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setTransportName(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refBroker.current) {
+                      refBroker.current.focus();
+                      refBroker.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (remarkTextareaRef.current) {
+                      remarkTextareaRef.current.focus();
+                    }
+                  } else if (e.key === 'ArrowRight') {
+                    const atEnd = e.target.selectionStart === e.target.value.length;
+                    if (atEnd) {
+                      e.preventDefault();
+                      if (refDueDate.current) {
+                        refDueDate.current.focus();
+                        refDueDate.current.select?.();
+                      }
+                    }
+                  } else if (e.key === 'ArrowLeft') {
+                    const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
+                    if (atStart) {
+                      e.preventDefault();
+                      if (remarkTextareaRef.current) {
+                        remarkTextareaRef.current.focus();
+                      }
+                    }
+                  }
+                }}
                 className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
               />
             </div>
-            */}
 
-            {/* Broker (Commented out per request)
             <div className="flex items-center">
               <label className="w-16 font-bold text-[11px] text-black">Broker</label>
               <input
+                ref={refBroker}
                 type="text"
                 value={brokerName}
                 disabled={isSaving}
@@ -1572,18 +2009,52 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setBrokerName(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refDueDate.current) {
+                      refDueDate.current.focus();
+                      refDueDate.current.select?.();
+                    } else if (refSaveBtn.current) {
+                      refSaveBtn.current.focus();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (refTransport.current) {
+                      refTransport.current.focus();
+                      refTransport.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowRight') {
+                    const atEnd = e.target.selectionStart === e.target.value.length;
+                    if (atEnd) {
+                      e.preventDefault();
+                      if (refShortageQty.current) {
+                        refShortageQty.current.focus();
+                        refShortageQty.current.select?.();
+                      }
+                    }
+                  } else if (e.key === 'ArrowLeft') {
+                    const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
+                    if (atStart) {
+                      e.preventDefault();
+                      if (refTransport.current) {
+                        refTransport.current.focus();
+                        refTransport.current.select?.();
+                      }
+                    }
+                  }
+                }}
                 className="flex-1 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black focus:outline-none focus:bg-white"
               />
             </div>
-            */}
           </div>
 
           {/* Lower Center: Due Date, Total VAT (red), Shortage */}
-          <div className="md:col-span-2 space-y-1">
-            {/* Due Date (Commented out per request)
+          <div className="md:col-span-3 space-y-1">
             <div className="flex items-center">
               <label className="w-18 font-bold text-[11px] text-black">Due Date</label>
               <input
+                ref={refDueDate}
                 type="text"
                 value={formatToDisplayDate(billDueDate)}
                 disabled={isSaving}
@@ -1591,27 +2062,50 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setBillDueDate(parseDisplayDateToIso(e.target.value));
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refShortageQty.current) {
+                      refShortageQty.current.focus();
+                      refShortageQty.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    focusCell(activeRowIdx, currentFocusedCol.current);
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (refTransport.current) {
+                      refTransport.current.focus();
+                      refTransport.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    if (refExpBeforeTax.current) {
+                      refExpBeforeTax.current.focus();
+                      refExpBeforeTax.current.select?.();
+                    }
+                  }
+                }}
                 placeholder="DD-MM-YYYY"
                 className="w-24 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold focus:outline-none focus:bg-white"
               />
             </div>
-            */}
 
             <div className="flex items-center">
-              <label className="w-16 font-bold text-[11px] text-red-700">Total VAT</label>
+              <label className="w-18 font-bold text-[11px] text-red-700">Total VAT</label>
               <input
                 type="text"
                 readOnly
                 value={calculations.totalVat}
-                className="w-20 h-5 bg-white border border-[#7f9db9] px-1 text-[11px] font-mono font-bold text-right text-black"
+                className="w-24 h-5 bg-white border border-[#7f9db9] px-1 text-[11px] font-mono font-bold text-right text-black"
               />
             </div>
 
-            {/* Shortage (Commented out per request)
             <div className="flex items-center">
               <label className="w-18 font-bold text-[11px] text-black">Shortage</label>
               <div className="flex items-center space-x-1">
                 <input
+                  ref={refShortageQty}
                   type="number"
                   step="any"
                   value={shortageQty}
@@ -1620,10 +2114,38 @@ export default function CombinedTransactionWorkspace() {
                     markDirtyAndEdit();
                     setShortageQty(e.target.value);
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === 'ArrowRight') {
+                      e.preventDefault();
+                      if (refShortageAmt.current) {
+                        refShortageAmt.current.focus();
+                        refShortageAmt.current.select?.();
+                      }
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      if (refDueDate.current) {
+                        refDueDate.current.focus();
+                        refDueDate.current.select?.();
+                      }
+                    } else if (e.key === 'ArrowLeft') {
+                      e.preventDefault();
+                      if (refBroker.current) {
+                        refBroker.current.focus();
+                        refBroker.current.select?.();
+                      }
+                    } else if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      if (refExpBeforeTax.current) {
+                        refExpBeforeTax.current.focus();
+                        refExpBeforeTax.current.select?.();
+                      }
+                    }
+                  }}
                   placeholder="Qty"
                   className="w-14 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] font-mono text-right text-black focus:outline-none focus:bg-white"
                 />
                 <input
+                  ref={refShortageAmt}
                   type="number"
                   step="any"
                   value={shortageAmt}
@@ -1632,30 +2154,56 @@ export default function CombinedTransactionWorkspace() {
                     markDirtyAndEdit();
                     setShortageAmt(e.target.value);
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      if (refExpBeforeTax.current) {
+                        refExpBeforeTax.current.focus();
+                        refExpBeforeTax.current.select?.();
+                      }
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      if (refDueDate.current) {
+                        refDueDate.current.focus();
+                        refDueDate.current.select?.();
+                      }
+                    } else if (e.key === 'ArrowLeft') {
+                      e.preventDefault();
+                      if (refShortageQty.current) {
+                        refShortageQty.current.focus();
+                        refShortageQty.current.select?.();
+                      }
+                    } else if (e.key === 'ArrowRight') {
+                      e.preventDefault();
+                      if (refExpBeforeTax.current) {
+                        refExpBeforeTax.current.focus();
+                        refExpBeforeTax.current.select?.();
+                      }
+                    }
+                  }}
                   placeholder="0.00"
                   className="w-18 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] font-mono text-right text-black focus:outline-none focus:bg-white"
                 />
               </div>
             </div>
-            */}
           </div>
 
           {/* Lower Right: Value, Exp Before Tax, Vat/Cst, Sur @, Exp After Tax, Grand Total */}
-          <div className="md:col-span-3 space-y-0.5">
+          <div className="md:col-span-4 space-y-0.5">
             <div className="flex items-center justify-between">
               <label className="font-bold text-[11px] text-black">Value</label>
               <input
                 type="text"
                 readOnly
                 value={calculations.value}
-                className="w-28 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+                className="w-32 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
               />
             </div>
 
-            {/* Exp Before Tax (Commented out per request)
             <div className="flex items-center justify-between">
               <label className="font-bold text-[11px] text-black">Exp Before Tax</label>
               <input
+                ref={refExpBeforeTax}
                 type="number"
                 step="any"
                 value={expBeforeTax}
@@ -1664,15 +2212,33 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setExpBeforeTax(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refBillTaxRate.current) {
+                      refBillTaxRate.current.focus();
+                      refBillTaxRate.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    focusCell(activeRowIdx, currentFocusedCol.current);
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (refShortageAmt.current) {
+                      refShortageAmt.current.focus();
+                      refShortageAmt.current.select?.();
+                    }
+                  }
+                }}
                 placeholder="0.00"
-                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
+                className="w-32 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
               />
             </div>
-            */}
 
             <div className="flex items-center justify-between">
               <label className="font-bold text-[11px] text-black">Vat/Cst</label>
               <input
+                ref={refBillTaxRate}
                 type="number"
                 step="any"
                 value={billTaxRate}
@@ -1681,13 +2247,35 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setBillTaxRate(e.target.value);
                 }}
-                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black font-semibold focus:outline-none focus:bg-white text-[11px]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refSurchargeRate.current) {
+                      refSurchargeRate.current.focus();
+                      refSurchargeRate.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (refExpBeforeTax.current) {
+                      refExpBeforeTax.current.focus();
+                      refExpBeforeTax.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (refBroker.current) {
+                      refBroker.current.focus();
+                      refBroker.current.select?.();
+                    }
+                  }
+                }}
+                className="w-32 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black font-semibold focus:outline-none focus:bg-white text-[11px]"
               />
             </div>
 
             <div className="flex items-center justify-between">
               <label className="font-bold text-[11px] text-black">Sur @</label>
               <input
+                ref={refSurchargeRate}
                 type="number"
                 step="any"
                 value={surchargeRate}
@@ -1696,15 +2284,30 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setSurchargeRate(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refExpAfterTax.current) {
+                      refExpAfterTax.current.focus();
+                      refExpAfterTax.current.select?.();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (refBillTaxRate.current) {
+                      refBillTaxRate.current.focus();
+                      refBillTaxRate.current.select?.();
+                    }
+                  }
+                }}
                 placeholder="0.00"
-                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
+                className="w-32 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
               />
             </div>
 
-            {/* Exp After Tax (Commented out per request)
             <div className="flex items-center justify-between">
               <label className="font-bold text-[11px] text-black">Exp After Tax</label>
               <input
+                ref={refExpAfterTax}
                 type="number"
                 step="any"
                 value={expAfterTax}
@@ -1713,11 +2316,24 @@ export default function CombinedTransactionWorkspace() {
                   markDirtyAndEdit();
                   setExpAfterTax(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (refSaveBtn.current) {
+                      refSaveBtn.current.focus();
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (refSurchargeRate.current) {
+                      refSurchargeRate.current.focus();
+                      refSurchargeRate.current.select?.();
+                    }
+                  }
+                }}
                 placeholder="0.00"
-                className="w-28 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
+                className="w-32 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-right font-mono text-black focus:outline-none focus:bg-white text-[11px]"
               />
             </div>
-            */}
 
             <div className="flex items-center justify-between pt-0.5">
               <label className="font-black text-[12px] text-black uppercase">Grand Total</label>
@@ -1725,20 +2341,20 @@ export default function CombinedTransactionWorkspace() {
                 type="text"
                 readOnly
                 value={calculations.grandTotal}
-                className="w-32 h-5.5 bg-[#cce4f7] border border-[#7f9db9] px-1.5 text-right font-mono font-black text-[13px] text-black"
+                className="w-32 h-6 bg-[#cce4f7] border border-[#7f9db9] px-1.5 text-right font-mono font-black text-[13px] text-black"
               />
             </div>
           </div>
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
-            BOTTOM ACTION BUTTON BAR: Add, Previous, Next, Print & Save
+            BOTTOM ACTION BUTTON BAR: Add, Previous, Next, First, Last, Search, Exit, Save, Print
            ───────────────────────────────────────────────────────────── */}
         <div className="shrink-0 pt-1 border-t border-[#7f9db9]">
-          <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center justify-between gap-1 flex-wrap">
             
-            {/* Left: Add, < Previous, Next > */}
-            <div className="flex items-center gap-1.5">
+            {/* Left: Add, < Previous, Next >, First, Last, Search, Exit, Save */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               {/* 1. Add */}
               <button
                 type="button"
@@ -1769,8 +2385,53 @@ export default function CombinedTransactionWorkspace() {
                 Next &gt;
               </button>
 
-              {/* 4. Save (Save only without printing) */}
+              {/* 4. First */}
               <button
+                type="button"
+                onClick={handleFirst}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Go to first Sale Voucher"
+              >
+                First
+              </button>
+
+              {/* 5. Last */}
+              <button
+                type="button"
+                onClick={handleLast}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Go to latest Sale Voucher"
+              >
+                Last
+              </button>
+
+              {/* 6. Search */}
+              <button
+                type="button"
+                onClick={handleOpenSearch}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Search Sale Vouchers"
+              >
+                Search
+              </button>
+
+              {/* 7. Exit */}
+              <button
+                type="button"
+                onClick={handleExit}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Exit Sale Voucher module"
+              >
+                Exit
+              </button>
+
+              {/* 8. Save (Save only without printing) */}
+              <button
+                ref={refSaveBtn}
                 type="button"
                 onClick={handleSaveOnly}
                 disabled={actionLoading}
@@ -1781,15 +2442,16 @@ export default function CombinedTransactionWorkspace() {
               </button>
             </div>
 
-            {/* Right: Print & Save */}
+            {/* Right: Print */}
             <div className="flex items-center">
               <button
                 type="button"
                 onClick={handlePrintAndSave}
                 disabled={actionLoading}
                 className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Print Sale Voucher"
               >
-                {actionLoading ? 'Saving...' : 'Print & Save'}
+                {actionLoading && mode === 'SAVING' ? 'Printing...' : 'Print'}
               </button>
             </div>
           </div>

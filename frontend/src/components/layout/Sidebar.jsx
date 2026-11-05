@@ -54,7 +54,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     { name: 'Estimates', icon: FileText, path: '/estimates', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
     { name: 'Rough Estimate', icon: FileText, path: '/rough-estimate', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'ESTIMATES' },
     { name: 'Billing', icon: Receipt, path: '/bills', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
-    { name: 'Sale Voucher', icon: Receipt, path: '/sale-voucher', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
+    { name: 'Billing Voucher', icon: Receipt, path: '/sale-voucher', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
     { name: 'Purchases', icon: ShoppingCart, path: '/purchases', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
     { name: 'Purchase Order', icon: ShoppingCart, path: '/purchase-order', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
     { name: 'Weighbridge', icon: Scale, path: '/weighbridge', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'], moduleKey: 'WEIGHBRIDGE' },

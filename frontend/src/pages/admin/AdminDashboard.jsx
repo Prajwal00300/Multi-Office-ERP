@@ -31,13 +31,13 @@ import {
 const MODULE_DEFINITIONS = [
   {
     id: 'BILLING',
-    name: 'Billing / Sale Voucher',
+    name: 'Billing / Billing Voucher',
     category: 'Sales & Invoicing',
-    description: 'Create and finalize official sale vouchers, calculate GST, record negotiated prices, and print invoices.',
+    description: 'Create and finalize official billing vouchers, calculate GST, record negotiated prices, and print invoices.',
     icon: Receipt,
     path: '/bills',
     createPath: '/sale-voucher',
-    createLabel: 'Sale Voucher',
+    createLabel: 'Billing Voucher',
     color: 'from-blue-600 to-indigo-700',
     lightBg: 'bg-blue-50 text-blue-700 border-blue-200',
     iconColor: 'text-blue-600',

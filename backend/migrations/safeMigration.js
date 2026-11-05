@@ -492,6 +492,135 @@ async function runSafeHierarchyMigration() {
       console.warn('   ⚠️ Note adding columns to estimates:', estErr.message);
     }
 
+    // 12. Add transport, broker, vehicle, terms, etc. columns to bills table if not exist
+    try {
+      const [billColumns] = await sequelize.query(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bills'
+      `);
+      const billColNames = billColumns.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+
+      if (!billColNames.includes('basic')) {
+        console.log("   -> Adding 'basic' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN basic VARCHAR(255) NULL
+        `);
+        console.log("   ✅ bills.basic added.");
+      }
+
+      if (!billColNames.includes('terms')) {
+        console.log("   -> Adding 'terms' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN terms VARCHAR(255) NULL
+        `);
+        console.log("   ✅ bills.terms added.");
+      }
+
+      if (!billColNames.includes('vehicle')) {
+        console.log("   -> Adding 'vehicle' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN vehicle VARCHAR(255) NULL
+        `);
+        console.log("   ✅ bills.vehicle added.");
+      }
+
+      if (!billColNames.includes('transport')) {
+        console.log("   -> Adding 'transport' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN transport VARCHAR(255) NULL
+        `);
+        console.log("   ✅ bills.transport added.");
+      }
+
+      if (!billColNames.includes('broker')) {
+        console.log("   -> Adding 'broker' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN broker VARCHAR(255) NULL
+        `);
+        console.log("   ✅ bills.broker added.");
+      }
+
+      if (!billColNames.includes('expbeforetax')) {
+        console.log("   -> Adding 'expBeforeTax' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN expBeforeTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ bills.expBeforeTax added.");
+      }
+
+      if (!billColNames.includes('taxrate')) {
+        console.log("   -> Adding 'taxRate' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN taxRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ bills.taxRate added.");
+      }
+
+      if (!billColNames.includes('taxamount')) {
+        console.log("   -> Adding 'taxAmount' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN taxAmount DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ bills.taxAmount added.");
+      }
+
+      if (!billColNames.includes('surchargerate')) {
+        console.log("   -> Adding 'surchargeRate' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN surchargeRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ bills.surchargeRate added.");
+      }
+
+      if (!billColNames.includes('expaftertax')) {
+        console.log("   -> Adding 'expAfterTax' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN expAfterTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ bills.expAfterTax added.");
+      }
+
+      if (!billColNames.includes('duedate')) {
+        console.log("   -> Adding 'dueDate' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN dueDate DATE NULL
+        `);
+        console.log("   ✅ bills.dueDate added.");
+      }
+
+      if (!billColNames.includes('shortageqty')) {
+        console.log("   -> Adding 'shortageQty' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN shortageQty DECIMAL(15, 3) NOT NULL DEFAULT 0.000
+        `);
+        console.log("   ✅ bills.shortageQty added.");
+      }
+
+      if (!billColNames.includes('shortageamt')) {
+        console.log("   -> Adding 'shortageAmt' column to bills...");
+        await sequelize.query(`
+          ALTER TABLE bills 
+          ADD COLUMN shortageAmt DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ bills.shortageAmt added.");
+      }
+    } catch (billErr) {
+      console.warn('   ⚠️ Note adding columns to bills:', billErr.message);
+    }
+
     console.log('✅ Safe hierarchy migration completed successfully.');
   } catch (error) {
     console.error('⚠️ Safe migration note (can be ignored if columns already up-to-date):', error.message);

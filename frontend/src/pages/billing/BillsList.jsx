@@ -99,9 +99,9 @@ const BillsList = () => {
               <Receipt className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Billing / Sale Vouchers</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Billing / Billing Vouchers</h1>
               <p className="text-sm text-gray-500">
-                Manage sales vouchers, tax invoices, GST calculations, and transport charges
+                Manage billing vouchers, tax invoices, GST calculations, and transport charges
               </p>
             </div>
           </div>
@@ -113,7 +113,7 @@ const BillsList = () => {
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
           >
             <Receipt className="w-4 h-4" />
-            Sale Voucher Workspace
+            Billing Voucher Workspace
           </Link>
         </div>
       </div>
@@ -254,7 +254,7 @@ const BillsList = () => {
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
             >
               <Receipt className="w-4 h-4" />
-              Open Sale Voucher Workspace
+              Open Billing Voucher Workspace
             </Link>
           </div>
         ) : (

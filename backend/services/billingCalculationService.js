@@ -63,7 +63,7 @@ const calculateGstTaxableBase = (productSubtotal, transportCost = 0) => {
  * @param {number|string} transportCost - Manually entered transportation cost
  * @returns {Object} - Complete calculated financial breakdown
  */
-const calculateBillTotals = (items = [], gstPercentage = 0, transportCost = 0) => {
+const calculateBillTotals = (items = [], gstPercentage = 0, transportCost = 0, taxOptions = {}) => {
   let totalQuantity = 0;
   let productSubtotal = 0;
 
@@ -89,12 +89,12 @@ const calculateBillTotals = (items = [], gstPercentage = 0, transportCost = 0) =
     };
   });
 
-  const parsedGstPercent = parseFloat(gstPercentage);
+  const parsedGstPercent = parseFloat(taxOptions.taxRate !== undefined && taxOptions.taxRate !== '' ? taxOptions.taxRate : gstPercentage);
   const validatedGstPercentage = isNaN(parsedGstPercent) || parsedGstPercent < 0 
     ? 0 
     : roundTo2Decimals(Math.min(parsedGstPercent, 100));
 
-  const parsedTransport = parseFloat(transportCost);
+  const parsedTransport = parseFloat(taxOptions.expBeforeTax !== undefined && taxOptions.expBeforeTax !== '' ? taxOptions.expBeforeTax : transportCost);
   const validatedTransportCost = isNaN(parsedTransport) || parsedTransport < 0 
     ? 0 
     : roundTo2Decimals(parsedTransport);
@@ -103,7 +103,11 @@ const calculateBillTotals = (items = [], gstPercentage = 0, transportCost = 0) =
   const taxableBase = calculateGstTaxableBase(roundedSubtotal, validatedTransportCost);
   const calculatedGstAmount = roundTo2Decimals((taxableBase * validatedGstPercentage) / 100);
 
-  const finalAmount = roundTo2Decimals(roundedSubtotal + calculatedGstAmount + validatedTransportCost);
+  const surRate = parseFloat(taxOptions.surchargeRate) || 0;
+  const surchargeAmt = roundTo2Decimals((calculatedGstAmount * surRate) / 100);
+  const expAfter = parseFloat(taxOptions.expAfterTax) || 0;
+
+  const finalAmount = roundTo2Decimals(roundedSubtotal + calculatedGstAmount + validatedTransportCost + surchargeAmt + expAfter);
 
   return {
     calculatedItems,
@@ -112,6 +116,11 @@ const calculateBillTotals = (items = [], gstPercentage = 0, transportCost = 0) =
     gstPercentage: validatedGstPercentage,
     gstAmount: calculatedGstAmount,
     transportCost: validatedTransportCost,
+    expBeforeTax: validatedTransportCost,
+    taxRate: validatedGstPercentage,
+    taxAmount: calculatedGstAmount,
+    surchargeRate: roundTo2Decimals(surRate),
+    expAfterTax: roundTo2Decimals(expAfter),
     finalAmount
   };
 };
