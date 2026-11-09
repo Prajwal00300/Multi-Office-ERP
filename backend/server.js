@@ -101,7 +101,7 @@ if (!process.env.VERCEL) {
   // In Vercel serverless environment, authenticate DB connection asynchronously
   sequelize.authenticate()
     .then(async () => {
-      console.log('✅ Connected to Aiven MySQL (Vercel Serverless)');
+      console.log('✅ Connected to MySQL database (Vercel Serverless)');
       await runSafeHierarchyMigration();
     })
     .catch(err => console.error('❌ Vercel DB connection error:', err));

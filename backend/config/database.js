@@ -9,28 +9,62 @@ const {
   DB_USER,
   DB_PASSWORD,
   DB_HOST,
-  DB_PORT
+  DB_PORT,
+  DATABASE_URL,
+  MYSQL_URL
 } = process.env;
 
-// Create Sequelize instance
-const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
-  host: DB_HOST,
-  port: DB_PORT || 3306,
-  dialect: 'mysql',
-  dialectModule: mysql2,
-  dialectOptions: process.env.DB_SSL === 'true' ? {
+const fs = require('fs');
+const connectionString = DATABASE_URL || MYSQL_URL;
+
+let sslConfig = {};
+if (process.env.DB_SSL === 'true') {
+  sslConfig = {
     ssl: {
-      require: true,
-      rejectUnauthorized: false
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'false' ? false : true
     }
-  } : {},
-  logging: false, // Disable logging or set to console.log to see SQL queries
-  pool: {
-    max: 5,
-    min: 0,
-    acquire: 30000,
-    idle: 10000
+  };
+
+  if (process.env.DB_CA_CERT && fs.existsSync(process.env.DB_CA_CERT)) {
+    try {
+      sslConfig.ssl.ca = fs.readFileSync(process.env.DB_CA_CERT);
+    } catch (caErr) {
+      console.warn('⚠️ Warning: Could not read DB_CA_CERT file:', caErr.message);
+    }
   }
-});
+}
+
+// Create Sequelize instance
+let sequelize;
+if (connectionString) {
+  sequelize = new Sequelize(connectionString, {
+    dialect: 'mysql',
+    dialectModule: mysql2,
+    dialectOptions: sslConfig,
+    logging: false,
+    pool: {
+      max: 5,
+      min: 0,
+      acquire: 30000,
+      idle: 10000
+    }
+  });
+} else {
+  sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
+    host: DB_HOST,
+    port: parseInt(DB_PORT, 10) || 4000,
+    dialect: 'mysql',
+    dialectModule: mysql2,
+    dialectOptions: sslConfig,
+    logging: false,
+    pool: {
+      max: 5,
+      min: 0,
+      acquire: 30000,
+      idle: 10000
+    }
+  });
+}
 
 module.exports = sequelize;
