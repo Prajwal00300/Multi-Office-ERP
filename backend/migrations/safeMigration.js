@@ -13,67 +13,73 @@ async function runSafeHierarchyMigration() {
     console.log('🔄 Checking database schema for CEO hierarchy columns...');
 
     // 1. Inspect 'users' columns
-    const [userColumns] = await sequelize.query(`
-      SELECT COLUMN_NAME, COLUMN_TYPE 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
-    `);
+    try {
+      const [userColumns] = await sequelize.query(`
+        SELECT COLUMN_NAME, COLUMN_TYPE 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+      `);
 
-    const userColumnNames = userColumns.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
-    const roleColumn = userColumns.find(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase() === 'role');
+      if (userColumns && userColumns.length > 0) {
+        const userColumnNames = userColumns.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+        const roleColumn = userColumns.find(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase() === 'role');
 
-    // 1a. Ensure 'CEO' is in the users.role ENUM
-    if (roleColumn) {
-      const colType = (roleColumn.COLUMN_TYPE || roleColumn.column_type || '').toUpperCase();
-      if (!colType.includes("'CEO'")) {
-        console.log("   -> Adding 'CEO' to users.role ENUM...");
-        await sequelize.query(`
-          ALTER TABLE users 
-          MODIFY COLUMN role ENUM('SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING', 'PAYMENT_COLLECTOR', 'USER') 
-          NOT NULL DEFAULT 'USER'
-        `);
-        console.log("   ✅ users.role ENUM updated with 'CEO'.");
+        // 1a. Ensure 'CEO' is in the users.role ENUM
+        if (roleColumn) {
+          const colType = (roleColumn.COLUMN_TYPE || roleColumn.column_type || '').toUpperCase();
+          if (!colType.includes("'CEO'")) {
+            console.log("   -> Adding 'CEO' to users.role ENUM...");
+            await sequelize.query(`
+              ALTER TABLE users 
+              MODIFY COLUMN role ENUM('SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING', 'PAYMENT_COLLECTOR', 'USER') 
+              NOT NULL DEFAULT 'USER'
+            `);
+            console.log("   ✅ users.role ENUM updated with 'CEO'.");
+          }
+        }
+
+        // 1b. Ensure users.status exists
+        if (!userColumnNames.includes('status')) {
+          console.log("   -> Adding 'status' column to users...");
+          await sequelize.query(`
+            ALTER TABLE users 
+            ADD COLUMN status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE'
+          `);
+          console.log("   ✅ users.status added.");
+        }
+
+        // 1c. Ensure users.fullName exists
+        if (!userColumnNames.includes('fullname')) {
+          console.log("   -> Adding 'fullName' column to users...");
+          await sequelize.query(`
+            ALTER TABLE users 
+            ADD COLUMN fullName VARCHAR(255) NULL
+          `);
+          console.log("   ✅ users.fullName added.");
+        }
+
+        // 1d. Ensure users.phone exists
+        if (!userColumnNames.includes('phone')) {
+          console.log("   -> Adding 'phone' column to users...");
+          await sequelize.query(`
+            ALTER TABLE users 
+            ADD COLUMN phone VARCHAR(255) NULL
+          `);
+          console.log("   ✅ users.phone added.");
+        }
+
+        // 1e. Ensure users.email exists
+        if (!userColumnNames.includes('email')) {
+          console.log("   -> Adding 'email' column to users...");
+          await sequelize.query(`
+            ALTER TABLE users 
+            ADD COLUMN email VARCHAR(255) NULL
+          `);
+          console.log("   ✅ users.email added.");
+        }
       }
-    }
-
-    // 1b. Ensure users.status exists
-    if (!userColumnNames.includes('status')) {
-      console.log("   -> Adding 'status' column to users...");
-      await sequelize.query(`
-        ALTER TABLE users 
-        ADD COLUMN status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE'
-      `);
-      console.log("   ✅ users.status added.");
-    }
-
-    // 1c. Ensure users.fullName exists
-    if (!userColumnNames.includes('fullname')) {
-      console.log("   -> Adding 'fullName' column to users...");
-      await sequelize.query(`
-        ALTER TABLE users 
-        ADD COLUMN fullName VARCHAR(255) NULL
-      `);
-      console.log("   ✅ users.fullName added.");
-    }
-
-    // 1d. Ensure users.phone exists
-    if (!userColumnNames.includes('phone')) {
-      console.log("   -> Adding 'phone' column to users...");
-      await sequelize.query(`
-        ALTER TABLE users 
-        ADD COLUMN phone VARCHAR(255) NULL
-      `);
-      console.log("   ✅ users.phone added.");
-    }
-
-    // 1e. Ensure users.email exists
-    if (!userColumnNames.includes('email')) {
-      console.log("   -> Adding 'email' column to users...");
-      await sequelize.query(`
-        ALTER TABLE users 
-        ADD COLUMN email VARCHAR(255) NULL
-      `);
-      console.log("   ✅ users.email added.");
+    } catch (userErr) {
+      console.warn("   ⚠️ Note checking users columns:", userErr.message);
     }
 
     // 2. Inspect 'organizations' columns

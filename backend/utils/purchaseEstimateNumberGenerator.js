@@ -33,31 +33,36 @@ const generateUniquePurchaseEstimateNumber = async (organizationId, transaction)
     }
   }
 
-  const [results] = await sequelize.query(query, options);
+  try {
+    const [results] = await sequelize.query(query, options);
 
-  let nextSequence = 1;
-  if (results && results[0] && results[0].maxNum !== null && results[0].maxNum !== undefined) {
-    const currentMax = parseInt(results[0].maxNum, 10);
-    if (!isNaN(currentMax) && currentMax >= 1) {
-      nextSequence = currentMax + 1;
+    let nextSequence = 1;
+    if (results && results[0] && results[0].maxNum !== null && results[0].maxNum !== undefined) {
+      const currentMax = parseInt(results[0].maxNum, 10);
+      if (!isNaN(currentMax) && currentMax >= 1) {
+        nextSequence = currentMax + 1;
+      }
     }
-  }
 
-  // Safety check: ensure string sequence doesn't collide within this organization
-  while (true) {
-    const candidate = String(nextSequence);
-    const where = { estimateNumber: candidate };
-    if (organizationId) {
-      where.organizationId = parseInt(organizationId, 10);
+    // Safety check: ensure string sequence doesn't collide within this organization
+    while (true) {
+      const candidate = String(nextSequence);
+      const where = { estimateNumber: candidate };
+      if (organizationId) {
+        where.organizationId = parseInt(organizationId, 10);
+      }
+      const existing = await PurchaseEstimate.findOne({
+        where,
+        transaction
+      });
+      if (!existing) {
+        return candidate;
+      }
+      nextSequence += 1;
     }
-    const existing = await PurchaseEstimate.findOne({
-      where,
-      transaction
-    });
-    if (!existing) {
-      return candidate;
-    }
-    nextSequence += 1;
+  } catch (err) {
+    console.warn('generateUniquePurchaseEstimateNumber notice (returning default 1):', err.message);
+    return '1';
   }
 };
 

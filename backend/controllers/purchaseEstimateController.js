@@ -82,9 +82,80 @@ async function revertInventoryForPurchaseEstimateItems(items, estimate, transact
   });
 }
 
+let tablesVerified = false;
+async function ensurePurchaseEstimateTablesExist() {
+  if (tablesVerified) return;
+  try {
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS purchase_estimates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        estimateNumber VARCHAR(255) NOT NULL,
+        organizationId INT NOT NULL,
+        customerId INT NULL,
+        partyName VARCHAR(255) NULL,
+        estimateDate DATE NOT NULL,
+        basic VARCHAR(255) NULL,
+        terms VARCHAR(255) NULL,
+        vehicle VARCHAR(255) NULL,
+        transport VARCHAR(255) NULL,
+        broker VARCHAR(255) NULL,
+        dueDate DATE NULL,
+        shortageQty DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+        shortageAmt DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        expBeforeTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        taxRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+        taxAmount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        surchargeRate DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+        expAfterTax DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        totalQuantity DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+        total DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        others DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        grandTotal DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        status ENUM('DRAFT', 'GENERATED', 'OVERRIDDEN') NOT NULL DEFAULT 'DRAFT',
+        createdBy INT NOT NULL,
+        lockedAt DATETIME NULL,
+        lockedBy INT NULL,
+        lastOverriddenBy INT NULL,
+        lastOverriddenAt DATETIME NULL,
+        notes TEXT NULL,
+        createdAt DATETIME NOT NULL,
+        updatedAt DATETIME NOT NULL,
+        INDEX idx_pe_orgId (organizationId),
+        INDEX idx_pe_num (estimateNumber),
+        INDEX idx_pe_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS purchase_estimate_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        purchaseEstimateId INT NOT NULL,
+        productId INT NULL,
+        productNameSnapshot VARCHAR(255) NOT NULL,
+        productCategorySnapshot VARCHAR(255) NULL,
+        productSizeSnapshot VARCHAR(255) NULL,
+        productSpecificationsSnapshot TEXT NULL,
+        btls VARCHAR(50) NULL,
+        quantity DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+        unit VARCHAR(50) NOT NULL DEFAULT 'Ton',
+        negotiatedRate DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        createdAt DATETIME NOT NULL,
+        updatedAt DATETIME NOT NULL,
+        INDEX idx_pei_estId (purchaseEstimateId),
+        INDEX idx_pei_productId (productId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    tablesVerified = true;
+  } catch (err) {
+    console.warn('ensurePurchaseEstimateTablesExist notice:', err.message);
+  }
+}
+
 // GET /api/purchase-estimates - List purchase estimates with filters
 exports.getPurchaseEstimates = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { 
       search, 
       status, 
@@ -143,6 +214,7 @@ exports.getPurchaseEstimates = async (req, res) => {
 // GET /api/purchase-estimates/:id - Get purchase estimate by ID
 exports.getPurchaseEstimateById = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { id } = req.params;
 
     const estimate = await PurchaseEstimate.findByPk(id, {
@@ -165,13 +237,12 @@ exports.getPurchaseEstimateById = async (req, res) => {
     }
 
     await verifyRecordOwnership(estimate, req.user);
-
     res.status(200).json(estimate);
   } catch (error) {
     if (error.statusCode) {
       return res.status(error.statusCode).json({ error: error.message });
     }
-    console.error('Error fetching purchase estimate:', error);
+    console.error('Error fetching purchase estimate by ID:', error);
     res.status(500).json({ error: 'Internal server error while fetching purchase estimate' });
   }
 };
@@ -179,22 +250,17 @@ exports.getPurchaseEstimateById = async (req, res) => {
 // GET /api/purchase-estimates/navigation/previous
 exports.getPreviousPurchaseEstimate = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { currentId, organizationId } = req.query;
-    if (!currentId) return res.status(400).json({ error: 'currentId query parameter is required' });
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
 
-    const currentEstimate = await PurchaseEstimate.findByPk(currentId);
-    if (!currentEstimate) return res.status(404).json({ error: 'Current purchase estimate not found' });
-
-    const targetOrgId = currentEstimate.organizationId;
-    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId || targetOrgId);
-    const officeWhere = buildOfficeWhereClause(targetOfficeIds);
+    if (currentId && !isNaN(Number(currentId))) {
+      whereClause.id = { [Op.lt]: parseInt(currentId, 10) };
+    }
 
     const prevEstimate = await PurchaseEstimate.findOne({
-      where: {
-        ...officeWhere,
-        organizationId: targetOrgId,
-        id: { [Op.lt]: currentEstimate.id }
-      },
+      where: whereClause,
       include: [
         { model: Customer, attributes: ['id', 'name', 'city', 'phone', 'tin'], required: false },
         { model: Organization, attributes: ['id', 'name'] },
@@ -204,33 +270,31 @@ exports.getPreviousPurchaseEstimate = async (req, res) => {
       order: [['id', 'DESC']]
     });
 
-    if (!prevEstimate) return res.status(404).json({ message: 'No previous purchase estimate found' });
+    if (!prevEstimate) return res.status(404).json({ error: 'No previous purchase estimate found' });
     res.status(200).json(prevEstimate);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching previous purchase estimate:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 };
 
 // GET /api/purchase-estimates/navigation/next
 exports.getNextPurchaseEstimate = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { currentId, organizationId } = req.query;
-    if (!currentId) return res.status(400).json({ error: 'currentId query parameter is required' });
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    let whereClause = buildOfficeWhereClause(targetOfficeIds);
 
-    const currentEstimate = await PurchaseEstimate.findByPk(currentId);
-    if (!currentEstimate) return res.status(404).json({ error: 'Current purchase estimate not found' });
-
-    const targetOrgId = currentEstimate.organizationId;
-    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId || targetOrgId);
-    const officeWhere = buildOfficeWhereClause(targetOfficeIds);
+    if (currentId && !isNaN(Number(currentId))) {
+      whereClause.id = { [Op.gt]: parseInt(currentId, 10) };
+    }
 
     const nextEstimate = await PurchaseEstimate.findOne({
-      where: {
-        ...officeWhere,
-        organizationId: targetOrgId,
-        id: { [Op.gt]: currentEstimate.id }
-      },
+      where: whereClause,
       include: [
         { model: Customer, attributes: ['id', 'name', 'city', 'phone', 'tin'], required: false },
         { model: Organization, attributes: ['id', 'name'] },
@@ -240,17 +304,21 @@ exports.getNextPurchaseEstimate = async (req, res) => {
       order: [['id', 'ASC']]
     });
 
-    if (!nextEstimate) return res.status(404).json({ message: 'No next purchase estimate found' });
+    if (!nextEstimate) return res.status(404).json({ error: 'No next purchase estimate found' });
     res.status(200).json(nextEstimate);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching next purchase estimate:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 };
 
 // GET /api/purchase-estimates/navigation/first
 exports.getFirstPurchaseEstimate = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { organizationId } = req.query;
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
     const officeWhere = buildOfficeWhereClause(targetOfficeIds);
@@ -266,17 +334,21 @@ exports.getFirstPurchaseEstimate = async (req, res) => {
       order: [['id', 'ASC']]
     });
 
-    if (!firstEstimate) return res.status(404).json({ message: 'No purchase estimates found' });
+    if (!firstEstimate) return res.status(404).json({ error: 'No purchase estimates found' });
     res.status(200).json(firstEstimate);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching first purchase estimate:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 };
 
 // GET /api/purchase-estimates/navigation/last
 exports.getLastPurchaseEstimate = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { organizationId } = req.query;
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
     const officeWhere = buildOfficeWhereClause(targetOfficeIds);
@@ -292,17 +364,21 @@ exports.getLastPurchaseEstimate = async (req, res) => {
       order: [['id', 'DESC']]
     });
 
-    if (!lastEstimate) return res.status(404).json({ message: 'No purchase estimates found' });
+    if (!lastEstimate) return res.status(404).json({ error: 'No purchase estimates found' });
     res.status(200).json(lastEstimate);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching last purchase estimate:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 };
 
 // GET /api/purchase-estimates/by-number/:estimateNumber
 exports.getPurchaseEstimateByNumber = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { estimateNumber } = req.params;
     const { organizationId } = req.query;
 
@@ -325,26 +401,35 @@ exports.getPurchaseEstimateByNumber = async (req, res) => {
     if (!estimate) return res.status(404).json({ error: `Purchase Estimate #${estimateNumber} not found` });
     res.status(200).json(estimate);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error fetching purchase estimate by number:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 };
 
 // GET /api/purchase-estimates/next-number
 exports.getNextPurchaseEstimateNumber = async (req, res) => {
   try {
+    await ensurePurchaseEstimateTablesExist();
     const { organizationId } = req.query;
-    const targetOrgId = await getAuthorizedTargetOfficeForCreation(req.user, organizationId);
-    const nextNumber = await generateUniquePurchaseEstimateNumber(targetOrgId);
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : (req.user.organizationId || null);
+    const nextNumber = await generateUniquePurchaseEstimateNumber(effectiveOrgId);
     res.status(200).json({ nextEstimateNumber: nextNumber });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('Error generating next purchase estimate number:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Failed to generate next purchase estimate number' });
   }
 };
 
 // POST /api/purchase-estimates - Create purchase estimate
 exports.createPurchaseEstimate = async (req, res) => {
+  await ensurePurchaseEstimateTablesExist();
   const t = await sequelize.transaction();
   try {
     const {
