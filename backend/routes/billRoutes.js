@@ -29,6 +29,7 @@ router.get('/next-number', billController.getNextBillNumber);
 router.get('/:id', billController.getBillById);
 router.post('/', billController.createBill);
 router.put('/:id', billController.updateBill);
+router.delete('/:id', billController.deleteBill);
 router.post('/:id/finalize', billController.finalizeBill);
 router.post('/:id/override', billController.overrideBill);
 

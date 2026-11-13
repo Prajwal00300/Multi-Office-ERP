@@ -63,6 +63,11 @@ export const updateEstimate = async (id, data) => {
   return res.data.estimate || res.data;
 };
 
+export const deleteEstimate = async (id) => {
+  const res = await api.delete(`/estimates/${id}`);
+  return res.data;
+};
+
 export default {
   getEstimates,
   getEstimateById,
@@ -72,5 +77,6 @@ export default {
   getFirstEstimate,
   getLastEstimate,
   createEstimate,
-  updateEstimate
+  updateEstimate,
+  deleteEstimate
 };

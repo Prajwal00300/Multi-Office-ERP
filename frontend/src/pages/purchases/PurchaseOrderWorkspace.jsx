@@ -8,7 +8,8 @@ import {
   getNextPurchaseNumber,
   getPurchaseById,
   createPurchase,
-  updatePurchase
+  updatePurchase,
+  deletePurchase
 } from '../../services/purchaseService';
 
 const DEFAULT_ROWS_COUNT = 30;
@@ -132,12 +133,13 @@ export default function PurchaseOrderWorkspace() {
   const [allPurchases, setAllPurchases] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Helper to mark dirty and switch to edit mode
+  const isSaving = mode === 'SAVING' || actionLoading;
+  const isEditable = (mode === 'ADD' || mode === 'EDIT') && !isSaving;
+
+  // Helper to mark dirty without auto-leaving VIEW mode
   const markDirtyAndEdit = () => {
+    if (mode === 'VIEW') return;
     setIsDirty(true);
-    if (mode === 'VIEW') {
-      setMode('EDIT');
-    }
   };
 
   // 1. Fetch Organizations for Super Admin / CEO
@@ -290,7 +292,7 @@ export default function PurchaseOrderWorkspace() {
 
   // Filtered products for autocomplete
   const getFilteredProducts = (query) => {
-    if (!query || !query.trim()) return products.slice(0, 15);
+    if (!query || !query.trim()) return [];
     const q = query.toLowerCase().trim();
     return products.filter(p =>
       (p.name && p.name.toLowerCase().includes(q)) ||
@@ -300,11 +302,15 @@ export default function PurchaseOrderWorkspace() {
 
   // Product Name input change
   const handleProductNameInputChange = (index, text) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (!isEditable) return;
     markDirtyAndEdit();
     setActiveRowIdx(index);
-    setActiveAutocompleteIdx(index);
-    setHighlightedSuggestionIdx(0);
+    if (text && text.trim()) {
+      setActiveAutocompleteIdx(index);
+      setHighlightedSuggestionIdx(0);
+    } else {
+      setActiveAutocompleteIdx(null);
+    }
 
     setOrderItems(prev => {
       const updated = [...prev];
@@ -338,7 +344,7 @@ export default function PurchaseOrderWorkspace() {
 
   // Select product from suggestion popup
   const handleSelectProductSuggestion = (index, prod) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (!isEditable) return;
     markDirtyAndEdit();
     setActiveRowIdx(index);
 
@@ -363,11 +369,9 @@ export default function PurchaseOrderWorkspace() {
 
   // Keyboard navigation for product autocomplete
   const handleProductInputKeyDown = (e, idx, filtered) => {
-    if (activeAutocompleteIdx !== idx || filtered.length === 0) {
-      if (e.key === 'ArrowDown') {
-        setActiveAutocompleteIdx(idx);
-        setHighlightedSuggestionIdx(0);
-      }
+    if (!isEditable) return;
+    const hasTyped = Boolean(orderItems[idx]?.productName && orderItems[idx]?.productName.trim());
+    if (activeAutocompleteIdx !== idx || filtered.length === 0 || !hasTyped) {
       return;
     }
 
@@ -391,7 +395,7 @@ export default function PurchaseOrderWorkspace() {
 
   // Description input change
   const handleItemDescriptionChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (!isEditable) return;
     markDirtyAndEdit();
     setOrderItems(prev => {
       const updated = [...prev];
@@ -402,7 +406,7 @@ export default function PurchaseOrderWorkspace() {
 
   // Quantity input change: calculate Amount = Quantity * Price
   const handleItemQuantityChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (!isEditable) return;
     markDirtyAndEdit();
     setOrderItems(prev => {
       const updated = [...prev];
@@ -421,7 +425,7 @@ export default function PurchaseOrderWorkspace() {
 
   // Price input change: calculate Amount = Quantity * Price
   const handleItemPriceChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (!isEditable) return;
     markDirtyAndEdit();
     setOrderItems(prev => {
       const updated = [...prev];
@@ -440,7 +444,7 @@ export default function PurchaseOrderWorkspace() {
 
   // Amount input change: calculate Price = Amount / Quantity (if qty > 0)
   const handleItemAmountChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (!isEditable) return;
     markDirtyAndEdit();
     setOrderItems(prev => {
       const updated = [...prev];
@@ -505,6 +509,63 @@ export default function PurchaseOrderWorkspace() {
     setErrorMsg('');
     setSuccessMsg('');
     await resetToAddMode();
+  };
+
+  // 2. EDIT
+  const handleEdit = () => {
+    if (actionLoading || isSaving) return;
+    if (!currentPurchase) {
+      setErrorMsg('No purchase order loaded to edit.');
+      return;
+    }
+    setMode('EDIT');
+    setIsDirty(false);
+    setErrorMsg('');
+    setSuccessMsg(`Editing Purchase Order #${cleanSerialNumber(orderNumber) || currentPurchase.purchaseNumber}.`);
+  };
+
+  // 3. DELETE
+  const handleDeleteRecord = async () => {
+    if (actionLoading || isSaving) return;
+    if (!currentPurchase || !currentPurchase.id) {
+      setErrorMsg('No saved purchase order loaded to delete.');
+      return;
+    }
+
+    const pNum = cleanSerialNumber(orderNumber) || currentPurchase.purchaseNumber || currentPurchase.id;
+    const confirmed = window.confirm(`Are you sure you want to delete Purchase Order #${pNum}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await deletePurchase(currentPurchase.id);
+      setSuccessMsg(`Purchase Order #${pNum} deleted successfully.`);
+
+      try {
+        const prevData = await getPreviousPurchase(currentPurchase.id, effectiveOrgId);
+        if (prevData && prevData.id) {
+          populatePurchaseIntoState(prevData);
+          setMode('VIEW');
+        } else {
+          const nextData = await getNextPurchase(currentPurchase.id, effectiveOrgId);
+          if (nextData && nextData.id) {
+            populatePurchaseIntoState(nextData);
+            setMode('VIEW');
+          } else {
+            await resetToAddMode();
+          }
+        }
+      } catch (navErr) {
+        await resetToAddMode();
+      }
+    } catch (err) {
+      console.error('Failed to delete purchase order:', err);
+      setErrorMsg(err.response?.data?.error || 'Failed to delete purchase order.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // 2. PREVIOUS
@@ -674,8 +735,6 @@ export default function PurchaseOrderWorkspace() {
     ).slice(0, 50);
   }, [allPurchases, searchQuery]);
 
-  const isSaving = mode === 'SAVING';
-
   return (
     <div className="w-full h-full flex flex-col bg-[#e6e9ed] border border-[#7f9db9] text-black text-xs select-none overflow-hidden font-sans">
       
@@ -708,13 +767,14 @@ export default function PurchaseOrderWorkspace() {
               <input
                 type="text"
                 value={formatToDisplayDate(orderDate)}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
+                  if (!isEditable) return;
                   markDirtyAndEdit();
                   setOrderDate(parseDisplayDateToIso(e.target.value));
                 }}
                 placeholder="DD-MM-YYYY"
-                className="w-24 h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] text-black font-semibold focus:outline-none focus:bg-white"
+                className={`w-24 h-5 border border-[#7f9db9] px-1 text-[11px] font-semibold focus:outline-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-700 cursor-not-allowed select-none'}`}
               />
               <span className="font-bold text-[11px] text-black">
                 {getDayOfWeekName(orderDate)}
@@ -789,19 +849,22 @@ export default function PurchaseOrderWorkspace() {
               <input
                 type="text"
                 value={partyName}
-                disabled={isSaving}
-                placeholder="Enter party name..."
-                onFocus={() => setShowPartySuggestions(true)}
+                disabled={!isEditable}
+                placeholder={isEditable ? "Enter party name..." : ""}
+                onFocus={() => {
+                  if (isEditable) setShowPartySuggestions(true);
+                }}
                 onChange={(e) => {
+                  if (!isEditable) return;
                   markDirtyAndEdit();
                   setPartyName(e.target.value);
                   setShowPartySuggestions(true);
                 }}
-                className="w-full h-5 bg-[#cce4f7] border border-[#7f9db9] px-1 text-[11px] font-bold text-black focus:outline-none focus:bg-white"
+                className={`w-full h-5 border border-[#7f9db9] px-1 text-[11px] font-bold focus:outline-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-800 cursor-not-allowed select-none'}`}
               />
 
               {/* Suggestions Dropdown for Party Name */}
-              {showPartySuggestions && partySuggestions.length > 0 && (
+              {isEditable && showPartySuggestions && partySuggestions.length > 0 && (
                 <div className="absolute top-full left-0 z-50 w-full bg-white border border-[#7f9db9] shadow-lg max-h-40 overflow-y-auto text-xs">
                   <div className="bg-[#b3d1f5] text-slate-900 px-2 py-0.5 text-[10px] font-bold border-b border-[#7f9db9]">
                     Previous Parties ({partySuggestions.filter(p => !partyName || p.toLowerCase().includes(partyName.toLowerCase())).length})
@@ -813,6 +876,7 @@ export default function PurchaseOrderWorkspace() {
                         key={idx}
                         onMouseDown={(e) => {
                           e.preventDefault();
+                          if (!isEditable) return;
                           markDirtyAndEdit();
                           setPartyName(p);
                           setShowPartySuggestions(false);
@@ -845,9 +909,8 @@ export default function PurchaseOrderWorkspace() {
                   <th className="w-6 border-r border-[#7f9db9] text-center p-0"></th>
                   <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[200px]">Product Name</th>
                   <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[220px]">Description</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-28">Quantity</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-28">Price</th>
-                  <th className="px-2 py-0.5 text-right w-36">Amount</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-32">Quantity</th>
+                  <th className="px-2 py-0.5 text-right w-36">Price</th>
                 </tr>
               </thead>
             </table>
@@ -883,21 +946,23 @@ export default function PurchaseOrderWorkspace() {
                         <input
                           type="text"
                           value={item.productName}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleProductNameInputChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
-                            if (!isSaving) {
+                            if (isEditable && item.productName && item.productName.trim()) {
                               setActiveAutocompleteIdx(idx);
                               setHighlightedSuggestionIdx(0);
+                            } else {
+                              setActiveAutocompleteIdx(null);
                             }
                           }}
                           onKeyDown={(e) => handleProductInputKeyDown(e, idx, filtered)}
-                          className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none font-medium"
+                          className={`w-full h-5 px-1 text-xs border-0 outline-none font-medium ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
 
-                        {/* Autocomplete Suggestions Box */}
-                        {!isSaving && activeAutocompleteIdx === idx && (
+                        {/* Autocomplete Suggestions Box (only shown when typing) */}
+                        {isEditable && activeAutocompleteIdx === idx && Boolean(item.productName && item.productName.trim()) && (
                           <div className="absolute top-full left-0 z-50 min-w-[280px] bg-white border border-[#7f9db9] shadow-lg text-xs">
                             <div className="bg-[#b3d1f5] text-slate-900 px-2 py-0.5 text-[10px] font-bold border-b border-[#7f9db9]">
                               Product Suggestions ({filtered.length})
@@ -936,49 +1001,36 @@ export default function PurchaseOrderWorkspace() {
                         <input
                           type="text"
                           value={item.description}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}
-                          className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none"
+                          className={`w-full h-5 px-1 text-xs border-0 outline-none ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
                       </td>
 
                       {/* Quantity */}
-                      <td className="border-r border-[#7f9db9] p-0 text-right w-28">
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-32">
                         <input
                           type="number"
                           step="any"
                           value={item.quantity}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
+                          className={`w-full h-5 px-1 text-right text-xs font-mono border-0 outline-none ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
                       </td>
 
                       {/* Price */}
-                      <td className="border-r border-[#7f9db9] p-0 text-right w-28">
-                        <input
-                          type="number"
-                          step="any"
-                          value={hasRowData ? item.price : ''}
-                          disabled={isSaving}
-                          onChange={(e) => handleItemPriceChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono font-medium text-black bg-transparent border-0 outline-none focus:bg-white"
-                        />
-                      </td>
-
-                      {/* Amount (Quantity * Price) */}
                       <td className="p-0 text-right w-36">
                         <input
                           type="number"
                           step="any"
-                          value={hasProduct ? (item.amount && item.amount !== '0.00' ? item.amount : '') : (item.amount && item.amount !== '0.00' ? item.amount : '')}
-                          disabled={isSaving}
-                          onChange={(e) => handleItemAmountChange(idx, e.target.value)}
+                          value={hasRowData ? item.price : ''}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemPriceChange(idx, e.target.value)}
                           onFocus={() => setActiveRowIdx(idx)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono font-semibold text-black bg-transparent border-0 outline-none focus:bg-white"
+                          className={`w-full h-5 px-1 text-right text-xs font-mono font-medium border-0 outline-none ${isEditable ? 'text-black bg-transparent focus:bg-white' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
                       </td>
                     </tr>
@@ -1025,12 +1077,13 @@ export default function PurchaseOrderWorkspace() {
               ref={remarkTextareaRef}
               rows={2}
               value={orderRemark}
-              disabled={isSaving}
+              disabled={!isEditable}
               onChange={(e) => {
+                if (!isEditable) return;
                 markDirtyAndEdit();
                 setOrderRemark(e.target.value);
               }}
-              className="flex-1 h-12 bg-[#cce4f7] border border-[#7f9db9] px-1.5 py-0.5 text-xs text-black focus:outline-none focus:bg-white resize-none"
+              className={`flex-1 h-12 border border-[#7f9db9] px-1.5 py-0.5 text-xs focus:outline-none resize-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-800 cursor-not-allowed select-none'}`}
             />
           </div>
 
@@ -1050,13 +1103,14 @@ export default function PurchaseOrderWorkspace() {
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
-            BOTTOM ACTION BUTTON BAR: Add, Previous, Next, Save, Print & Save
+            BOTTOM ACTION BUTTON BAR: Add, Edit, Delete, Previous, Next, Save, Print & Save
            ───────────────────────────────────────────────────────────── */}
         <div className="shrink-0 pt-1 border-t border-[#7f9db9]">
-          <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center justify-between gap-1 flex-wrap">
             
-            {/* Left: Add, < Previous, Next >, Save */}
-            <div className="flex items-center gap-1.5">
+            {/* Left: Add, Edit, Delete, < Previous, Next >, Save */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* 1. Add */}
               <button
                 type="button"
                 onClick={handleAdd}
@@ -1066,6 +1120,29 @@ export default function PurchaseOrderWorkspace() {
                 Add
               </button>
 
+              {/* 2. Edit */}
+              <button
+                type="button"
+                onClick={handleEdit}
+                disabled={actionLoading || mode === 'EDIT' || mode === 'ADD' || !currentPurchase}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Edit current Purchase Order"
+              >
+                Edit
+              </button>
+
+              {/* 3. Delete */}
+              <button
+                type="button"
+                onClick={handleDeleteRecord}
+                disabled={actionLoading || mode === 'ADD' || !currentPurchase}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-red-700 font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Delete current Purchase Order"
+              >
+                Delete
+              </button>
+
+              {/* 4. Previous */}
               <button
                 type="button"
                 onClick={handlePrevious}
@@ -1075,6 +1152,7 @@ export default function PurchaseOrderWorkspace() {
                 &lt; Previous
               </button>
 
+              {/* 5. Next */}
               <button
                 type="button"
                 onClick={handleNext}
@@ -1084,12 +1162,13 @@ export default function PurchaseOrderWorkspace() {
                 Next &gt;
               </button>
 
+              {/* 6. Save */}
               <button
                 type="button"
                 onClick={handleSaveOnly}
-                disabled={actionLoading}
+                disabled={actionLoading || mode === 'VIEW'}
                 className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
-                title="Save record only without printing"
+                title={mode === 'VIEW' ? 'Click Edit to modify this record before saving' : 'Save record only without printing'}
               >
                 {actionLoading && mode === 'SAVING' ? 'Saving...' : 'Save'}
               </button>

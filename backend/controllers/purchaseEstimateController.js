@@ -1026,3 +1026,41 @@ exports.overridePurchaseEstimate = async (req, res) => {
     res.status(500).json({ error: 'Internal server error while overriding purchase estimate' });
   }
 };
+
+// DELETE /api/purchase-estimates/:id
+exports.deletePurchaseEstimate = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const estimate = await PurchaseEstimate.findByPk(id, {
+      include: [{ model: PurchaseEstimateItem, as: 'items' }],
+      transaction: t
+    });
+
+    if (!estimate) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Purchase estimate not found' });
+    }
+
+    try {
+      await verifyRecordOwnership(estimate, req.user);
+    } catch (scopeErr) {
+      await t.rollback();
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
+    }
+
+    // Revert inventory additions if any exist
+    await revertInventoryForPurchaseEstimateItems(estimate.items || [], estimate, t);
+
+    // Delete purchase estimate items and purchase estimate
+    await PurchaseEstimateItem.destroy({ where: { purchaseEstimateId: estimate.id }, transaction: t });
+    await estimate.destroy({ transaction: t });
+
+    await t.commit();
+    res.status(200).json({ message: 'Purchase estimate deleted successfully' });
+  } catch (error) {
+    await t.rollback();
+    console.error('Error deleting purchase estimate:', error);
+    res.status(500).json({ error: 'Failed to delete purchase estimate' });
+  }
+};

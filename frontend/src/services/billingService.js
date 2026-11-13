@@ -80,6 +80,11 @@ export const overrideBill = async (id, data) => {
   return res.data;
 };
 
+export const deleteBill = async (id) => {
+  const res = await api.delete(`/bills/${id}`);
+  return res.data;
+};
+
 export default {
   getBills,
   getBillById,
@@ -91,5 +96,6 @@ export default {
   createBill,
   updateBill,
   finalizeBill,
-  overrideBill
+  overrideBill,
+  deleteBill
 };

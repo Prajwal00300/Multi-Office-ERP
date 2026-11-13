@@ -10,7 +10,8 @@ import {
   getNextEstimateNumber,
   getEstimateById,
   createEstimate,
-  updateEstimate
+  updateEstimate,
+  deleteEstimate
 } from '../../services/estimateService';
 
 const DEFAULT_ROWS_COUNT = 30;
@@ -443,10 +444,8 @@ export default function EstimateVoucherWorkspace() {
 
   // Helper to mark dirty and switch to edit mode when any field is changed
   const markDirtyAndEdit = () => {
+    if (mode === 'VIEW') return;
     setIsDirty(true);
-    if (mode === 'VIEW') {
-      setMode('EDIT');
-    }
   };
 
   // ==========================================
@@ -454,7 +453,7 @@ export default function EstimateVoucherWorkspace() {
   // ==========================================
   const getFilteredProducts = (query) => {
     if (!query || !query.trim()) {
-      return products.slice(0, 10);
+      return [];
     }
     const q = query.toLowerCase().trim();
     return products.filter(p =>
@@ -464,11 +463,15 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleProductNameInputChange = (index, text) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setActiveRowIdx(index);
-    setActiveAutocompleteIdx(index);
-    setHighlightedSuggestionIdx(0);
+    if (text && text.trim()) {
+      setActiveAutocompleteIdx(index);
+      setHighlightedSuggestionIdx(0);
+    } else {
+      setActiveAutocompleteIdx(null);
+    }
 
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -539,7 +542,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleDeleteRow = (indexToDelete, colIdx = 0) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
 
     setTransactionItems(prev => {
@@ -561,7 +564,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleSelectProductSuggestion = (index, prod) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setActiveRowIdx(index);
 
@@ -599,6 +602,8 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleCellKeyDown = (e, rowIdx, colIdx) => {
+    if (mode === 'VIEW') return;
+
     // 1. Delete Row with Control + Delete (or Ctrl+Del, Ctrl+Backspace, Cmd+Backspace)
     const isCtrlDelete =
       (e.ctrlKey && (e.key === 'Delete' || e.key === 'Del' || e.code === 'Delete' || e.key === 'Backspace')) ||
@@ -613,8 +618,9 @@ export default function EstimateVoucherWorkspace() {
 
     // 2. Col 0 (Product Name) with Autocomplete open
     if (colIdx === 0) {
+      const hasTypedText = Boolean(transactionItems[rowIdx]?.productName?.trim());
       const filtered = getFilteredProducts(transactionItems[rowIdx]?.productName || '');
-      const isDropdownOpen = activeAutocompleteIdx === rowIdx && filtered.length > 0;
+      const isDropdownOpen = activeAutocompleteIdx === rowIdx && hasTypedText && filtered.length > 0;
 
       if (isDropdownOpen) {
         if (e.key === 'ArrowDown') {
@@ -749,7 +755,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleItemDescriptionChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -759,7 +765,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleItemDifferenceChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -783,7 +789,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleItemPcsChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -793,7 +799,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleItemQuantityChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -813,7 +819,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const handleItemBasicRateChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -836,7 +842,7 @@ export default function EstimateVoucherWorkspace() {
 
   // Direct Rate change: calculate Difference = Rate - B.Rate, Amount = Rate * Quantity
   const handleItemRateChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -857,7 +863,7 @@ export default function EstimateVoucherWorkspace() {
 
   // Direct Amount change: calculate Rate = Amount / Quantity (if qty > 0)
   const handleItemAmountChange = (index, val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
@@ -882,7 +888,7 @@ export default function EstimateVoucherWorkspace() {
 
   // Header B.Rate change: propagate to rows with products (unless user set a custom row B.Rate)
   const handleHeaderBRateChange = (val) => {
-    if (actionLoading || mode === 'SAVING') return;
+    if (actionLoading || mode === 'SAVING' || mode === 'VIEW') return;
     markDirtyAndEdit();
     setHeaderBRate(val);
     setTransactionItems(prev => {
@@ -920,6 +926,66 @@ export default function EstimateVoucherWorkspace() {
     }
     await resetToAddMode();
     setSuccessMsg('Ready for new entry. Select customer, enter products and quantities.');
+  };
+
+  // EDIT
+  const handleEdit = () => {
+    if (actionLoading || isSaving) return;
+    if (!currentEstimate) {
+      setErrorMsg('No record loaded to edit.');
+      return;
+    }
+    setMode('EDIT');
+    setIsDirty(false);
+    setErrorMsg('');
+    setSuccessMsg(`Editing Sale Voucher Estimate #${estimateNumber || currentEstimate.estimateNumber}.`);
+    setTimeout(() => {
+      focusCell(0, 0);
+    }, 50);
+  };
+
+  // DELETE
+  const handleDeleteRecord = async () => {
+    if (actionLoading || isSaving) return;
+    if (!currentEstimate || !currentEstimate.id) {
+      setErrorMsg('No saved record loaded to delete.');
+      return;
+    }
+
+    const estNum = estimateNumber || currentEstimate.estimateNumber || currentEstimate.id;
+    const confirmed = window.confirm(`Are you sure you want to delete Sale Voucher Estimate #${estNum}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await deleteEstimate(currentEstimate.id);
+      setSuccessMsg(`Sale Voucher Estimate #${estNum} deleted successfully.`);
+
+      try {
+        const prevEst = await getPreviousEstimate(currentEstimate.id, effectiveOrgId);
+        if (prevEst && prevEst.id) {
+          populateEstimateIntoState(prevEst);
+          setMode('VIEW');
+        } else {
+          const lastEst = await getLastEstimate(effectiveOrgId);
+          if (lastEst && lastEst.id && lastEst.id !== currentEstimate.id) {
+            populateEstimateIntoState(lastEst);
+            setMode('VIEW');
+          } else {
+            await resetToAddMode();
+          }
+        }
+      } catch (navErr) {
+        await resetToAddMode();
+      }
+    } catch (err) {
+      console.error('Failed to delete estimate:', err);
+      setErrorMsg(err.response?.data?.error || 'Failed to delete estimate.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // 2. PREVIOUS (< Previous)
@@ -1190,6 +1256,7 @@ export default function EstimateVoucherWorkspace() {
   };
 
   const isSaving = mode === 'SAVING' || actionLoading;
+  const isEditable = (mode === 'ADD' || mode === 'EDIT') && !isSaving;
 
   // Today Date & Day
   const todayDateObj = new Date();
@@ -1240,7 +1307,7 @@ export default function EstimateVoucherWorkspace() {
                 ref={refDate}
                 type="text"
                 value={formatToDisplayDate(estimateDate)}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setEstimateDate(parseDisplayDateToIso(e.target.value));
@@ -1328,7 +1395,7 @@ export default function EstimateVoucherWorkspace() {
                 <select
                   ref={refCustomer}
                   value={selectedCustomerId}
-                  disabled={isSaving}
+                  disabled={!isEditable}
                   onChange={(e) => {
                     markDirtyAndEdit();
                     setSelectedCustomerId(e.target.value);
@@ -1388,7 +1455,7 @@ export default function EstimateVoucherWorkspace() {
                 type="number"
                 step="any"
                 value={headerBRate}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => handleHeaderBRateChange(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === 'ArrowDown') {
@@ -1415,7 +1482,7 @@ export default function EstimateVoucherWorkspace() {
                 ref={refTerms}
                 type="text"
                 value={terms}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setTerms(e.target.value);
@@ -1450,7 +1517,7 @@ export default function EstimateVoucherWorkspace() {
                 ref={refVehicle}
                 type="text"
                 value={vehicle}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setVehicle(e.target.value);
@@ -1587,22 +1654,24 @@ export default function EstimateVoucherWorkspace() {
                           }}
                           type="text"
                           value={item.productName}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleProductNameInputChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
                             currentFocusedCol.current = 0;
-                            if (!isSaving) {
+                            if (!isSaving && item.productName && item.productName.trim()) {
                               setActiveAutocompleteIdx(idx);
                               setHighlightedSuggestionIdx(0);
+                            } else {
+                              setActiveAutocompleteIdx(null);
                             }
                           }}
                           onKeyDown={(e) => handleCellKeyDown(e, idx, 0)}
                           className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none font-medium"
                         />
 
-                        {/* Autocomplete Suggestions Box */}
-                        {!isSaving && activeAutocompleteIdx === idx && (
+                        {/* Autocomplete Suggestions Box (only shown when typing) */}
+                        {!isSaving && activeAutocompleteIdx === idx && Boolean(item.productName && item.productName.trim()) && (
                           <div className="absolute top-full left-0 z-50 min-w-[280px] bg-white border border-[#7f9db9] shadow-lg text-xs">
                             <div className="bg-[#b3d1f5] text-slate-900 px-2 py-0.5 text-[10px] font-bold border-b border-[#7f9db9]">
                               Product Suggestions ({filtered.length})
@@ -1643,7 +1712,7 @@ export default function EstimateVoucherWorkspace() {
                           }}
                           type="text"
                           value={item.description}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
@@ -1664,7 +1733,7 @@ export default function EstimateVoucherWorkspace() {
                           type="number"
                           step="any"
                           value={hasRowData ? item.difference : ''}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
@@ -1684,7 +1753,7 @@ export default function EstimateVoucherWorkspace() {
                           }}
                           type="number"
                           value={hasRowData ? item.pcs : ''}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemPcsChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
@@ -1705,7 +1774,7 @@ export default function EstimateVoucherWorkspace() {
                           type="number"
                           step="any"
                           value={item.quantity}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
@@ -1726,7 +1795,7 @@ export default function EstimateVoucherWorkspace() {
                           type="number"
                           step="any"
                           value={hasProduct ? (item.basicRate || headerBRate || '') : (item.basicRate || '')}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
@@ -1747,7 +1816,7 @@ export default function EstimateVoucherWorkspace() {
                           type="number"
                           step="any"
                           value={hasProduct ? (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : (item.finalRate || '')) : (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : '')}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemRateChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
@@ -1768,7 +1837,7 @@ export default function EstimateVoucherWorkspace() {
                           type="number"
                           step="any"
                           value={hasProduct ? (item.amount && item.amount !== '0.00' ? item.amount : '') : (item.amount && item.amount !== '0.00' ? item.amount : '')}
-                          disabled={isSaving}
+                          disabled={!isEditable}
                           onChange={(e) => handleItemAmountChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
@@ -1831,7 +1900,7 @@ export default function EstimateVoucherWorkspace() {
                 ref={remarkTextareaRef}
                 rows={2}
                 value={estimateRemark}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setEstimateRemark(e.target.value);
@@ -1875,7 +1944,7 @@ export default function EstimateVoucherWorkspace() {
                 ref={refTransport}
                 type="text"
                 value={transportName}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setTransportName(e.target.value);
@@ -1921,7 +1990,7 @@ export default function EstimateVoucherWorkspace() {
                 ref={refBroker}
                 type="text"
                 value={brokerName}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setBrokerName(e.target.value);
@@ -1974,7 +2043,7 @@ export default function EstimateVoucherWorkspace() {
                 ref={refDueDate}
                 type="text"
                 value={formatToDisplayDate(estimateDueDate)}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setEstimateDueDate(parseDisplayDateToIso(e.target.value));
@@ -2026,7 +2095,7 @@ export default function EstimateVoucherWorkspace() {
                   type="number"
                   step="any"
                   value={shortageQty}
-                  disabled={isSaving}
+                  disabled={!isEditable}
                   onChange={(e) => {
                     markDirtyAndEdit();
                     setShortageQty(e.target.value);
@@ -2066,7 +2135,7 @@ export default function EstimateVoucherWorkspace() {
                   type="number"
                   step="any"
                   value={shortageAmt}
-                  disabled={isSaving}
+                  disabled={!isEditable}
                   onChange={(e) => {
                     markDirtyAndEdit();
                     setShortageAmt(e.target.value);
@@ -2124,7 +2193,7 @@ export default function EstimateVoucherWorkspace() {
                 type="number"
                 step="any"
                 value={expBeforeTax}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setExpBeforeTax(e.target.value);
@@ -2159,7 +2228,7 @@ export default function EstimateVoucherWorkspace() {
                 type="number"
                 step="any"
                 value={billTaxRate}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setBillTaxRate(e.target.value);
@@ -2196,7 +2265,7 @@ export default function EstimateVoucherWorkspace() {
                 type="number"
                 step="any"
                 value={surchargeRate}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setSurchargeRate(e.target.value);
@@ -2228,7 +2297,7 @@ export default function EstimateVoucherWorkspace() {
                 type="number"
                 step="any"
                 value={expAfterTax}
-                disabled={isSaving}
+                disabled={!isEditable}
                 onChange={(e) => {
                   markDirtyAndEdit();
                   setExpAfterTax(e.target.value);
@@ -2282,7 +2351,29 @@ export default function EstimateVoucherWorkspace() {
                 Add
               </button>
 
-              {/* 2. Previous */}
+              {/* 2. Edit */}
+              <button
+                type="button"
+                onClick={handleEdit}
+                disabled={actionLoading || mode === 'EDIT' || mode === 'ADD' || !currentEstimate}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Edit current Sale Voucher Estimate"
+              >
+                Edit
+              </button>
+
+              {/* 3. Delete */}
+              <button
+                type="button"
+                onClick={handleDeleteRecord}
+                disabled={actionLoading || mode === 'ADD' || !currentEstimate}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-red-700 font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Delete current Sale Voucher Estimate"
+              >
+                Delete
+              </button>
+
+              {/* 4. Previous */}
               <button
                 type="button"
                 onClick={handlePrevious}
@@ -2292,7 +2383,7 @@ export default function EstimateVoucherWorkspace() {
                 &lt; Previous
               </button>
 
-              {/* 3. Next */}
+              {/* 5. Next */}
               <button
                 type="button"
                 onClick={handleNext}
@@ -2302,7 +2393,7 @@ export default function EstimateVoucherWorkspace() {
                 Next &gt;
               </button>
 
-              {/* 4. First */}
+              {/* 6. First */}
               <button
                 type="button"
                 onClick={handleFirst}
@@ -2313,7 +2404,7 @@ export default function EstimateVoucherWorkspace() {
                 First
               </button>
 
-              {/* 5. Last */}
+              {/* 7. Last */}
               <button
                 type="button"
                 onClick={handleLast}
@@ -2324,7 +2415,7 @@ export default function EstimateVoucherWorkspace() {
                 Last
               </button>
 
-              {/* 6. Search */}
+              {/* 8. Search */}
               <button
                 type="button"
                 onClick={handleOpenSearch}
@@ -2335,7 +2426,7 @@ export default function EstimateVoucherWorkspace() {
                 Search
               </button>
 
-              {/* 7. Exit */}
+              {/* 9. Exit */}
               <button
                 type="button"
                 onClick={handleExit}
@@ -2346,12 +2437,12 @@ export default function EstimateVoucherWorkspace() {
                 Exit
               </button>
 
-              {/* 8. Save (Save only without printing) */}
+              {/* 10. Save (Save only without printing) */}
               <button
                 ref={refSaveBtn}
                 type="button"
                 onClick={handleSaveOnly}
-                disabled={actionLoading}
+                disabled={actionLoading || mode === 'VIEW'}
                 className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
                 title="Save record only without printing"
               >

@@ -258,12 +258,41 @@ const EstimateDetail = () => {
               </span>
             </div>
 
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Others:</span>
-              <span className="font-semibold text-gray-800 font-mono">
-                {formatCurrency(estimate.others)}
-              </span>
-            </div>
+            {parseFloat(estimate.taxAmount || 0) > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Tax{parseFloat(estimate.taxRate || 0) > 0 ? ` (${parseFloat(estimate.taxRate)}%)` : ''}:</span>
+                <span className="font-semibold text-gray-800 font-mono">
+                  {formatCurrency(estimate.taxAmount)}
+                </span>
+              </div>
+            )}
+
+            {parseFloat(estimate.tds || 0) > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">TDS:</span>
+                <span className="font-semibold text-gray-800 font-mono">
+                  {formatCurrency(estimate.tds)}
+                </span>
+              </div>
+            )}
+
+            {parseFloat(estimate.tcs || 0) > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">TCS:</span>
+                <span className="font-semibold text-gray-800 font-mono">
+                  {formatCurrency(estimate.tcs)}
+                </span>
+              </div>
+            )}
+
+            {parseFloat(estimate.others || 0) > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Others:</span>
+                <span className="font-semibold text-gray-800 font-mono">
+                  {formatCurrency(estimate.others)}
+                </span>
+              </div>
+            )}
 
             <div className="border-t border-gray-200 pt-2 flex justify-between text-base font-bold">
               <span className="text-gray-900">Grand Total:</span>

@@ -488,6 +488,24 @@ async function runSafeHierarchyMigration() {
         `);
         console.log("   ✅ estimates.shortageAmt added.");
       }
+
+      if (!estColNames.includes('tds')) {
+        console.log("   -> Adding 'tds' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN tds DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.tds added.");
+      }
+
+      if (!estColNames.includes('tcs')) {
+        console.log("   -> Adding 'tcs' column to estimates...");
+        await sequelize.query(`
+          ALTER TABLE estimates 
+          ADD COLUMN tcs DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+        `);
+        console.log("   ✅ estimates.tcs added.");
+      }
     } catch (estErr) {
       console.warn('   ⚠️ Note adding columns to estimates:', estErr.message);
     }

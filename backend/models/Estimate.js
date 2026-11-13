@@ -127,6 +127,18 @@ const Estimate = sequelize.define('Estimate', {
     defaultValue: 0,
     comment: 'Client Estimate (K) bottom field: Others'
   },
+  tds: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'TDS amount'
+  },
+  tcs: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'TCS amount'
+  },
   grandTotal: {
     type: DataTypes.DECIMAL(15, 2),
     allowNull: false,

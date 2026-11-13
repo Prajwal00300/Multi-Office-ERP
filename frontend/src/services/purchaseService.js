@@ -90,6 +90,11 @@ export const overridePurchase = async (id, data) => {
   return res.data;
 };
 
+export const deletePurchase = async (id) => {
+  const res = await api.delete(`/purchases/${id}`);
+  return res.data;
+};
+
 export default {
   getPurchases,
   getNextPurchaseNumber,
@@ -105,5 +110,6 @@ export default {
   submitPurchase,
   approvePurchase,
   rejectPurchase,
-  overridePurchase
+  overridePurchase,
+  deletePurchase
 };

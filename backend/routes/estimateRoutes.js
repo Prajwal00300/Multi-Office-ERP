@@ -32,6 +32,7 @@ router.get('/next-number', estimateController.getNextEstimateNumber);
 router.get('/:id', estimateController.getEstimateById);
 router.post('/', estimateController.createEstimate);
 router.put('/:id', estimateController.updateEstimate);
+router.delete('/:id', estimateController.deleteEstimate);
 router.post('/:id/generate', estimateController.generateEstimate);
 router.post('/:id/override', estimateController.overrideEstimate);
 

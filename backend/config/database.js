@@ -16,9 +16,11 @@ const {
 
 const fs = require('fs');
 const connectionString = DATABASE_URL || MYSQL_URL;
+const isTiDB = (DB_HOST && DB_HOST.includes('tidbcloud.com')) || 
+               (connectionString && connectionString.includes('tidbcloud.com'));
 
 let sslConfig = {};
-if (process.env.DB_SSL === 'true') {
+if (process.env.DB_SSL === 'true' || isTiDB) {
   sslConfig = {
     ssl: {
       minVersion: 'TLSv1.2',

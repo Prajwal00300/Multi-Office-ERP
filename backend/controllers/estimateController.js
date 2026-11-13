@@ -564,6 +564,8 @@ exports.createEstimate = async (req, res) => {
       taxAmount,
       surchargeRate,
       expAfterTax,
+      tds,
+      tcs,
       items,
       others,
       notes,
@@ -709,6 +711,8 @@ exports.createEstimate = async (req, res) => {
       totalQuantity,
       total,
       others: validatedOthers,
+      tds: parseFloat(tds) || 0,
+      tcs: parseFloat(tcs) || 0,
       grandTotal,
       status: isGenerated ? 'GENERATED' : 'DRAFT',
       createdBy: req.user.userId,
@@ -787,6 +791,8 @@ exports.updateEstimate = async (req, res) => {
       taxAmount,
       surchargeRate,
       expAfterTax,
+      tds,
+      tcs,
       items,
       others,
       notes
@@ -923,6 +929,8 @@ exports.updateEstimate = async (req, res) => {
       totalQuantity,
       total,
       others: validatedOthers,
+      tds: tds !== undefined ? (parseFloat(tds) || 0) : estimate.tds,
+      tcs: tcs !== undefined ? (parseFloat(tcs) || 0) : estimate.tcs,
       grandTotal,
       notes: notes !== undefined ? (notes ? notes.trim() : null) : estimate.notes
     }, { transaction: t });
@@ -1295,5 +1303,43 @@ exports.overrideEstimate = async (req, res) => {
     await t.rollback();
     console.error('Error overriding estimate:', error);
     res.status(500).json({ error: 'Internal server error while overriding estimate' });
+  }
+};
+
+// DELETE /api/estimates/:id
+exports.deleteEstimate = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const estimate = await Estimate.findByPk(id, {
+      include: [{ model: EstimateItem, as: 'items' }],
+      transaction: t
+    });
+
+    if (!estimate) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Estimate not found' });
+    }
+
+    try {
+      await verifyRecordOwnership(estimate, req.user);
+    } catch (scopeErr) {
+      await t.rollback();
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
+    }
+
+    // Revert inventory deductions if any exist
+    await revertInventoryForEstimateItems(estimate.items || [], estimate, t);
+
+    // Delete estimate items and estimate
+    await EstimateItem.destroy({ where: { estimateId: estimate.id }, transaction: t });
+    await estimate.destroy({ transaction: t });
+
+    await t.commit();
+    res.status(200).json({ message: 'Estimate deleted successfully' });
+  } catch (error) {
+    await t.rollback();
+    console.error('Error deleting estimate:', error);
+    res.status(500).json({ error: 'Failed to delete estimate' });
   }
 };

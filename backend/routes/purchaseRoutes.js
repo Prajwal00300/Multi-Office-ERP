@@ -35,6 +35,7 @@ router.get('/:id', purchaseController.getPurchaseById);
 // Order Placement & Modification
 router.post('/', purchaseController.createPurchase);
 router.put('/:id', purchaseController.updatePurchase);
+router.delete('/:id', purchaseController.deletePurchase);
 
 // Order Received / Goods Receipt
 router.post('/receive', purchaseController.receiveGoods);

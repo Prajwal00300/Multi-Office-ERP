@@ -1192,3 +1192,41 @@ exports.overrideBill = async (req, res) => {
     res.status(500).json({ error: error.message || 'Internal server error while overriding bill' });
   }
 };
+
+// DELETE /api/bills/:id
+exports.deleteBill = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const bill = await Bill.findByPk(id, {
+      include: [{ model: BillItem, as: 'items' }],
+      transaction
+    });
+
+    if (!bill) {
+      await transaction.rollback();
+      return res.status(404).json({ error: 'Bill not found' });
+    }
+
+    try {
+      await verifyRecordOwnership(bill, req.user);
+    } catch (scopeErr) {
+      await transaction.rollback();
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
+    }
+
+    // Revert inventory if any
+    await revertInventoryForBillItems(bill.items || [], bill, transaction);
+
+    // Delete bill items and bill
+    await BillItem.destroy({ where: { billId: bill.id }, transaction });
+    await bill.destroy({ transaction });
+
+    await transaction.commit();
+    res.status(200).json({ message: 'Bill deleted successfully' });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('Error deleting bill:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete bill' });
+  }
+};

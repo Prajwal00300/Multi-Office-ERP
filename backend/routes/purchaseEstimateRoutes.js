@@ -31,6 +31,7 @@ router.get('/next-number', purchaseEstimateController.getNextPurchaseEstimateNum
 router.get('/:id', purchaseEstimateController.getPurchaseEstimateById);
 router.post('/', purchaseEstimateController.createPurchaseEstimate);
 router.put('/:id', purchaseEstimateController.updatePurchaseEstimate);
+router.delete('/:id', purchaseEstimateController.deletePurchaseEstimate);
 router.post('/:id/generate', purchaseEstimateController.generatePurchaseEstimate);
 router.post('/:id/override', purchaseEstimateController.overridePurchaseEstimate);
 

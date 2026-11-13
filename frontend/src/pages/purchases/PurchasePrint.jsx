@@ -177,9 +177,8 @@ const PurchasePrint = () => {
           <thead>
             <tr className="border-b border-black text-[11px] font-bold text-black uppercase bg-slate-50">
               <th className="border-r border-black py-1 px-1.5 text-left">Item Description</th>
-              <th className="border-r border-black py-1 px-1.5 w-20 text-right">Qty</th>
-              <th className="border-r border-black py-1 px-1.5 w-20 text-right">Price</th>
-              <th className="py-1 px-1.5 w-24 text-right">Amount</th>
+              <th className="border-r border-black py-1 px-1.5 w-24 text-right">Qty</th>
+              <th className="py-1 px-1.5 w-28 text-right">Price</th>
             </tr>
           </thead>
           <tbody className="divide-y-0 text-xs font-mono">
@@ -188,7 +187,6 @@ const PurchasePrint = () => {
               const desc = (row.productSpecificationsSnapshot || row.specifications || row.Product?.specifications || '').trim();
               const qty = parseFloat(row.quantity || 0);
               const rate = parseFloat(row.rate || row.price || 0);
-              const amt = parseFloat(row.amount || (qty * rate) || 0);
 
               return (
                 <tr key={row.id || idx} className="h-5">
@@ -199,11 +197,8 @@ const PurchasePrint = () => {
                   <td className="border-r border-black py-0.5 px-1.5 text-right">
                     {qty.toFixed(3)}
                   </td>
-                  <td className="border-r border-black py-0.5 px-1.5 text-right">
+                  <td className="py-0.5 px-1.5 text-right">
                     {formatNumber(rate)}
-                  </td>
-                  <td className="py-0.5 px-1.5 text-right font-bold">
-                    {formatNumber(amt)}
                   </td>
                 </tr>
               );
@@ -212,7 +207,6 @@ const PurchasePrint = () => {
             {/* Fill minimum blank visual rows */}
             {emptyRows.map((_, idx) => (
               <tr key={`empty-${idx}`} className="h-5">
-                <td className="border-r border-black py-0.5 px-1.5">&nbsp;</td>
                 <td className="border-r border-black py-0.5 px-1.5">&nbsp;</td>
                 <td className="border-r border-black py-0.5 px-1.5">&nbsp;</td>
                 <td className="py-0.5 px-1.5">&nbsp;</td>

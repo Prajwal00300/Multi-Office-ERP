@@ -63,6 +63,11 @@ export const updatePurchaseEstimate = async (id, data) => {
   return res.data.estimate || res.data;
 };
 
+export const deletePurchaseEstimate = async (id) => {
+  const res = await api.delete(`/purchase-estimates/${id}`);
+  return res.data;
+};
+
 export default {
   getPurchaseEstimates,
   getPurchaseEstimateById,
@@ -72,5 +77,6 @@ export default {
   getFirstPurchaseEstimate,
   getLastPurchaseEstimate,
   createPurchaseEstimate,
-  updatePurchaseEstimate
+  updatePurchaseEstimate,
+  deletePurchaseEstimate
 };

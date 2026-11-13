@@ -57,7 +57,7 @@ const EstimatePrint = () => {
   }
 
   const items = estimate.items || [];
-  const minRows = 10;
+  const minRows = 8;
   const emptyRowsCount = Math.max(0, minRows - items.length);
   const emptyRows = Array.from({ length: emptyRowsCount });
 
@@ -65,6 +65,20 @@ const EstimatePrint = () => {
   const subtotal = formatNumber(estimate.total || estimate.basic || 0);
   const othersVal = parseFloat(estimate.others || 0);
   const grandTotal = formatNumber(estimate.grandTotal || estimate.total || 0);
+
+  const taxRateVal = parseFloat(estimate.taxRate || 0);
+  const rawTaxAmount = parseFloat(estimate.taxAmount || 0);
+  const calculatedTaxAmount = taxRateVal > 0 && parseFloat(estimate.total || 0) > 0
+    ? (parseFloat(estimate.total || 0) * taxRateVal) / 100
+    : 0;
+  const taxAmountVal = rawTaxAmount > 0 
+    ? rawTaxAmount 
+    : (calculatedTaxAmount > 0 
+        ? calculatedTaxAmount 
+        : Math.max(0, parseFloat(estimate.grandTotal || 0) - parseFloat(estimate.total || 0) - othersVal));
+
+  const tdsVal = parseFloat(estimate.tds || estimate.tdsAmount || 0);
+  const tcsVal = parseFloat(estimate.tcs || estimate.tcsAmount || 0);
 
   return (
     <div className="min-h-screen bg-slate-100 py-6 px-2 flex flex-col items-center font-sans">
@@ -225,16 +239,51 @@ const EstimatePrint = () => {
               </td>
             </tr>
 
-            {/* Others Row */}
+            {/* Tax Row (instead of Others) */}
             <tr className="border-t border-black">
               <td colSpan={3} className="border-r border-black"></td>
               <td className="border-r border-black px-1.5 py-0.5 font-sans font-bold text-left text-xs">
-                Others
+                Tax
               </td>
               <td className="px-1.5 py-0.5 text-right font-mono text-xs">
-                {othersVal > 0 ? formatNumber(othersVal) : ''}
+                {taxAmountVal > 0 ? formatNumber(taxAmountVal) : ''}
               </td>
             </tr>
+
+            {/* TDS Row */}
+            <tr className="border-t border-black">
+              <td colSpan={3} className="border-r border-black"></td>
+              <td className="border-r border-black px-1.5 py-0.5 font-sans font-bold text-left text-xs">
+                TDS
+              </td>
+              <td className="px-1.5 py-0.5 text-right font-mono text-xs">
+                {tdsVal > 0 ? formatNumber(tdsVal) : ''}
+              </td>
+            </tr>
+
+            {/* TCS Row */}
+            <tr className="border-t border-black">
+              <td colSpan={3} className="border-r border-black"></td>
+              <td className="border-r border-black px-1.5 py-0.5 font-sans font-bold text-left text-xs">
+                TCS
+              </td>
+              <td className="px-1.5 py-0.5 text-right font-mono text-xs">
+                {tcsVal > 0 ? formatNumber(tcsVal) : ''}
+              </td>
+            </tr>
+
+            {/* Others Row (if non-zero) */}
+            {othersVal > 0 && (
+              <tr className="border-t border-black">
+                <td colSpan={3} className="border-r border-black"></td>
+                <td className="border-r border-black px-1.5 py-0.5 font-sans font-bold text-left text-xs">
+                  Others
+                </td>
+                <td className="px-1.5 py-0.5 text-right font-mono text-xs">
+                  {formatNumber(othersVal)}
+                </td>
+              </tr>
+            )}
           </tbody>
 
           {/* 4. BOTTOM SUMMARY ROW: Total | Total Qty | Grand Total Amount */}

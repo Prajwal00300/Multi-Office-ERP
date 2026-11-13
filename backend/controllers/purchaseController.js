@@ -1157,3 +1157,47 @@ exports.rejectPurchase = async (req, res) => {
 exports.overridePurchase = async (req, res) => {
   res.status(200).json({ message: 'Purchase order updated.' });
 };
+
+// DELETE /api/purchases/:id
+exports.deletePurchase = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const purchase = await Purchase.findByPk(id, {
+      include: [{ model: PurchaseItem, as: 'items' }],
+      transaction
+    });
+
+    if (!purchase) {
+      await transaction.rollback();
+      return res.status(404).json({ error: 'Purchase Order not found.' });
+    }
+
+    try {
+      await verifyRecordOwnership(purchase, req.user);
+    } catch (scopeErr) {
+      await transaction.rollback();
+      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
+    }
+
+    const hasAnyReceived = (purchase.items || []).some(it => parseFloat(it.receivedQuantity) > 0);
+    if (hasAnyReceived) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: 'Cannot delete a purchase order that has already received goods.'
+      });
+    }
+
+    // Delete purchase items and purchase
+    await PurchaseItem.destroy({ where: { purchaseId: purchase.id }, transaction });
+    await purchase.destroy({ transaction });
+
+    await transaction.commit();
+    res.status(200).json({ message: 'Purchase Order deleted successfully.' });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('Error deleting purchase:', error);
+    res.status(500).json({ error: error.message || 'Internal server error while deleting purchase' });
+  }
+};
+
