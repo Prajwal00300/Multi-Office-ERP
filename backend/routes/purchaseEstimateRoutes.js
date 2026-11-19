@@ -27,6 +27,7 @@ router.get('/navigation/next', purchaseEstimateController.getNextPurchaseEstimat
 router.get('/navigation/first', purchaseEstimateController.getFirstPurchaseEstimate);
 router.get('/navigation/last', purchaseEstimateController.getLastPurchaseEstimate);
 router.get('/by-number/:estimateNumber', purchaseEstimateController.getPurchaseEstimateByNumber);
+router.get('/pending-order-summary', purchaseEstimateController.getPendingOrderSummary);
 router.get('/next-number', purchaseEstimateController.getNextPurchaseEstimateNumber);
 router.get('/:id', purchaseEstimateController.getPurchaseEstimateById);
 router.post('/', purchaseEstimateController.createPurchaseEstimate);

@@ -2,6 +2,9 @@ const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const Purchase = require('../models/Purchase');
 const PurchaseItem = require('../models/PurchaseItem');
+const PurchaseEstimate = require('../models/PurchaseEstimate');
+const PurchaseEstimateItem = require('../models/PurchaseEstimateItem');
+const PurchaseEstimateAllocation = require('../models/PurchaseEstimateAllocation');
 const GoodsReceipt = require('../models/GoodsReceipt');
 const GoodsReceiptItem = require('../models/GoodsReceiptItem');
 const InventoryMovement = require('../models/InventoryMovement');
@@ -11,6 +14,10 @@ const Organization = require('../models/Organization');
 const User = require('../models/User');
 const { calculatePurchaseTotals } = require('../services/purchaseCalculationService');
 const { generateUniquePurchaseNumber, generateUniqueReceiptNumber } = require('../utils/purchaseNumberGenerator');
+const {
+  ensureCustomerForParty,
+  ensureProductForOrderLine
+} = require('../utils/syncPurchaseMasterData');
 const {
   getAuthorizedOfficeScope,
   getAuthorizedTargetOfficeForCreation,
@@ -132,29 +139,41 @@ exports.getPurchases = async (req, res) => {
       const pJson = purchase.toJSON();
       let totalOrdered = 0;
       let totalReceived = 0;
+      let computedTotalAmount = parseFloat(pJson.totalAmount) || 0;
+      let itemsTotalAmount = 0;
 
       const enrichedItems = (pJson.items || []).map(item => {
         const ordered = parseFloat(item.quantity) || 0;
         const received = parseFloat(item.receivedQuantity) || 0;
         const pending = Math.max(0, ordered - received);
+        const rate = parseFloat(item.rate) || 0;
+        const itemAmt = parseFloat(item.amount) || (ordered * rate);
 
         totalOrdered += ordered;
         totalReceived += received;
+        itemsTotalAmount += itemAmt;
 
         return {
           ...item,
           orderedQuantity: ordered,
           previouslyReceivedQuantity: received,
-          pendingQuantity: pending
+          pendingQuantity: pending,
+          rate,
+          amount: itemAmt
         };
       });
+
+      const finalTotalAmount = computedTotalAmount > 0 ? computedTotalAmount : itemsTotalAmount;
+      const averagePrice = totalOrdered > 0 ? parseFloat((finalTotalAmount / totalOrdered).toFixed(2)) : 0;
 
       return {
         ...pJson,
         items: enrichedItems,
         totalOrderedQuantity: totalOrdered,
         totalReceivedQuantity: totalReceived,
-        totalPendingQuantity: Math.max(0, totalOrdered - totalReceived)
+        totalPendingQuantity: Math.max(0, totalOrdered - totalReceived),
+        totalAmount: finalTotalAmount,
+        averagePrice
       };
     });
 
@@ -181,6 +200,176 @@ exports.getNextPurchaseNumber = async (req, res) => {
   } catch (error) {
     console.error('Error generating next purchase number preview:', error);
     res.status(500).json({ error: 'Failed to generate next purchase order number preview' });
+  }
+};
+
+/**
+ * GET /api/purchases/in-hand-order-summary
+ * Calculates:
+ * purchase total order pending + in house stock - sales total order pending = in hand order
+ * Both aggregate totals and product-wise breakdown.
+ */
+exports.getInHandOrderSummary = async (req, res) => {
+  try {
+    const { organizationId } = req.query;
+    const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
+    const officeWhereClause = buildOfficeWhereClause(targetOfficeIds);
+
+    // 1. Fetch In-House Stock from Products for target office
+    const products = await Product.findAll({
+      where: {
+        ...officeWhereClause,
+        status: 'ACTIVE'
+      },
+      attributes: ['id', 'name', 'unit', 'currentStock', 'organizationId']
+    });
+
+    const productMap = new Map();
+    let totalInHouseStock = 0;
+
+    for (const prod of products) {
+      const stock = parseFloat(prod.currentStock) || 0;
+      totalInHouseStock += stock;
+
+      productMap.set(prod.id, {
+        productId: prod.id,
+        productName: prod.name,
+        unit: prod.unit || 'Tons',
+        purchasePending: 0,
+        inHouseStock: stock,
+        salesPending: 0,
+        inHandOrder: stock
+      });
+    }
+
+    // Helper to find product by id or case-insensitive name
+    const findOrAddProduct = (productId, name) => {
+      if (productId && productMap.has(productId)) {
+        return productMap.get(productId);
+      }
+      const normName = (name || '').trim().toLowerCase();
+      for (const item of productMap.values()) {
+        if ((item.productName || '').trim().toLowerCase() === normName) {
+          return item;
+        }
+      }
+      const newEntry = {
+        productId: productId || null,
+        productName: name || 'Unassigned Product',
+        unit: 'Tons',
+        purchasePending: 0,
+        inHouseStock: 0,
+        salesPending: 0,
+        inHandOrder: 0
+      };
+      if (productId) {
+        productMap.set(productId, newEntry);
+      } else {
+        productMap.set(`name_${normName || Math.random()}`, newEntry);
+      }
+      return newEntry;
+    };
+
+    // 2. Fetch Pending Quantities from Purchase Orders
+    const purchases = await Purchase.findAll({
+      where: {
+        ...officeWhereClause,
+        status: { [Op.ne]: 'CANCELLED' }
+      },
+      include: [
+        {
+          model: PurchaseItem,
+          as: 'items'
+        }
+      ]
+    });
+
+    let totalPurchasePending = 0;
+    for (const po of purchases) {
+      for (const it of (po.items || [])) {
+        const ord = parseFloat(it.quantity) || 0;
+        const rec = parseFloat(it.receivedQuantity) || 0;
+        const pen = Math.max(0, ord - rec);
+        if (pen > 0) {
+          totalPurchasePending += pen;
+          const entry = findOrAddProduct(it.productId, it.productNameSnapshot);
+          entry.purchasePending += pen;
+        }
+      }
+    }
+
+    // 3. Fetch Pending Quantities from Sale Orders
+    let totalSalesPending = 0;
+    try {
+      const { ensureSaleOrderTablesExist } = require('./saleOrderController');
+      await ensureSaleOrderTablesExist();
+      const SaleOrder = require('../models/SaleOrder');
+      const SaleOrderItem = require('../models/SaleOrderItem');
+
+      const saleOrders = await SaleOrder.findAll({
+        where: {
+          ...officeWhereClause,
+          status: { [Op.ne]: 'CANCELLED' }
+        },
+        include: [
+          {
+            model: SaleOrderItem,
+            as: 'items'
+          }
+        ]
+      });
+
+      for (const so of saleOrders) {
+        for (const it of (so.items || [])) {
+          const ord = parseFloat(it.quantity) || 0;
+          const proc = parseFloat(it.processedQuantity) || 0;
+          const pen = Math.max(0, ord - proc);
+          if (pen > 0) {
+            totalSalesPending += pen;
+            const entry = findOrAddProduct(it.productId, it.productNameSnapshot);
+            entry.salesPending += pen;
+          }
+        }
+      }
+    } catch (soErr) {
+      console.warn('Could not query SaleOrder for in-hand order summary:', soErr.message);
+    }
+
+    // 4. Calculate In-Hand Order for each product and overall
+    totalPurchasePending = parseFloat(totalPurchasePending.toFixed(3));
+    totalInHouseStock = parseFloat(totalInHouseStock.toFixed(3));
+    totalSalesPending = parseFloat(totalSalesPending.toFixed(3));
+    const totalInHandOrder = parseFloat((totalPurchasePending + totalInHouseStock - totalSalesPending).toFixed(3));
+
+    const productBreakdown = Array.from(productMap.values()).map(p => {
+      const pPend = parseFloat(p.purchasePending.toFixed(3));
+      const sStock = parseFloat(p.inHouseStock.toFixed(3));
+      const sPend = parseFloat(p.salesPending.toFixed(3));
+      const inHand = parseFloat((pPend + sStock - sPend).toFixed(3));
+      return {
+        productId: p.productId,
+        productName: p.productName,
+        unit: p.unit,
+        purchasePending: pPend,
+        inHouseStock: sStock,
+        salesPending: sPend,
+        inHandOrder: inHand
+      };
+    }).sort((a, b) => a.productName.localeCompare(b.productName));
+
+    res.status(200).json({
+      purchaseTotalOrderPending: totalPurchasePending,
+      inHouseStock: totalInHouseStock,
+      salesTotalOrderPending: totalSalesPending,
+      inHandOrder: totalInHandOrder,
+      productBreakdown
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error calculating In Hand Order summary:', error);
+    res.status(500).json({ error: 'Failed to calculate In Hand Order summary' });
   }
 };
 
@@ -244,29 +433,91 @@ exports.getPurchaseById = async (req, res) => {
     const pJson = purchase.toJSON();
     let totalOrdered = 0;
     let totalReceived = 0;
+    let computedTotalAmount = parseFloat(pJson.totalAmount) || 0;
+    let itemsTotalAmount = 0;
 
     const enrichedItems = (pJson.items || []).map(item => {
       const ordered = parseFloat(item.quantity) || 0;
       const received = parseFloat(item.receivedQuantity) || 0;
       const pending = Math.max(0, ordered - received);
+      const rate = parseFloat(item.rate) || 0;
+      const itemAmt = parseFloat(item.amount) || (ordered * rate);
 
       totalOrdered += ordered;
       totalReceived += received;
+      itemsTotalAmount += itemAmt;
 
       return {
         ...item,
         orderedQuantity: ordered,
         previouslyReceivedQuantity: received,
-        pendingQuantity: pending
+        pendingQuantity: pending,
+        rate,
+        amount: itemAmt
       };
     });
+
+    const finalTotalAmount = computedTotalAmount > 0 ? computedTotalAmount : itemsTotalAmount;
+    const averagePrice = totalOrdered > 0 ? parseFloat((finalTotalAmount / totalOrdered).toFixed(2)) : 0;
+
+    // Fetch linked Purchase Estimate Vouchers (receipts created via Purchase Estimate Voucher)
+    let purchaseEstimateReceipts = [];
+    try {
+      const allocs = await PurchaseEstimateAllocation.findAll({
+        where: { purchaseId: purchase.id },
+        include: [
+          {
+            model: PurchaseEstimate,
+            as: 'purchaseEstimate',
+            include: [{ model: User, as: 'creator', attributes: ['id', 'username'] }]
+          },
+          {
+            model: PurchaseItem,
+            as: 'purchaseItem',
+            attributes: ['id', 'productNameSnapshot', 'carbonType', 'unit']
+          }
+        ],
+        order: [['createdAt', 'DESC']]
+      });
+
+      const byEst = new Map();
+      for (const a of allocs) {
+        const est = a.purchaseEstimate;
+        if (!est) continue;
+        if (!byEst.has(est.id)) {
+          byEst.set(est.id, {
+            id: est.id,
+            estimateNumber: est.estimateNumber,
+            estimateDate: est.estimateDate,
+            vehicle: est.vehicle,
+            notes: est.notes,
+            creator: est.creator,
+            items: []
+          });
+        }
+        byEst.get(est.id).items.push({
+          purchaseItemId: a.purchaseItemId,
+          productNameSnapshot: a.purchaseItem?.productNameSnapshot || 'Product',
+          carbonType: a.purchaseItem?.carbonType || 'Low Carbon',
+          unit: a.purchaseItem?.unit || 'Ton',
+          quantityReceived: parseFloat(a.allocatedQuantity) || 0
+        });
+      }
+      purchaseEstimateReceipts = Array.from(byEst.values());
+    } catch (peAllocErr) {
+      // Table may not exist yet on fresh DB before first purchase estimate; safe to ignore
+      purchaseEstimateReceipts = [];
+    }
 
     res.status(200).json({
       ...pJson,
       items: enrichedItems,
       totalOrderedQuantity: totalOrdered,
       totalReceivedQuantity: totalReceived,
-      totalPendingQuantity: Math.max(0, totalOrdered - totalReceived)
+      totalPendingQuantity: Math.max(0, totalOrdered - totalReceived),
+      totalAmount: finalTotalAmount,
+      averagePrice,
+      purchaseEstimateReceipts
     });
   } catch (error) {
     if (error.statusCode) {
@@ -387,7 +638,6 @@ exports.getNextPurchase = async (req, res) => {
 
 /**
  * GET /api/purchases/lookup/:orderId - Look up purchase order by Order ID / purchaseNumber
- * Used by the Order Received interface.
  */
 exports.lookupPurchaseByNumber = async (req, res) => {
   try {
@@ -541,6 +791,11 @@ exports.createPurchase = async (req, res) => {
 
     const effectivePartyName = (partyName || vendorName || '').trim();
 
+    // Auto-register new party in Customer Master so it appears in Purchase Estimate Voucher
+    if (effectivePartyName) {
+      await ensureCustomerForParty(targetOrgId, effectivePartyName, transaction);
+    }
+
     // 2. Validate product rows
     if (!items || !Array.isArray(items) || items.length === 0) {
       await transaction.rollback();
@@ -595,6 +850,21 @@ exports.createPurchase = async (req, res) => {
       if (!productName) {
         await transaction.rollback();
         return res.status(400).json({ error: `Row #${i + 1}: Product selection or description is required.` });
+      }
+
+      // If no existing productId was linked, auto-register or match the product in Product Master (stock stays 0 until received)
+      if (!productId && productName) {
+        const syncedProduct = await ensureProductForOrderLine(
+          targetOrgId,
+          { name: productName, unit, specifications },
+          transaction
+        );
+        if (syncedProduct) {
+          productId = syncedProduct.id;
+          productName = syncedProduct.name;
+          unit = syncedProduct.unit || unit;
+          specifications = syncedProduct.specifications || specifications;
+        }
       }
 
       // Quantity validation: must be positive number
@@ -698,251 +968,6 @@ exports.createPurchase = async (req, res) => {
 };
 
 /**
- * POST /api/purchases/:id/receive & POST /api/purchases/receive - PART 2: ORDER RECEIVED
- * Records goods received against a Purchase Order, updates line quantities and stock atomically.
- */
-exports.receiveGoods = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const targetIdOrNumber = req.params.id || req.body.id || req.body.orderId || req.body.purchaseNumber;
-    const {
-      receiptDate,
-      remarks,
-      idempotencyKey,
-      items // Array of { purchaseItemId, quantityReceivedNow }
-    } = req.body;
-
-    if (!targetIdOrNumber) {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'Order ID or Purchase ID is required.' });
-    }
-
-    // 1. Idempotency control: prevent double counting of retried requests
-    if (idempotencyKey && idempotencyKey.trim()) {
-      const existingReceipt = await GoodsReceipt.findOne({
-        where: { idempotencyKey: idempotencyKey.trim() },
-        include: [{ model: GoodsReceiptItem, as: 'items' }],
-        transaction
-      });
-      if (existingReceipt) {
-        await transaction.rollback();
-        return res.status(200).json({
-          message: 'Receipt already recorded (idempotent).',
-          receipt: existingReceipt,
-          idempotent: true
-        });
-      }
-    }
-
-    // 2. Retrieve parent Purchase Order with row lock
-    let whereCondition;
-    if (!isNaN(Number(targetIdOrNumber))) {
-      whereCondition = { [Op.or]: [{ id: Number(targetIdOrNumber) }, { purchaseNumber: String(targetIdOrNumber).trim() }] };
-    } else {
-      whereCondition = { purchaseNumber: String(targetIdOrNumber).trim() };
-    }
-
-    const receiveOrgId = req.body.organizationId || (req.user && req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'CEO' ? req.user.organizationId : null);
-    if (receiveOrgId) {
-      whereCondition = {
-        [Op.and]: [
-          whereCondition,
-          { organizationId: receiveOrgId }
-        ]
-      };
-    }
-
-    const purchase = await Purchase.findOne({
-      where: whereCondition,
-      include: [
-        {
-          model: PurchaseItem,
-          as: 'items'
-        }
-      ],
-      lock: transaction.LOCK.UPDATE,
-      transaction
-    });
-
-    if (!purchase) {
-      await transaction.rollback();
-      return res.status(404).json({ error: `Purchase Order "${targetIdOrNumber}" not found.` });
-    }
-
-    // 3. Office ownership check
-    try {
-      await verifyRecordOwnership(purchase, req.user);
-    } catch (scopeErr) {
-      await transaction.rollback();
-      return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
-    }
-
-    if (purchase.status === 'CANCELLED') {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'Cannot record receipts against a cancelled purchase order.' });
-    }
-
-    // 4. Validate items received
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'At least one product line received quantity must be specified.' });
-    }
-
-    const receiptLinesToProcess = [];
-    let totalQtyReceivedThisReceipt = 0;
-
-    for (let i = 0; i < items.length; i++) {
-      const inputItem = items[i];
-      const purchaseItemId = parseInt(inputItem.purchaseItemId || inputItem.id, 10);
-      const qtyReceivedNow = parseFloat(inputItem.quantityReceivedNow || inputItem.quantityReceived || 0);
-
-      // Validate non-negative
-      if (isNaN(qtyReceivedNow) || qtyReceivedNow < 0) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          error: `Line #${i + 1}: Quantity received now cannot be negative. Received: ${inputItem.quantityReceivedNow}` 
-        });
-      }
-
-      // Skip lines with 0 received now
-      if (qtyReceivedNow === 0) {
-        continue;
-      }
-
-      // Match against purchase order line item
-      const orderLine = (purchase.items || []).find(it => it.id === purchaseItemId);
-      if (!orderLine) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          error: `Line item #${purchaseItemId} does not belong to Purchase Order "${purchase.purchaseNumber}". Unrelated products cannot be received.` 
-        });
-      }
-
-      const orderedQty = parseFloat(orderLine.quantity) || 0;
-      const previouslyReceivedQty = parseFloat(orderLine.receivedQuantity) || 0;
-      const pendingQty = Math.max(0, orderedQty - previouslyReceivedQty);
-
-      // Validate total received quantity does not exceed ordered quantity
-      if (qtyReceivedNow > pendingQty) {
-        await transaction.rollback();
-        return res.status(400).json({
-          error: `Quantity received now (${qtyReceivedNow} Tons) exceeds pending quantity (${pendingQty} Tons) for "${orderLine.productNameSnapshot}". Over-receiving is not permitted.`
-        });
-      }
-
-      totalQtyReceivedThisReceipt += qtyReceivedNow;
-      receiptLinesToProcess.push({
-        orderLine,
-        qtyReceivedNow
-      });
-    }
-
-    if (receiptLinesToProcess.length === 0) {
-      await transaction.rollback();
-      return res.status(400).json({ error: 'At least one product line must have a quantity received now greater than 0.' });
-    }
-
-    // 5. Generate unique Receipt ID (GRN)
-    const receiptNumber = await generateUniqueReceiptNumber(transaction);
-
-    // 6. Create GoodsReceipt Header
-    const goodsReceipt = await GoodsReceipt.create({
-      receiptNumber,
-      purchaseId: purchase.id,
-      purchaseNumber: purchase.purchaseNumber,
-      organizationId: purchase.organizationId,
-      receiptDate: receiptDate || new Date(),
-      receivedBy: req.user.userId,
-      remarks: remarks ? remarks.trim() : null,
-      idempotencyKey: idempotencyKey ? idempotencyKey.trim() : null
-    }, { transaction });
-
-    // 7. Process each received line:
-    //    - Record GoodsReceiptItem
-    //    - Increment PurchaseItem.receivedQuantity
-    //    - Increase Product.currentStock strictly by newly received quantity
-    //    - Record traceable InventoryMovement
-    for (const { orderLine, qtyReceivedNow } of receiptLinesToProcess) {
-      // 7a. GoodsReceiptItem
-      await GoodsReceiptItem.create({
-        goodsReceiptId: goodsReceipt.id,
-        purchaseItemId: orderLine.id,
-        productId: orderLine.productId,
-        productNameSnapshot: orderLine.productNameSnapshot,
-        carbonType: orderLine.carbonType,
-        quantityReceived: qtyReceivedNow
-      }, { transaction });
-
-      // 7b. Update PurchaseItem.receivedQuantity
-      await orderLine.increment('receivedQuantity', { by: qtyReceivedNow, transaction });
-
-      // 7c. Increase inventory stock for product if linked
-      if (orderLine.productId) {
-        await Product.increment('currentStock', {
-          by: qtyReceivedNow,
-          where: {
-            id: orderLine.productId,
-            organizationId: purchase.organizationId
-          },
-          transaction
-        });
-
-        // 7d. Record traceable inventory movement
-        await InventoryMovement.create({
-          organizationId: purchase.organizationId,
-          productId: orderLine.productId,
-          movementType: 'IN',
-          quantity: qtyReceivedNow,
-          referenceType: 'GOODS_RECEIPT',
-          referenceId: goodsReceipt.id,
-          referenceNumber: goodsReceipt.receiptNumber,
-          purchaseItemId: orderLine.id,
-          performedBy: req.user.userId,
-          notes: `Goods Receipt #${goodsReceipt.receiptNumber} for PO #${purchase.purchaseNumber}: ${orderLine.productNameSnapshot} (${orderLine.carbonType})`
-        }, { transaction });
-      }
-    }
-
-    // 8. Recalculate Overall Order Status across all lines
-    const allLines = await PurchaseItem.findAll({
-      where: { purchaseId: purchase.id },
-      transaction
-    });
-
-    const newOverallStatus = computeOrderStatus(allLines);
-    await purchase.update({ status: newOverallStatus }, { transaction });
-
-    await transaction.commit();
-
-    // 9. Fetch complete receipt with items and updated purchase
-    const completeReceipt = await GoodsReceipt.findByPk(goodsReceipt.id, {
-      include: [
-        { model: GoodsReceiptItem, as: 'items' },
-        { model: User, as: 'receiver', attributes: ['id', 'username'] }
-      ]
-    });
-
-    const updatedPurchase = await Purchase.findByPk(purchase.id, {
-      include: [
-        { model: PurchaseItem, as: 'items' },
-        { model: Organization, attributes: ['id', 'name'] }
-      ]
-    });
-
-    res.status(200).json({
-      message: `Goods receipt "${receiptNumber}" recorded successfully. Total received now: ${totalQtyReceivedThisReceipt} Tons.`,
-      status: newOverallStatus,
-      receipt: completeReceipt,
-      purchase: updatedPurchase
-    });
-  } catch (error) {
-    await transaction.rollback();
-    console.error('Error recording goods received:', error);
-    res.status(500).json({ error: error.message || 'Internal server error while recording goods received' });
-  }
-};
-
-/**
  * PUT /api/purchases/:id - Edit purchase order (if Pending)
  */
 exports.updatePurchase = async (req, res) => {
@@ -987,6 +1012,10 @@ exports.updatePurchase = async (req, res) => {
 
     const effectivePartyName = (partyName || vendorName || '').trim();
 
+    if (effectivePartyName) {
+      await ensureCustomerForParty(purchase.organizationId, effectivePartyName, transaction);
+    }
+
     if (items && Array.isArray(items) && items.length > 0) {
       // Validate and rebuild items
       await PurchaseItem.destroy({ where: { purchaseId: purchase.id }, transaction });
@@ -1030,6 +1059,19 @@ exports.updatePurchase = async (req, res) => {
         if (!productName) {
           await transaction.rollback();
           return res.status(400).json({ error: `Row #${i + 1}: Product name is required.` });
+        }
+
+        if (!productId && productName) {
+          const syncedProduct = await ensureProductForOrderLine(
+            purchase.organizationId,
+            { name: productName, unit, specifications },
+            transaction
+          );
+          if (syncedProduct) {
+            productId = syncedProduct.id;
+            productName = syncedProduct.name;
+            unit = syncedProduct.unit || unit;
+          }
         }
 
         const q = parseFloat(row.quantity);

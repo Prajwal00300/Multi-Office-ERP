@@ -39,6 +39,14 @@ const MODULES = [
     isImplemented: true
   },
   {
+    id: 'SALES',
+    name: 'Sales Management',
+    category: 'Sales & Invoicing',
+    description: 'Track customer sale orders, dispatch fulfillment, and order processing',
+    path: '/sales',
+    isImplemented: true
+  },
+  {
     id: 'PURCHASES',
     name: 'Purchase Management',
     category: 'Procurement',

@@ -15,7 +15,9 @@ import {
   FileText,
   Layers,
   Calendar,
-  Printer
+  Printer,
+  DollarSign,
+  TrendingUp
 } from 'lucide-react';
 import { AuthContext } from '../../context/AuthContext';
 import { getPurchaseById } from '../../services/purchaseService';
@@ -127,7 +129,10 @@ const PurchaseDetail = () => {
   const totalOrdered = parseFloat(purchase.totalOrderedQuantity) || items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
   const totalReceived = parseFloat(purchase.totalReceivedQuantity) || items.reduce((s, i) => s + (parseFloat(i.receivedQuantity) || 0), 0);
   const totalPending = Math.max(0, totalOrdered - totalReceived);
+  const totalAmount = parseFloat(purchase.totalAmount) || items.reduce((s, i) => s + (parseFloat(i.amount) || ((parseFloat(i.quantity) || 0) * (parseFloat(i.rate) || 0))), 0);
+  const averagePrice = totalOrdered > 0 ? (totalAmount / totalOrdered) : (parseFloat(purchase.averagePrice) || 0);
   const receipts = purchase.receipts || [];
+  const purchaseEstimateReceipts = purchase.purchaseEstimateReceipts || [];
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
@@ -155,11 +160,11 @@ const PurchaseDetail = () => {
         <div className="flex items-center gap-2.5">
           {totalPending > 0 && purchase.status !== 'CANCELLED' && (
             <Link
-              to={`/purchases/receive?orderId=${encodeURIComponent(purchase.purchaseNumber)}`}
+              to={`/purchase-estimate?purchaseId=${purchase.id}`}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
             >
               <Inbox className="w-4 h-4" />
-              Receive Goods
+              Receive via Voucher
             </Link>
           )}
 
@@ -185,7 +190,7 @@ const PurchaseDetail = () => {
       </div>
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {/* Party Info */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
@@ -217,7 +222,7 @@ const PurchaseDetail = () => {
         {/* Quantity Status Card */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-emerald-600" />
+            <Layers className="w-3.5 h-3.5 text-blue-600" />
             Fulfillment Summary
           </h2>
           <div className="grid grid-cols-3 gap-2 text-center pt-1">
@@ -232,6 +237,28 @@ const PurchaseDetail = () => {
             <div>
               <p className="text-[10px] text-gray-400 font-semibold uppercase">Pending</p>
               <p className="text-sm font-bold text-amber-600">{totalPending.toFixed(2)} T</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Pricing Summary Card */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+            <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+            Pricing Summary
+          </h2>
+          <div className="pt-1">
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span>Average Price:</span>
+              <span className="font-bold text-emerald-700 text-sm">
+                ₹{averagePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+              <span>Total Value:</span>
+              <span className="font-bold text-gray-900 text-sm">
+                ₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
             </div>
           </div>
         </div>
@@ -258,6 +285,8 @@ const PurchaseDetail = () => {
                 <th className="py-3 px-4 text-right">Ordered Qty</th>
                 <th className="py-3 px-4 text-right">Received Qty</th>
                 <th className="py-3 px-4 text-right">Pending Qty</th>
+                <th className="py-3 px-4 text-right">Price (₹)</th>
+                <th className="py-3 px-4 text-right">Amount (₹)</th>
                 <th className="py-3 px-4 text-center">Line Status</th>
               </tr>
             </thead>
@@ -267,6 +296,8 @@ const PurchaseDetail = () => {
                 const received = parseFloat(item.receivedQuantity) || 0;
                 const pending = Math.max(0, ordered - received);
                 const isLineComplete = pending <= 0;
+                const price = parseFloat(item.rate) || 0;
+                const amount = parseFloat(item.amount) || (ordered * price);
 
                 return (
                   <tr key={item.id || index} className="hover:bg-gray-50/60">
@@ -296,6 +327,12 @@ const PurchaseDetail = () => {
                         <span className="font-bold text-amber-600">{pending.toFixed(3)} Tons</span>
                       )}
                     </td>
+                    <td className="py-3.5 px-4 text-right font-mono text-gray-800 text-sm">
+                      ₹{price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono font-semibold text-gray-900 text-sm">
+                      ₹{amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
                     <td className="py-3.5 px-4 text-center">
                       {isLineComplete ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
@@ -315,24 +352,100 @@ const PurchaseDetail = () => {
                 );
               })}
             </tbody>
+            <tfoot className="bg-gray-50 font-semibold text-gray-900 border-t border-gray-200 text-xs">
+              <tr>
+                <td colSpan={3} className="py-3 px-4 text-right">Totals:</td>
+                <td className="py-3 px-4 text-right font-mono">{totalOrdered.toFixed(3)} Tons</td>
+                <td className="py-3 px-4 text-right font-mono text-emerald-700">{totalReceived.toFixed(3)} Tons</td>
+                <td className="py-3 px-4 text-right font-mono text-amber-700">{totalPending.toFixed(3)} Tons</td>
+                <td className="py-3 px-4 text-right font-mono text-emerald-700">
+                  Avg: ₹{averagePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+                <td className="py-3 px-4 text-right font-mono text-blue-700">
+                  ₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+                <td></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
 
-      {/* Goods Receipts History */}
-      {receipts.length > 0 && (
+      {/* Linked Purchase Estimate Vouchers (Receipts) */}
+      {purchaseEstimateReceipts.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-gray-100 pb-3">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
               <FileText className="w-5 h-5 text-emerald-600" />
-              Goods Receipts History ({receipts.length})
+              Received Vouchers — Purchase Estimate Slips ({purchaseEstimateReceipts.length})
             </h2>
-            <Link
-              to={`/purchases/receive?orderId=${encodeURIComponent(purchase.purchaseNumber)}`}
-              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-            >
-              + Record Another Receipt
-            </Link>
+            {totalPending > 0 && purchase.status !== 'CANCELLED' && (
+              <Link
+                to={`/purchase-estimate?purchaseId=${purchase.id}`}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                + Receive Remaining via Voucher
+              </Link>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {purchaseEstimateReceipts.map(voucher => (
+              <div key={voucher.id} className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <Link
+                      to={`/purchase-estimate?estimateId=${voucher.id}`}
+                      className="font-mono font-bold text-blue-700 hover:underline text-sm"
+                    >
+                      Voucher #{voucher.estimateNumber}
+                    </Link>
+                    <span className="text-gray-500">Date: {voucher.estimateDate}</span>
+                    {voucher.vehicle && (
+                      <span className="text-gray-500">Vehicle: {voucher.vehicle}</span>
+                    )}
+                  </div>
+                  <div className="text-gray-500">
+                    Recorded by: <span className="font-medium text-gray-800">{voucher.creator?.username || 'Employee'}</span>
+                  </div>
+                </div>
+
+                {/* Items received in this voucher */}
+                <div className="flex flex-wrap gap-2 pt-1 border-t border-gray-200/60">
+                  {(voucher.items || []).map((it, idx) => (
+                    <span key={idx} className="bg-white px-2.5 py-1 border border-gray-200 rounded text-gray-800 font-medium">
+                      {it.productNameSnapshot}: <strong className="text-emerald-700">{parseFloat(it.quantityReceived || 0).toFixed(3)} {it.unit || 'Tons'}</strong>
+                    </span>
+                  ))}
+                </div>
+
+                {voucher.notes && (
+                  <p className="text-[11px] text-gray-500 italic mt-1">
+                    Notes: {voucher.notes}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Legacy Goods Receipts History (preserved read-only for historical records) */}
+      {receipts.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+            <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-slate-600" />
+              Historical Goods Receipts ({receipts.length})
+            </h2>
+            {totalPending > 0 && purchase.status !== 'CANCELLED' && (
+              <Link
+                to={`/purchase-estimate?purchaseId=${purchase.id}`}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                + Record Receipt via Voucher
+              </Link>
+            )}
           </div>
 
           <div className="space-y-3">

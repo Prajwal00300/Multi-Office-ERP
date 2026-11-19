@@ -7,6 +7,7 @@ const {
   verifyRecordOwnership,
   buildOfficeWhereClause
 } = require('../utils/scopeFilter');
+const { syncExistingPurchasePartiesAndProducts } = require('../utils/syncPurchaseMasterData');
 
 // Create a new customer
 exports.createCustomer = async (req, res) => {
@@ -53,6 +54,7 @@ exports.createCustomer = async (req, res) => {
 // Get all customers (with search & organization support)
 exports.getCustomers = async (req, res) => {
   try {
+    await syncExistingPurchasePartiesAndProducts();
     const { search, organizationId } = req.query;
 
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);

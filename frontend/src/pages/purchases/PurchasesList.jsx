@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   Plus, 
@@ -16,6 +16,11 @@ import {
   DollarSign, 
   AlertCircle,
   TrendingUp,
+  TrendingDown,
+  Calculator,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
   Inbox,
   Package,
   Layers,
@@ -24,7 +29,7 @@ import {
 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
-import { getPurchases } from '../../services/purchaseService';
+import { getPurchases, getInHandOrderSummary } from '../../services/purchaseService';
 
 const cleanSerialNumber = (val) => {
   if (!val) return '';
@@ -113,6 +118,49 @@ const PurchasesList = () => {
     return () => clearTimeout(delayDebounceFn);
   }, [fetchPurchasesData]);
 
+  // In Hand Order State: Purchase Total Order Pending + In House Stock - Sales Total Order Pending = In Hand Order
+  const [inHandSummary, setInHandSummary] = useState({
+    purchaseTotalOrderPending: 0,
+    inHouseStock: 0,
+    salesTotalOrderPending: 0,
+    inHandOrder: 0,
+    productBreakdown: []
+  });
+  const [inHandLoading, setInHandLoading] = useState(false);
+  const [showProductBreakdown, setShowProductBreakdown] = useState(false);
+  const [productBreakdownSearch, setProductBreakdownSearch] = useState('');
+
+  const fetchInHandData = useCallback(async () => {
+    try {
+      setInHandLoading(true);
+      const params = {};
+      if (user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') {
+        if (selectedOrgId) params.organizationId = selectedOrgId;
+      } else if (user?.organizationId) {
+        params.organizationId = user.organizationId;
+      }
+      const data = await getInHandOrderSummary(params);
+      if (data) {
+        setInHandSummary(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch In Hand Order summary:', err);
+    } finally {
+      setInHandLoading(false);
+    }
+  }, [selectedOrgId, user]);
+
+  useEffect(() => {
+    fetchInHandData();
+  }, [fetchInHandData]);
+
+  const filteredProductBreakdown = useMemo(() => {
+    const list = inHandSummary.productBreakdown || [];
+    if (!productBreakdownSearch.trim()) return list;
+    const q = productBreakdownSearch.toLowerCase().trim();
+    return list.filter(p => (p.productName || '').toLowerCase().includes(q));
+  }, [inHandSummary.productBreakdown, productBreakdownSearch]);
+
   // Status Badge Component
   const renderStatusBadge = (status) => {
     switch (status) {
@@ -157,6 +205,13 @@ const PurchasesList = () => {
   const partialCount = purchases.filter(p => p.status === 'Partially Received').length;
   const fullyReceivedCount = purchases.filter(p => p.status === 'Fully Received' || p.status === 'APPROVED').length;
   const totalOrderedTons = purchases.reduce((acc, curr) => acc + (parseFloat(curr.totalOrderedQuantity) || parseFloat(curr.totalQuantity) || 0), 0);
+  const totalPurchaseValue = purchases.reduce((acc, curr) => {
+    const amt = parseFloat(curr.totalAmount);
+    if (!isNaN(amt) && amt > 0) return acc + amt;
+    const itemsSum = (curr.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+    return acc + itemsSum;
+  }, 0);
+  const overallAveragePrice = totalOrderedTons > 0 ? (totalPurchaseValue / totalOrderedTons) : 0;
 
   return (
     <div className="space-y-6 pb-12">
@@ -175,13 +230,13 @@ const PurchasesList = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Order Received Button */}
+          {/* Receive via Purchase Estimate Voucher Button */}
           <Link
-            to="/purchases/receive"
+            to="/purchase-estimate"
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
           >
             <Inbox className="w-4 h-4" />
-            Order Received
+            Purchase Estimate Voucher
           </Link>
 
           {/* Purchase Order Button */}
@@ -211,7 +266,7 @@ const PurchasesList = () => {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
             <ShoppingCart className="w-5 h-5" />
@@ -263,6 +318,268 @@ const PurchasesList = () => {
             </p>
           </div>
         </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
+          <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-lg">
+            <TrendingUp className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Average Price</p>
+            <p className="text-lg font-bold text-emerald-700">
+              ₹{overallAveragePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          IN HAND ORDER CALCULATION SECTION
+          Formula: Purchase Total Order Pending + In House Stock - Sales Total Order Pending = In Hand Order
+         ───────────────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-gray-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+              <Calculator className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                In Hand Order
+                <span className="text-xs font-normal text-gray-500">
+                  (Live Inventory & Order Balance)
+                </span>
+              </h2>
+              <p className="text-xs text-gray-500 font-mono">
+                Purchase Total Order Pending + In House Stock − Sales Total Order Pending = In Hand Order
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <button
+              type="button"
+              onClick={fetchInHandData}
+              disabled={inHandLoading}
+              className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+              title="Refresh In Hand Order Balance"
+            >
+              <RefreshCw className={`w-4 h-4 ${inHandLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowProductBreakdown(!showProductBreakdown)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
+            >
+              {showProductBreakdown ? (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  Hide Breakdown
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                  View Product Breakdown ({(inHandSummary.productBreakdown || []).length})
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* The Equation: Box + Box - Box = Box */}
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          
+          {/* Box 1: Purchase Total Order Pending */}
+          <div className="flex-1 bg-amber-50/80 border-2 border-amber-300 rounded-xl p-4 flex flex-col justify-between shadow-sm min-w-[210px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-amber-900 uppercase tracking-wider">
+                Purchase Total Order Pending
+              </span>
+              <ShoppingCart className="w-4 h-4 text-amber-600 shrink-0" />
+            </div>
+            <div className="mt-3 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-amber-950 font-mono">
+                {Number(inHandSummary.purchaseTotalOrderPending || 0).toFixed(3)}
+              </span>
+              <span className="text-xs font-semibold text-amber-700">Tons</span>
+            </div>
+            <p className="text-[11px] text-amber-700/80 mt-1">Pending to receive from suppliers</p>
+          </div>
+
+          {/* Plus Sign */}
+          <div className="flex items-center justify-center shrink-0 py-1 lg:py-0">
+            <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-xl font-black text-slate-700 shadow-inner select-none">
+              +
+            </div>
+          </div>
+
+          {/* Box 2: In House Stock */}
+          <div className="flex-1 bg-blue-50/80 border-2 border-blue-300 rounded-xl p-4 flex flex-col justify-between shadow-sm min-w-[210px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">
+                In House Stock
+              </span>
+              <Package className="w-4 h-4 text-blue-600 shrink-0" />
+            </div>
+            <div className="mt-3 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-blue-950 font-mono">
+                {Number(inHandSummary.inHouseStock || 0).toFixed(3)}
+              </span>
+              <span className="text-xs font-semibold text-blue-700">Tons</span>
+            </div>
+            <p className="text-[11px] text-blue-700/80 mt-1">Current physical stock in warehouse</p>
+          </div>
+
+          {/* Minus Sign */}
+          <div className="flex items-center justify-center shrink-0 py-1 lg:py-0">
+            <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-xl font-black text-slate-700 shadow-inner select-none">
+              −
+            </div>
+          </div>
+
+          {/* Box 3: Sales Total Order Pending */}
+          <div className="flex-1 bg-rose-50/80 border-2 border-rose-300 rounded-xl p-4 flex flex-col justify-between shadow-sm min-w-[210px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-rose-900 uppercase tracking-wider">
+                Sales Total Order Pending
+              </span>
+              <TrendingDown className="w-4 h-4 text-rose-600 shrink-0" />
+            </div>
+            <div className="mt-3 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-rose-950 font-mono">
+                {Number(inHandSummary.salesTotalOrderPending || 0).toFixed(3)}
+              </span>
+              <span className="text-xs font-semibold text-rose-700">Tons</span>
+            </div>
+            <p className="text-[11px] text-rose-700/80 mt-1">Committed to customers awaiting delivery</p>
+          </div>
+
+          {/* Equals Sign */}
+          <div className="flex items-center justify-center shrink-0 py-1 lg:py-0">
+            <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-xl font-black text-emerald-700 shadow-inner select-none">
+              =
+            </div>
+          </div>
+
+          {/* Box 4: In Hand Order (Highlighted Result Box) */}
+          <div className={`flex-1 border-2 rounded-xl p-4 flex flex-col justify-between shadow-md min-w-[210px] ${
+            Number(inHandSummary.inHandOrder || 0) >= 0 
+              ? 'bg-gradient-to-br from-emerald-600 to-teal-700 border-emerald-600 text-white' 
+              : 'bg-gradient-to-br from-red-600 to-rose-700 border-red-600 text-white'
+          }`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-emerald-100 uppercase tracking-wider">
+                In Hand Order
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white backdrop-blur-xs">
+                {Number(inHandSummary.inHandOrder || 0) >= 0 ? 'Surplus Balance' : 'Deficit / Shortfall'}
+              </span>
+            </div>
+            <div className="mt-3 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-white font-mono">
+                {Number(inHandSummary.inHandOrder || 0).toFixed(3)}
+              </span>
+              <span className="text-xs font-semibold text-emerald-100">Tons</span>
+            </div>
+            <p className="text-[11px] text-white/80 mt-1">Net uncommitted order balance</p>
+          </div>
+
+        </div>
+
+        {/* Expandable Product-wise Breakdown */}
+        {showProductBreakdown && (
+          <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">
+                Product-wise In Hand Order Breakdown
+              </h3>
+              <div className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Filter products..."
+                  value={productBreakdownSearch}
+                  onChange={(e) => setProductBreakdownSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="w-full border-collapse text-xs text-left">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-700 font-semibold uppercase text-[11px]">
+                    <th className="py-2.5 px-3">Product Name</th>
+                    <th className="py-2.5 px-3 text-right text-amber-800 bg-amber-50/50">Purchase Pending</th>
+                    <th className="py-2.5 px-2 text-center text-gray-400">+</th>
+                    <th className="py-2.5 px-3 text-right text-blue-800 bg-blue-50/50">In House Stock</th>
+                    <th className="py-2.5 px-2 text-center text-gray-400">−</th>
+                    <th className="py-2.5 px-3 text-right text-rose-800 bg-rose-50/50">Sales Pending</th>
+                    <th className="py-2.5 px-2 text-center text-gray-400">=</th>
+                    <th className="py-2.5 px-3 text-right font-bold text-gray-900 bg-emerald-50/60">In Hand Order</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 font-mono">
+                  {filteredProductBreakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-4 text-center text-gray-400 font-sans italic">
+                        No product data found
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredProductBreakdown.map((prod, pIdx) => {
+                      const isInHandPositive = Number(prod.inHandOrder) >= 0;
+                      return (
+                        <tr key={prod.productId || pIdx} className="hover:bg-gray-50/80">
+                          <td className="py-2 px-3 font-sans font-medium text-gray-900">
+                            {prod.productName}
+                          </td>
+                          <td className="py-2 px-3 text-right text-amber-900 bg-amber-50/20">
+                            {Number(prod.purchasePending || 0).toFixed(3)} T
+                          </td>
+                          <td className="py-2 px-2 text-center text-gray-400 font-sans">+</td>
+                          <td className="py-2 px-3 text-right text-blue-900 bg-blue-50/20">
+                            {Number(prod.inHouseStock || 0).toFixed(3)} T
+                          </td>
+                          <td className="py-2 px-2 text-center text-gray-400 font-sans">−</td>
+                          <td className="py-2 px-3 text-right text-rose-900 bg-rose-50/20">
+                            {Number(prod.salesPending || 0).toFixed(3)} T
+                          </td>
+                          <td className="py-2 px-2 text-center text-gray-400 font-sans">=</td>
+                          <td className={`py-2 px-3 text-right font-bold bg-emerald-50/30 ${
+                            isInHandPositive ? 'text-emerald-700' : 'text-rose-700'
+                          }`}>
+                            {Number(prod.inHandOrder || 0).toFixed(3)} T
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+                <tfoot className="bg-gray-100 border-t-2 border-gray-300 font-mono font-bold text-gray-900 text-xs">
+                  <tr>
+                    <td className="py-2.5 px-3 font-sans">Total Balance</td>
+                    <td className="py-2.5 px-3 text-right text-amber-900">
+                      {Number(inHandSummary.purchaseTotalOrderPending || 0).toFixed(3)} T
+                    </td>
+                    <td className="py-2.5 px-2 text-center font-sans">+</td>
+                    <td className="py-2.5 px-3 text-right text-blue-900">
+                      {Number(inHandSummary.inHouseStock || 0).toFixed(3)} T
+                    </td>
+                    <td className="py-2.5 px-2 text-center font-sans">−</td>
+                    <td className="py-2.5 px-3 text-right text-rose-900">
+                      {Number(inHandSummary.salesTotalOrderPending || 0).toFixed(3)} T
+                    </td>
+                    <td className="py-2.5 px-2 text-center font-sans">=</td>
+                    <td className="py-2.5 px-3 text-right text-emerald-800 font-black">
+                      {Number(inHandSummary.inHandOrder || 0).toFixed(3)} T
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -381,11 +698,11 @@ const PurchasesList = () => {
                 Purchase Order
               </Link>
               <Link
-                to="/purchases/receive"
+                to="/purchase-estimate"
                 className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
               >
                 <Inbox className="w-4 h-4" />
-                Order Received
+                Purchase Estimate Voucher
               </Link>
             </div>
           </div>
@@ -400,6 +717,7 @@ const PurchasesList = () => {
                   <th className="py-3.5 px-4 text-right">Ordered</th>
                   <th className="py-3.5 px-4 text-right">Received</th>
                   <th className="py-3.5 px-4 text-right">Pending</th>
+                  <th className="py-3.5 px-4 text-right">Avg. Price</th>
                   {user?.role === 'SUPER_ADMIN' && <th className="py-3.5 px-4">Office</th>}
                   <th className="py-3.5 px-4 text-center">Status</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
@@ -411,6 +729,8 @@ const PurchasesList = () => {
                   const totalRec = parseFloat(purchase.totalReceivedQuantity) || 0;
                   const totalPen = Math.max(0, totalOrd - totalRec);
                   const itemsList = purchase.items || [];
+                  const orderAmt = parseFloat(purchase.totalAmount) || (purchase.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+                  const orderAvgPrice = totalOrd > 0 ? (orderAmt / totalOrd) : (parseFloat(purchase.averagePrice) || 0);
 
                   return (
                     <tr key={purchase.id} className="hover:bg-gray-50/75 transition-colors">
@@ -485,6 +805,15 @@ const PurchasesList = () => {
                         )}
                       </td>
 
+                      {/* Avg. Price */}
+                      <td className="py-3 px-4 text-right font-medium text-slate-800 text-sm">
+                        {orderAvgPrice > 0 ? (
+                          <>₹{orderAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+
                       {/* Office (Super Admin) */}
                       {user?.role === 'SUPER_ADMIN' && (
                         <td className="py-3 px-4 text-xs text-gray-600">
@@ -500,12 +829,12 @@ const PurchasesList = () => {
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {/* Quick Receive Goods Button */}
+                          {/* Quick Receive Goods via Purchase Estimate Voucher Button */}
                           {totalPen > 0 && purchase.status !== 'CANCELLED' && (
                             <Link
-                              to={`/purchases/receive?orderId=${encodeURIComponent(purchase.purchaseNumber)}`}
+                              to={`/purchase-estimate?purchaseId=${purchase.id}`}
                               className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-xs font-medium transition-colors"
-                              title="Receive Goods against this Order"
+                              title="Receive Goods via Purchase Estimate Voucher"
                             >
                               <Inbox className="w-3.5 h-3.5" />
                               Receive

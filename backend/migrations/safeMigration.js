@@ -712,15 +712,77 @@ async function runSafeHierarchyMigration() {
           unit VARCHAR(50) NOT NULL DEFAULT 'Ton',
           negotiatedRate DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
           amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          purchaseId INT NULL,
+          purchaseItemId INT NULL,
+          orderedQuantity DECIMAL(15, 3) NULL,
+          receivedQuantityAfter DECIMAL(15, 3) NULL,
+          pendingQuantityAfter DECIMAL(15, 3) NULL,
           createdAt DATETIME NOT NULL,
           updatedAt DATETIME NOT NULL,
           INDEX idx_pei_estId (purchaseEstimateId),
           INDEX idx_pei_productId (productId)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
-      console.log("   ✅ purchase_estimates and purchase_estimate_items tables verified/created.");
+
+      // Ensure PO snapshot columns exist on purchase_estimate_items if table pre-existed
+      const [peiCols] = await sequelize.query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchase_estimate_items'
+      `);
+      const peiColNames = peiCols.map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+      const peiNewCols = [
+        { name: 'purchaseid', sql: 'ADD COLUMN purchaseId INT NULL' },
+        { name: 'purchaseitemid', sql: 'ADD COLUMN purchaseItemId INT NULL' },
+        { name: 'orderedquantity', sql: 'ADD COLUMN orderedQuantity DECIMAL(15, 3) NULL' },
+        { name: 'receivedquantityafter', sql: 'ADD COLUMN receivedQuantityAfter DECIMAL(15, 3) NULL' },
+        { name: 'pendingquantityafter', sql: 'ADD COLUMN pendingQuantityAfter DECIMAL(15, 3) NULL' }
+      ];
+      for (const col of peiNewCols) {
+        if (!peiColNames.includes(col.name)) {
+          await sequelize.query(`ALTER TABLE purchase_estimate_items ${col.sql}`);
+        }
+      }
+
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS purchase_estimate_po_allocations (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          organizationId INT NOT NULL,
+          purchaseEstimateId INT NOT NULL,
+          purchaseEstimateItemId INT NOT NULL,
+          purchaseId INT NOT NULL,
+          purchaseItemId INT NOT NULL,
+          allocatedQuantity DECIMAL(15, 3) NOT NULL DEFAULT 0.000,
+          createdAt DATETIME NOT NULL,
+          updatedAt DATETIME NOT NULL,
+          INDEX idx_pepa_orgId (organizationId),
+          INDEX idx_pepa_estId (purchaseEstimateId),
+          INDEX idx_pepa_estItemId (purchaseEstimateItemId),
+          INDEX idx_pepa_purId (purchaseId),
+          INDEX idx_pepa_purItemId (purchaseItemId)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+      console.log("   ✅ purchase_estimates, purchase_estimate_items, and purchase_estimate_po_allocations tables verified/created.");
     } catch (peErr) {
       console.warn('   ⚠️ Note verifying purchase_estimates tables:', peErr.message);
+    }
+
+    // 15. Backfill any existing Purchase Order parties & products into Customer/Product Master
+    try {
+      const { syncExistingPurchasePartiesAndProducts } = require('../utils/syncPurchaseMasterData');
+      await syncExistingPurchasePartiesAndProducts();
+      console.log("   ✅ Purchase Order parties & products synced with Customer/Product Master.");
+    } catch (syncErr) {
+      console.warn('   ⚠️ Note syncing PO parties/products:', syncErr.message);
+    }
+
+    // 16. Create sale_orders, sale_order_items, and sale_order_allocations tables
+    try {
+      const { ensureSaleOrderTablesExist } = require('../controllers/saleOrderController');
+      await ensureSaleOrderTablesExist();
+      console.log("   ✅ sale_orders, sale_order_items, and sale_order_allocations tables verified/created.");
+    } catch (soErr) {
+      console.warn('   ⚠️ Note verifying sale_orders tables:', soErr.message);
     }
 
     console.log('✅ Safe hierarchy migration completed successfully.');

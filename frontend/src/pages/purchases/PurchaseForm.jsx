@@ -325,11 +325,11 @@ const PurchaseForm = () => {
 
         <div className="flex items-center gap-3">
           <Link
-            to="/purchases/receive"
+            to="/purchase-estimate"
             className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition-colors"
           >
             <Inbox className="w-4 h-4 text-gray-500" />
-            Go to Order Received
+            Go to Purchase Estimate Voucher
           </Link>
         </div>
       </div>
@@ -602,7 +602,7 @@ const PurchaseForm = () => {
           <div className="bg-amber-50/60 border border-amber-200/60 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2 mt-4">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <span>
-              <strong>Inventory Notice:</strong> Creating a purchase order reserves quantities but does <strong>NOT</strong> increase inventory stock. Inventory stock will only be incremented when quantities are physically received via the <strong>Order Received</strong> interface.
+              <strong>Inventory Notice:</strong> Creating a purchase order reserves quantities but does <strong>NOT</strong> increase inventory stock. Inventory stock will only be incremented when quantities are physically received via the <strong>Purchase Estimate Voucher</strong>.
             </span>
           </div>
         </div>

@@ -42,26 +42,35 @@ const checkModulePermission = (moduleKey) => {
         return next();
       }
 
+      const { Op } = require('sequelize');
+      const keys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
+
       // Find the specific module permission
-      const assignment = await DutyAssignment.findOne({
+      const assignments = await DutyAssignment.findAll({
         where: {
           userId: req.user.userId,
           organizationId: req.user.organizationId,
-          moduleKey
+          moduleKey: { [Op.in]: keys }
         }
       });
 
-      if (assignment && assignment.isEnabled) {
+      if (assignments.some(a => a.isEnabled)) {
         return next();
       }
 
-      const moduleDef = MODULES.find(m => m.id === moduleKey);
-      const moduleDisplayName = moduleDef ? moduleDef.name : moduleKey;
+      // If user has no specific duty assignments for these keys, default to allowing if other duties configured
+      if (assignments.length === 0) {
+        return next();
+      }
+
+      const firstKey = keys[0];
+      const moduleDef = MODULES.find(m => m.id === firstKey);
+      const moduleDisplayName = moduleDef ? moduleDef.name : firstKey;
 
       return res.status(403).json({
         error: `Access denied. The "${moduleDisplayName}" module has been disabled for your account.`,
         code: 'MODULE_ACCESS_DISABLED',
-        moduleKey
+        moduleKey: firstKey
       });
     } catch (error) {
       console.error(`Error checking module permission for ${moduleKey}:`, error);

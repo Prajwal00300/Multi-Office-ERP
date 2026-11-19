@@ -7,6 +7,11 @@ const Product = require('../models/Product');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 const InventoryMovement = require('../models/InventoryMovement');
+const SaleOrder = require('../models/SaleOrder');
+const SaleOrderItem = require('../models/SaleOrderItem');
+const SaleOrderAllocation = require('../models/SaleOrderAllocation');
+const { ensureSaleOrderTablesExist } = require('./saleOrderController');
+const { ensureCustomerForParty, ensureProductForOrderLine } = require('../utils/syncPurchaseMasterData');
 const { calculateEstimateTotals } = require('../services/estimateCalculationService');
 const { generateUniqueEstimateNumber } = require('../utils/estimateNumberGenerator');
 const {
@@ -80,6 +85,191 @@ async function revertInventoryForEstimateItems(items, estimate, transaction) {
     },
     transaction
   });
+}
+
+const normalizeMatchKey = (str) => String(str || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+const computeSaleOrderStatusFromItems = (items) => {
+  if (!items || items.length === 0) return 'Pending';
+  let hasAnyProcessed = false;
+  let hasAnyPending = false;
+
+  for (const item of items) {
+    const ordered = parseFloat(item.quantity) || 0;
+    const processed = parseFloat(item.processedQuantity) || 0;
+
+    if (processed > 0.0001) hasAnyProcessed = true;
+    if (ordered - processed > 0.0001) hasAnyPending = true;
+  }
+
+  if (!hasAnyProcessed) return 'Pending';
+  if (hasAnyProcessed && hasAnyPending) return 'Partially Processed';
+  return 'Fully Processed';
+};
+
+const soAllocationInclude = {
+  model: SaleOrderAllocation,
+  as: 'soAllocations',
+  required: false,
+  include: [
+    {
+      model: SaleOrder,
+      attributes: ['id', 'orderNumber', 'orderDate', 'status']
+    },
+    {
+      model: SaleOrderItem,
+      attributes: ['id', 'productNameSnapshot', 'quantity', 'processedQuantity', 'unit']
+    }
+  ]
+};
+
+/**
+ * Automatically allocates Sale Estimate Voucher item quantities against matching open
+ * Sale Order lines (same office, matching customer, matching product) in FIFO order.
+ * Updates SaleOrderItem.processedQuantity, SaleOrder.status, and creates SaleOrderAllocation.
+ */
+async function allocateEstimateToSaleOrders(createdEstimateItems, estimate, customerNameToMatch, transaction) {
+  if (!createdEstimateItems || createdEstimateItems.length === 0) return;
+  await ensureSaleOrderTablesExist();
+  const targetKey = normalizeMatchKey(customerNameToMatch);
+  if (!targetKey && !estimate.customerId) return;
+
+  const officeOrders = await SaleOrder.findAll({
+    where: {
+      organizationId: estimate.organizationId,
+      status: { [Op.ne]: 'CANCELLED' }
+    },
+    include: [
+      {
+        model: SaleOrderItem,
+        as: 'items'
+      }
+    ],
+    order: [
+      ['orderDate', 'ASC'],
+      ['id', 'ASC'],
+      [{ model: SaleOrderItem, as: 'items' }, 'id', 'ASC']
+    ],
+    transaction
+  });
+
+  const matchingOrders = officeOrders.filter(so =>
+    (estimate.customerId && so.customerId && Number(estimate.customerId) === Number(so.customerId)) ||
+    (targetKey && normalizeMatchKey(so.customerName) === targetKey)
+  );
+
+  if (matchingOrders.length === 0) return;
+
+  const affectedOrderIds = new Set();
+
+  for (const estItem of createdEstimateItems) {
+    let remainingToAllocate = parseFloat(estItem.quantity) || 0;
+    if (remainingToAllocate <= 0) continue;
+
+    const estProdId = estItem.productId ? Number(estItem.productId) : null;
+    const estProdNameKey = normalizeMatchKey(estItem.productNameSnapshot);
+
+    const matchingLines = [];
+    for (const so of matchingOrders) {
+      for (const soi of (so.items || [])) {
+        const soiProdId = soi.productId ? Number(soi.productId) : null;
+        const soiProdNameKey = normalizeMatchKey(soi.productNameSnapshot);
+        const matchesProduct =
+          (estProdId && soiProdId && estProdId === soiProdId) ||
+          (estProdNameKey && soiProdNameKey && estProdNameKey === soiProdNameKey);
+
+        if (matchesProduct) {
+          matchingLines.push({ so, soi });
+        }
+      }
+    }
+
+    if (matchingLines.length === 0) continue;
+
+    for (const entry of matchingLines) {
+      if (remainingToAllocate <= 0.0001) break;
+      const { so, soi } = entry;
+
+      const orderedQty = parseFloat(soi.quantity) || 0;
+      const currentProcessed = parseFloat(soi.processedQuantity) || 0;
+      const pendingQty = Math.max(0, parseFloat((orderedQty - currentProcessed).toFixed(3)));
+
+      if (pendingQty <= 0.0001) continue;
+
+      const allocQty = Math.min(remainingToAllocate, pendingQty);
+      remainingToAllocate = parseFloat((remainingToAllocate - allocQty).toFixed(3));
+      const newProcessed = parseFloat((currentProcessed + allocQty).toFixed(3));
+
+      await soi.update({ processedQuantity: newProcessed }, { transaction });
+      soi.processedQuantity = newProcessed;
+
+      await SaleOrderAllocation.create({
+        organizationId: estimate.organizationId,
+        estimateId: estimate.id,
+        estimateItemId: estItem.id,
+        saleOrderId: so.id,
+        saleOrderItemId: soi.id,
+        allocatedQuantity: allocQty
+      }, { transaction });
+
+      affectedOrderIds.add(so.id);
+    }
+  }
+
+  for (const orderId of affectedOrderIds) {
+    const freshItems = await SaleOrderItem.findAll({
+      where: { saleOrderId: orderId },
+      transaction
+    });
+    const newStatus = computeSaleOrderStatusFromItems(freshItems);
+    await SaleOrder.update(
+      { status: newStatus },
+      { where: { id: orderId }, transaction }
+    );
+  }
+}
+
+/**
+ * Reverts all SaleOrderAllocations previously created by a Sale Estimate Voucher.
+ */
+async function revertEstimateSaleOrderAllocations(estimateId, transaction) {
+  await ensureSaleOrderTablesExist();
+  const allocations = await SaleOrderAllocation.findAll({
+    where: { estimateId },
+    transaction
+  });
+
+  if (!allocations || allocations.length === 0) return;
+
+  const affectedOrderIds = new Set();
+
+  for (const alloc of allocations) {
+    const soi = await SaleOrderItem.findByPk(alloc.saleOrderItemId, { transaction });
+    if (soi) {
+      const currentProcessed = parseFloat(soi.processedQuantity) || 0;
+      const allocQty = parseFloat(alloc.allocatedQuantity) || 0;
+      const newProcessed = Math.max(0, parseFloat((currentProcessed - allocQty).toFixed(3)));
+      await soi.update({ processedQuantity: newProcessed }, { transaction });
+    }
+    affectedOrderIds.add(alloc.saleOrderId);
+  }
+
+  await SaleOrderAllocation.destroy({
+    where: { estimateId },
+    transaction
+  });
+
+  for (const orderId of affectedOrderIds) {
+    const freshItems = await SaleOrderItem.findAll({
+      where: { saleOrderId: orderId },
+      transaction
+    });
+    const newStatus = computeSaleOrderStatusFromItems(freshItems);
+    await SaleOrder.update(
+      { status: newStatus },
+      { where: { id: orderId }, transaction }
+    );
+  }
 }
 
 // GET /api/estimates - List estimates with filters
@@ -205,7 +395,8 @@ exports.getEstimateById = async (req, res) => {
               attributes: ['id', 'name', 'unit', 'difference', 'specifications']
             }
           ]
-        }
+        },
+        soAllocationInclude
       ]
     });
 
@@ -582,22 +773,35 @@ exports.createEstimate = async (req, res) => {
     }
 
     // 2. Validate Customer exists and belongs to target organization
-    if (!customerId) {
-      await t.rollback();
-      return res.status(400).json({ error: 'Customer is required.' });
+    let customer = null;
+    let resolvedCustomerId = customerId && !String(customerId).startsWith('party:') && !isNaN(Number(customerId))
+      ? parseInt(customerId, 10)
+      : null;
+
+    if (resolvedCustomerId) {
+      customer = await Customer.findOne({
+        where: { id: resolvedCustomerId, organizationId: targetOrgId },
+        transaction: t
+      });
     }
 
-    const customer = await Customer.findOne({
-      where: {
-        id: customerId,
-        organizationId: targetOrgId
-      },
-      transaction: t
-    });
+    if (!customer) {
+      const nameCandidate = req.body.customerName || req.body.partyName || (customerId && String(customerId).startsWith('party:') ? String(customerId).slice(6) : '');
+      if (nameCandidate && nameCandidate.trim()) {
+        try {
+          customer = await ensureCustomerForParty(targetOrgId, nameCandidate.trim(), t);
+          if (customer) {
+            resolvedCustomerId = customer.id;
+          }
+        } catch (custSyncErr) {
+          console.warn('Could not auto-sync customer in createEstimate:', custSyncErr.message);
+        }
+      }
+    }
 
     if (!customer) {
       await t.rollback();
-      return res.status(400).json({ error: 'Selected customer not found in the designated organization.' });
+      return res.status(400).json({ error: 'Customer is required and must exist in the designated organization.' });
     }
 
     // 3. Validate Items
@@ -632,6 +836,36 @@ exports.createEstimate = async (req, res) => {
             productSpecificationsSnapshot = product.specifications;
           }
           unit = product.unit || unit;
+        }
+      } else if (productNameSnapshot) {
+        const prodMatch = await Product.findOne({
+          where: {
+            organizationId: targetOrgId,
+            [Op.and]: [
+              sequelize.where(sequelize.fn('LOWER', sequelize.fn('TRIM', sequelize.col('name'))), productNameSnapshot.toLowerCase())
+            ]
+          },
+          transaction: t
+        });
+        if (prodMatch) {
+          row.productId = prodMatch.id;
+          productCategorySnapshot = prodMatch.category || productCategorySnapshot;
+          productSizeSnapshot = prodMatch.size || productSizeSnapshot;
+          productSpecificationsSnapshot = prodMatch.specifications || productSpecificationsSnapshot;
+          unit = prodMatch.unit || unit;
+        } else {
+          try {
+            const syncedProduct = await ensureProductForOrderLine(
+              targetOrgId,
+              { name: productNameSnapshot, unit, specifications: productSpecificationsSnapshot },
+              t
+            );
+            if (syncedProduct) {
+              row.productId = syncedProduct.id;
+            }
+          } catch (syncErr) {
+            console.warn('Could not auto-sync product in createEstimate:', syncErr.message);
+          }
         }
       }
 
@@ -693,7 +927,7 @@ exports.createEstimate = async (req, res) => {
     const newEstimate = await Estimate.create({
       estimateNumber,
       organizationId: targetOrgId,
-      customerId,
+      customerId: resolvedCustomerId,
       estimateDate: estimateDate || new Date(),
       basic: basic ? basic.trim() : null,
       terms: terms ? terms.trim() : null,
@@ -746,6 +980,13 @@ exports.createEstimate = async (req, res) => {
       t,
       `Sale estimate created #${newEstimate.estimateNumber}`
     );
+
+    // 9. Allocate against open Sale Orders for this customer
+    const createdEstimateItems = await EstimateItem.findAll({
+      where: { estimateId: newEstimate.id },
+      transaction: t
+    });
+    await allocateEstimateToSaleOrders(createdEstimateItems, newEstimate, customer.name, t);
 
     await t.commit();
 
@@ -858,6 +1099,36 @@ exports.updateEstimate = async (req, res) => {
           }
           unit = product.unit || unit;
         }
+      } else if (productNameSnapshot) {
+        const prodMatch = await Product.findOne({
+          where: {
+            organizationId: targetOrgId,
+            [Op.and]: [
+              sequelize.where(sequelize.fn('LOWER', sequelize.fn('TRIM', sequelize.col('name'))), productNameSnapshot.toLowerCase())
+            ]
+          },
+          transaction: t
+        });
+        if (prodMatch) {
+          row.productId = prodMatch.id;
+          productCategorySnapshot = prodMatch.category || productCategorySnapshot;
+          productSizeSnapshot = prodMatch.size || productSizeSnapshot;
+          productSpecificationsSnapshot = prodMatch.specifications || productSpecificationsSnapshot;
+          unit = prodMatch.unit || unit;
+        } else {
+          try {
+            const syncedProduct = await ensureProductForOrderLine(
+              targetOrgId,
+              { name: productNameSnapshot, unit, specifications: productSpecificationsSnapshot },
+              t
+            );
+            if (syncedProduct) {
+              row.productId = syncedProduct.id;
+            }
+          } catch (syncErr) {
+            console.warn('Could not auto-sync product in createEstimate:', syncErr.message);
+          }
+        }
       }
 
       if (!productNameSnapshot) {
@@ -935,7 +1206,8 @@ exports.updateEstimate = async (req, res) => {
       notes: notes !== undefined ? (notes ? notes.trim() : null) : estimate.notes
     }, { transaction: t });
 
-    // Revert previously deducted stock for this estimate's existing items
+    // Revert previously deducted stock and sale order allocations for this estimate's existing items
+    await revertEstimateSaleOrderAllocations(estimate.id, t);
     const existingItems = await EstimateItem.findAll({ where: { estimateId: estimate.id }, transaction: t });
     await revertInventoryForEstimateItems(existingItems, estimate, t);
 
@@ -966,6 +1238,14 @@ exports.updateEstimate = async (req, res) => {
       t,
       `Sale estimate updated #${estimate.estimateNumber}`
     );
+
+    // Re-allocate against open Sale Orders for this customer
+    const updatedEstimateItems = await EstimateItem.findAll({
+      where: { estimateId: estimate.id },
+      transaction: t
+    });
+    const estCustomer = await Customer.findByPk(estimate.customerId, { transaction: t });
+    await allocateEstimateToSaleOrders(updatedEstimateItems, estimate, estCustomer?.name, t);
 
     await t.commit();
 
@@ -1184,6 +1464,36 @@ exports.overrideEstimate = async (req, res) => {
           }
           unit = product.unit || unit;
         }
+      } else if (productNameSnapshot) {
+        const prodMatch = await Product.findOne({
+          where: {
+            organizationId: targetOrgId,
+            [Op.and]: [
+              sequelize.where(sequelize.fn('LOWER', sequelize.fn('TRIM', sequelize.col('name'))), productNameSnapshot.toLowerCase())
+            ]
+          },
+          transaction: t
+        });
+        if (prodMatch) {
+          row.productId = prodMatch.id;
+          productCategorySnapshot = prodMatch.category || productCategorySnapshot;
+          productSizeSnapshot = prodMatch.size || productSizeSnapshot;
+          productSpecificationsSnapshot = prodMatch.specifications || productSpecificationsSnapshot;
+          unit = prodMatch.unit || unit;
+        } else {
+          try {
+            const syncedProduct = await ensureProductForOrderLine(
+              targetOrgId,
+              { name: productNameSnapshot, unit, specifications: productSpecificationsSnapshot },
+              t
+            );
+            if (syncedProduct) {
+              row.productId = syncedProduct.id;
+            }
+          } catch (syncErr) {
+            console.warn('Could not auto-sync product in createEstimate:', syncErr.message);
+          }
+        }
       }
 
       if (!productNameSnapshot) {
@@ -1241,6 +1551,7 @@ exports.overrideEstimate = async (req, res) => {
     }, { transaction: t });
 
     // Revert previously deducted stock for this estimate's existing items
+    await revertEstimateSaleOrderAllocations(estimate.id, t);
     await revertInventoryForEstimateItems(estimate.items, estimate, t);
 
     // Replace items
@@ -1270,6 +1581,14 @@ exports.overrideEstimate = async (req, res) => {
       t,
       `Sale estimate overridden #${estimate.estimateNumber}`
     );
+
+    // Re-allocate against open Sale Orders for this customer
+    const freshEstimateItems = await EstimateItem.findAll({
+      where: { estimateId: estimate.id },
+      transaction: t
+    });
+    const estCustomer = await Customer.findByPk(estimate.customerId, { transaction: t });
+    await allocateEstimateToSaleOrders(freshEstimateItems, estimate, estCustomer?.name, t);
 
     const newValuesSnapshot = {
       customerId: estimate.customerId,
@@ -1328,7 +1647,8 @@ exports.deleteEstimate = async (req, res) => {
       return res.status(scopeErr.statusCode || 403).json({ error: scopeErr.message });
     }
 
-    // Revert inventory deductions if any exist
+    // Revert inventory deductions and sale order allocations if any exist
+    await revertEstimateSaleOrderAllocations(estimate.id, t);
     await revertInventoryForEstimateItems(estimate.items || [], estimate, t);
 
     // Delete estimate items and estimate

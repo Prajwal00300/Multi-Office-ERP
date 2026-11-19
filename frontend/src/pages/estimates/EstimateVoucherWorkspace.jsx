@@ -13,6 +13,7 @@ import {
   updateEstimate,
   deleteEstimate
 } from '../../services/estimateService';
+import { getSaleOrderById, getPendingSaleOrderSummary } from '../../services/saleOrderService';
 
 const DEFAULT_ROWS_COUNT = 30;
 
@@ -71,6 +72,9 @@ export default function EstimateVoucherWorkspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialEstimateId = searchParams.get('estimateId');
+  const initialSaleId = searchParams.get('saleId');
+  const prefilledSaleRef = useRef(null);
+  const [pendingSaleOrderSummary, setPendingSaleOrderSummary] = useState(null);
   const { user } = useContext(AuthContext);
 
   // Mode: 'VIEW' | 'ADD' | 'EDIT' | 'SAVING'
@@ -218,21 +222,65 @@ export default function EstimateVoucherWorkspace() {
     fetchOffices();
   }, [user]);
 
-  // Load Master Data (Customers & Products)
-  useEffect(() => {
-    const loadMasterData = async () => {
-      if (!effectiveOrgId) return;
-      try {
-        const [custRes, prodRes] = await Promise.all([
-          api.get(`/customers?organizationId=${effectiveOrgId}`),
-          api.get(`/products?organizationId=${effectiveOrgId}`)
-        ]);
-        setCustomers(custRes.data || []);
-        setProducts(prodRes.data || []);
-      } catch (err) {
-        console.error('Master data load failed:', err);
+  // Load Master Data (Customers, Products, and any customers/products from open Sale Orders)
+  const loadMasterData = async () => {
+    if (!effectiveOrgId) return;
+    try {
+      const [custRes, prodRes, soRes] = await Promise.all([
+        api.get(`/customers?organizationId=${effectiveOrgId}`),
+        api.get(`/products?organizationId=${effectiveOrgId}`),
+        api.get(`/sale-orders?organizationId=${effectiveOrgId}`).catch(() => ({ data: [] }))
+      ]);
+
+      const masterCustomers = custRes.data || [];
+      const masterProducts = prodRes.data || [];
+      const officeSaleOrders = soRes.data || [];
+
+      // Merge any SO customer names not yet in Customer Master
+      const existingCustNames = new Set(masterCustomers.map(c => String(c.name || '').trim().toLowerCase()));
+      const mergedCustomers = [...masterCustomers];
+      for (const so of officeSaleOrders) {
+        const cName = String(so.customerName || '').trim();
+        if (cName && !existingCustNames.has(cName.toLowerCase())) {
+          existingCustNames.add(cName.toLowerCase());
+          mergedCustomers.push({
+            id: `party:${cName}`,
+            name: cName,
+            city: '',
+            tin: '',
+            isSaleCustomer: true
+          });
+        }
       }
-    };
+
+      // Merge any SO product names not yet in Product Master
+      const existingProdNames = new Set(masterProducts.map(p => String(p.name || '').trim().toLowerCase()));
+      const mergedProducts = [...masterProducts];
+      for (const so of officeSaleOrders) {
+        for (const it of (so.items || [])) {
+          const pName = String(it.productNameSnapshot || '').trim();
+          if (pName && !existingProdNames.has(pName.toLowerCase())) {
+            existingProdNames.add(pName.toLowerCase());
+            mergedProducts.push({
+              id: `so-prod:${pName}`,
+              name: pName,
+              specifications: it.productSpecificationsSnapshot || '',
+              unit: it.unit || 'Ton',
+              difference: 0,
+              isSaleProduct: true
+            });
+          }
+        }
+      }
+
+      setCustomers(mergedCustomers);
+      setProducts(mergedProducts);
+    } catch (err) {
+      console.error('Master data load failed:', err);
+    }
+  };
+
+  useEffect(() => {
     loadMasterData();
   }, [effectiveOrgId]);
 
@@ -246,6 +294,136 @@ export default function EstimateVoucherWorkspace() {
     }
   }, [selectedCustomerId, customers]);
 
+  // Handle party/customer selection with automatic pre-fill of products ordered in open Sale Orders
+  const handleCustomerSelection = async (newCustomerId) => {
+    markDirtyAndEdit();
+    setSelectedCustomerId(newCustomerId);
+
+    if (!newCustomerId) {
+      setSelectedCustomer(null);
+      setPendingSaleOrderSummary(null);
+      setTransactionItems(createBlankRows(DEFAULT_ROWS_COUNT));
+      return;
+    }
+
+    const match = customers.find(c => String(c.id) === String(newCustomerId));
+    setSelectedCustomer(match || null);
+
+    const isSynthetic = String(newCustomerId).startsWith('party:');
+    const customerNameStr = match?.name || (isSynthetic ? String(newCustomerId).slice(6) : '');
+    const numericCustId = !isSynthetic && !isNaN(Number(newCustomerId)) ? newCustomerId : undefined;
+
+    try {
+      const summary = await getPendingSaleOrderSummary({
+        organizationId: effectiveOrgId,
+        customerId: numericCustId,
+        customerName: customerNameStr || undefined
+      });
+      setPendingSaleOrderSummary(summary || null);
+
+      if (summary && summary.products && summary.products.length > 0) {
+        const autoRows = summary.products
+          .filter(p => (parseFloat(p.pendingQuantity) || 0) > 0.0001 || (parseFloat(p.orderedQuantity) || 0) > 0.0001)
+          .map(p => {
+            const rateNum = parseFloat(p.rate) || 0;
+            const prodMatch = products.find(prod => String(prod.id) === String(p.productId) || (prod.name || '').trim().toLowerCase() === (p.productName || '').trim().toLowerCase());
+            const diffNum = prodMatch?.difference !== undefined && prodMatch?.difference !== null ? parseFloat(prodMatch.difference) : 0;
+            const bRateNum = Math.max(0, rateNum - diffNum);
+            return {
+              productId: p.productId ? String(p.productId) : (prodMatch ? String(prodMatch.id) : ''),
+              productName: p.productName || prodMatch?.name || '',
+              description: p.description || prodMatch?.specifications || '',
+              difference: diffNum.toFixed(2),
+              pcs: '0',
+              quantity: '', // ALWAYS BLANK for manual entry per user instructions!
+              basicRate: rateNum > 0 ? (bRateNum > 0 ? bRateNum.toFixed(2) : String(rateNum)) : '',
+              finalRate: rateNum > 0 ? rateNum.toFixed(2) : '0.00',
+              amount: '0.00',
+              unit: p.unit || prodMatch?.unit || 'Ton'
+            };
+          });
+
+        if (autoRows.length > 0) {
+          while (autoRows.length < DEFAULT_ROWS_COUNT) {
+            autoRows.push({ ...BLANK_TRANSACTION_ROW });
+          }
+          setTransactionItems(autoRows);
+          setSuccessMsg(`Auto-filled ${autoRows.filter(r => r.productName).length} ordered product(s) for ${customerNameStr}. Please enter the dispatched quantity.`);
+        } else {
+          setTransactionItems(createBlankRows(DEFAULT_ROWS_COUNT));
+        }
+      } else {
+        setTransactionItems(createBlankRows(DEFAULT_ROWS_COUNT));
+      }
+    } catch (err) {
+      console.warn('Failed to auto-fetch pending products for selected customer:', err);
+    }
+  };
+
+  // Pre-fill existing fields when navigated from Sales ("Make Slip") with ?saleId=...
+  useEffect(() => {
+    const prefillFromSaleOrder = async () => {
+      if (!initialSaleId || !effectiveOrgId) return;
+      if (prefilledSaleRef.current === `${initialSaleId}-${customers.length}-${products.length}`) return;
+      if (customers.length === 0 && products.length === 0) return;
+
+      try {
+        const so = await getSaleOrderById(initialSaleId);
+        if (!so) return;
+
+        prefilledSaleRef.current = `${initialSaleId}-${customers.length}-${products.length}`;
+
+        // Match customer by name
+        const custKey = (so.customerName || so.Customer?.name || '').trim().toLowerCase();
+        if (custKey && customers.length > 0) {
+          const matchedCustomer = customers.find(c => (c.name || '').trim().toLowerCase() === custKey);
+          if (matchedCustomer) {
+            setSelectedCustomerId(String(matchedCustomer.id));
+            setSelectedCustomer(matchedCustomer);
+          }
+        }
+
+        // Populate pending lines into ledger rows with BLANK quantity
+        const pendingLines = (so.items || []).filter(it => {
+          const ord = parseFloat(it.quantity) || 0;
+          const proc = parseFloat(it.processedQuantity) || 0;
+          return ord - proc > 0.0001;
+        });
+
+        if (pendingLines.length > 0) {
+          const mappedRows = pendingLines.map(it => {
+            const rateNum = parseFloat(it.rate) || 0;
+            const prodMatch = products.find(p => String(p.id) === String(it.productId) || (p.name || '').trim().toLowerCase() === (it.productNameSnapshot || '').trim().toLowerCase());
+            const diffNum = prodMatch?.difference !== undefined && prodMatch?.difference !== null ? parseFloat(prodMatch.difference) : 0;
+            const bRateNum = Math.max(0, rateNum - diffNum);
+            return {
+              productId: it.productId ? String(it.productId) : (prodMatch ? String(prodMatch.id) : ''),
+              productName: it.productNameSnapshot || prodMatch?.name || '',
+              description: it.productSpecificationsSnapshot || prodMatch?.specifications || '',
+              difference: diffNum.toFixed(2),
+              pcs: '0',
+              quantity: '', // ALWAYS BLANK for manual entry per user instructions!
+              basicRate: rateNum > 0 ? (bRateNum > 0 ? bRateNum.toFixed(2) : String(rateNum)) : '',
+              finalRate: rateNum > 0 ? rateNum.toFixed(2) : '0.00',
+              amount: '0.00',
+              unit: it.unit || prodMatch?.unit || 'Ton'
+            };
+          });
+          while (mappedRows.length < DEFAULT_ROWS_COUNT) {
+            mappedRows.push({ ...BLANK_TRANSACTION_ROW });
+          }
+          setTransactionItems(mappedRows);
+        }
+
+        setSuccessMsg(`Loaded Sale Order #${so.orderNumber} (${so.customerName || 'Customer'}) for slip generation. Please enter quantity and save.`);
+      } catch (err) {
+        console.error('Failed to prefill from Sale Order:', err);
+      }
+    };
+
+    prefillFromSaleOrder();
+  }, [initialSaleId, effectiveOrgId, customers, products]);
+
   // Load Initial Transaction
   useEffect(() => {
     const loadInitialEstimate = async () => {
@@ -254,7 +432,7 @@ export default function EstimateVoucherWorkspace() {
         let estData = null;
         if (initialEstimateId) {
           estData = await getEstimateById(initialEstimateId);
-        } else {
+        } else if (!initialSaleId) {
           try {
             estData = await getPreviousEstimate(null, effectiveOrgId);
           } catch (navErr) {
@@ -354,6 +532,7 @@ export default function EstimateVoucherWorkspace() {
     setEstimateDate(new Date().toISOString().split('T')[0]);
     setSelectedCustomerId('');
     setSelectedCustomer(null);
+    setPendingSaleOrderSummary(null);
     setTransactionItems(createBlankRows(DEFAULT_ROWS_COUNT));
 
     setHeaderBRate('');
@@ -1189,9 +1368,15 @@ export default function EstimateVoucherWorkspace() {
         };
       });
 
+      const isSyntheticCust = String(selectedCustomerId).startsWith('party:');
+      const numericCustomerId = !isSyntheticCust && !isNaN(parseInt(selectedCustomerId, 10)) ? parseInt(selectedCustomerId, 10) : null;
+      const customerNameSnapshot = selectedCustomer?.name || (isSyntheticCust ? String(selectedCustomerId).slice(6) : null);
+
       const estimatePayload = {
         organizationId: effectiveOrgId,
-        customerId: parseInt(selectedCustomerId, 10),
+        customerId: numericCustomerId,
+        customerName: customerNameSnapshot,
+        partyName: customerNameSnapshot,
         estimateDate: estimateDate,
         basic: headerBRate ? headerBRate.trim() : null,
         terms: terms ? terms.trim() : null,
@@ -1262,6 +1447,140 @@ export default function EstimateVoucherWorkspace() {
   const todayDateObj = new Date();
   const todayDateStr = `${String(todayDateObj.getDate()).padStart(2, '0')}-${String(todayDateObj.getMonth() + 1).padStart(2, '0')}-${todayDateObj.getFullYear()}`;
   const todayDayStr = todayDateObj.toLocaleDateString('en-US', { weekday: 'long' });
+
+  // Compute read-only Sale Order Processed & Pending summary for display in Sale Estimate Voucher
+  const soTrackingDisplay = useMemo(() => {
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    // 1. In VIEW mode, if this saved voucher has linked SO allocations, display them
+    if (mode === 'VIEW' && currentEstimate?.soAllocations && currentEstimate.soAllocations.length > 0) {
+      const soNumbers = new Set();
+      const bySaleItem = new Map();
+
+      for (const alloc of currentEstimate.soAllocations) {
+        if (alloc.saleOrder?.orderNumber) {
+          soNumbers.add(alloc.saleOrder.orderNumber);
+        }
+        const soi = alloc.saleOrderItem;
+        const key = soi ? `soi:${soi.id}` : `alloc:${alloc.id}`;
+        if (!bySaleItem.has(key)) {
+          const ordered = parseFloat(soi?.quantity) || 0;
+          const processed = parseFloat(soi?.processedQuantity) || 0;
+          bySaleItem.set(key, {
+            productName: soi?.productNameSnapshot || 'Product',
+            unit: soi?.unit || 'Ton',
+            ordered,
+            processed,
+            pending: Math.max(0, parseFloat((ordered - processed).toFixed(3))),
+            processedThisVoucher: parseFloat(alloc.allocatedQuantity) || 0
+          });
+        } else {
+          const entry = bySaleItem.get(key);
+          entry.processedThisVoucher = parseFloat((entry.processedThisVoucher + (parseFloat(alloc.allocatedQuantity) || 0)).toFixed(3));
+        }
+      }
+
+      const lines = Array.from(bySaleItem.values());
+      const totalOrdered = parseFloat(lines.reduce((s, l) => s + l.ordered, 0).toFixed(3));
+      const totalProcessed = parseFloat(lines.reduce((s, l) => s + l.processed, 0).toFixed(3));
+      const totalPending = Math.max(0, parseFloat((totalOrdered - totalProcessed).toFixed(3)));
+
+      return {
+        isSavedLink: true,
+        soNumbers: Array.from(soNumbers),
+        lines,
+        totalOrdered,
+        totalProcessed,
+        totalPending,
+        processingNow: 0,
+        projectedProcessed: totalProcessed,
+        projectedPending: totalPending
+      };
+    }
+
+    // 2. Otherwise (ADD / EDIT, or VIEW with open SOs for this customer), display live open SOs
+    if (!pendingSaleOrderSummary || !pendingSaleOrderSummary.products || pendingSaleOrderSummary.products.length === 0) {
+      return null;
+    }
+
+    // Map quantities currently entered in the voucher table by productId / productName
+    const typedByProdId = new Map();
+    const typedByProdName = new Map();
+    const enteredProductIds = new Set();
+    const enteredProductNames = new Set();
+
+    for (const row of transactionItems) {
+      const hasName = Boolean(row.productName && row.productName.trim());
+      if (!row.productId && !hasName) continue;
+      const qty = parseFloat(row.quantity) || 0;
+      if (row.productId) {
+        const idKey = String(row.productId);
+        enteredProductIds.add(idKey);
+        typedByProdId.set(idKey, (typedByProdId.get(idKey) || 0) + qty);
+      }
+      if (hasName) {
+        const nameKey = norm(row.productName);
+        enteredProductNames.add(nameKey);
+        typedByProdName.set(nameKey, (typedByProdName.get(nameKey) || 0) + qty);
+      }
+    }
+
+    const allOpenProducts = pendingSaleOrderSummary.products;
+    const matchedOpenProducts = allOpenProducts.filter(p =>
+      (p.productId && enteredProductIds.has(String(p.productId))) ||
+      enteredProductNames.has(norm(p.productName))
+    );
+    const displayProducts = matchedOpenProducts.length > 0 ? matchedOpenProducts : allOpenProducts;
+
+    const soNumbers = new Set();
+    const lines = displayProducts.map(p => {
+      (p.orderNumbers || []).forEach(num => soNumbers.add(num));
+      const pIdKey = p.productId ? String(p.productId) : null;
+      const pNameKey = norm(p.productName);
+
+      const ordered = parseFloat(p.orderedQuantity) || 0;
+      const baseProcessed = parseFloat(p.processedQuantity) || 0;
+      const basePending = Math.max(0, parseFloat((ordered - baseProcessed).toFixed(3)));
+
+      const typedNow = (mode === 'ADD' || mode === 'EDIT')
+        ? (pIdKey && typedByProdId.has(pIdKey) ? typedByProdId.get(pIdKey) : (typedByProdName.get(pNameKey) || 0))
+        : 0;
+
+      const allocPreview = Math.min(typedNow, basePending);
+      const projectedProcessed = parseFloat((baseProcessed + allocPreview).toFixed(3));
+      const projectedPending = Math.max(0, parseFloat((basePending - allocPreview).toFixed(3)));
+
+      return {
+        productName: p.productName,
+        unit: p.unit || 'Ton',
+        ordered,
+        processed: baseProcessed,
+        pending: basePending,
+        processingNow: typedNow,
+        projectedProcessed,
+        projectedPending
+      };
+    });
+
+    const totalOrdered = parseFloat(lines.reduce((s, l) => s + l.ordered, 0).toFixed(3));
+    const totalProcessed = parseFloat(lines.reduce((s, l) => s + l.processed, 0).toFixed(3));
+    const totalPending = parseFloat(lines.reduce((s, l) => s + l.pending, 0).toFixed(3));
+    const processingNow = parseFloat(lines.reduce((s, l) => s + l.processingNow, 0).toFixed(3));
+    const projectedProcessed = parseFloat(lines.reduce((s, l) => s + l.projectedProcessed, 0).toFixed(3));
+    const projectedPending = parseFloat(lines.reduce((s, l) => s + l.projectedPending, 0).toFixed(3));
+
+    return {
+      isSavedLink: false,
+      soNumbers: Array.from(soNumbers),
+      lines,
+      totalOrdered,
+      totalProcessed,
+      totalPending,
+      processingNow,
+      projectedProcessed,
+      projectedPending
+    };
+  }, [mode, currentEstimate, pendingSaleOrderSummary, transactionItems]);
 
   // Filtered estimates for Search Modal
   const filteredSearchEstimates = useMemo(() => {
@@ -1383,6 +1702,40 @@ export default function EstimateVoucherWorkspace() {
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
+            READ-ONLY SALE ORDER FULFILLMENT & PENDING STATUS STRIP
+           ───────────────────────────────────────────────────────────── */}
+        {soTrackingDisplay && (
+          <div className="shrink-0 bg-[#eef6ff] border border-[#7f9db9] px-2 py-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold text-blue-900">
+                {soTrackingDisplay.isSavedLink ? 'Linked Sale Order' : 'Open Sale Order'}
+                {soTrackingDisplay.soNumbers.length > 0 ? ` #${soTrackingDisplay.soNumbers.join(', #')}` : ''}:
+              </span>
+              {soTrackingDisplay.lines.slice(0, 3).map((line, i) => (
+                <span key={i} className="inline-flex items-center gap-1 bg-white border border-[#b5cce3] px-1.5 py-0 rounded text-[10px]">
+                  <span className="font-bold text-slate-800">{line.productName}</span>
+                  <span className="text-slate-600">Ord: <strong className="font-mono text-black">{line.ordered.toFixed(3)}</strong></span>
+                  <span className="text-emerald-700">Proc: <strong className="font-mono">{(line.processingNow > 0 ? line.projectedProcessed : line.processed).toFixed(3)}</strong></span>
+                  <span className="text-amber-700">Pend: <strong className="font-mono">{(line.processingNow > 0 ? line.projectedPending : line.pending).toFixed(3)}</strong></span>
+                </span>
+              ))}
+              {soTrackingDisplay.lines.length > 3 && (
+                <span className="text-[10px] text-slate-600 font-semibold">+{soTrackingDisplay.lines.length - 3} more</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 font-mono text-[11px]">
+              <span>Ordered: <strong className="text-black">{soTrackingDisplay.totalOrdered.toFixed(3)}</strong></span>
+              <span className="text-emerald-800">
+                Processed: <strong>{(soTrackingDisplay.processingNow > 0 ? soTrackingDisplay.projectedProcessed : soTrackingDisplay.totalProcessed).toFixed(3)}</strong>
+              </span>
+              <span className="text-amber-800">
+                Pending: <strong>{(soTrackingDisplay.processingNow > 0 ? soTrackingDisplay.projectedPending : soTrackingDisplay.totalPending).toFixed(3)}</strong>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────────────────────────────────────────────────────
             THREE-COLUMN MASTER HEADER GRID
            ───────────────────────────────────────────────────────────── */}
         <div className="shrink-0 grid grid-cols-1 md:grid-cols-12 gap-2 pt-0.5">
@@ -1396,10 +1749,7 @@ export default function EstimateVoucherWorkspace() {
                   ref={refCustomer}
                   value={selectedCustomerId}
                   disabled={!isEditable}
-                  onChange={(e) => {
-                    markDirtyAndEdit();
-                    setSelectedCustomerId(e.target.value);
-                  }}
+                  onChange={(e) => handleCustomerSelection(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === 'ArrowRight') {
                       e.preventDefault();
@@ -1419,7 +1769,9 @@ export default function EstimateVoucherWorkspace() {
                 >
                   <option value="">-- SELECT CUSTOMER --</option>
                   {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.name}{c.isSaleCustomer ? ' (Sale Order)' : ''}
+                    </option>
                   ))}
                 </select>
               </div>

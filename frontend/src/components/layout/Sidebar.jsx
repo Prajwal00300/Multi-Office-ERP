@@ -10,6 +10,8 @@ import {
   FileText,
   Receipt,
   ShoppingCart,
+  ShoppingBag,
+  TrendingUp,
   Truck,
   Scale,
   Ticket,
@@ -19,8 +21,7 @@ import {
   ClipboardList,
   Lock,
   ShieldCheck,
-  PanelLeftClose,
-  PackageCheck
+  PanelLeftClose
 } from 'lucide-react';
 
 const Sidebar = ({ isOpen, onClose }) => {
@@ -57,9 +58,10 @@ const Sidebar = ({ isOpen, onClose }) => {
     { name: 'Purchase Estimate Voucher', icon: ShoppingCart, path: '/purchase-estimate', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
     { name: 'Billing', icon: Receipt, path: '/bills', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
     { name: 'Billing Voucher', icon: Receipt, path: '/sale-voucher', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'BILLING' },
+    { name: 'Sales', icon: TrendingUp, path: '/sales', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'SALES' },
+    { name: 'Sale Order', icon: ShoppingBag, path: '/sale-order', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'SALES' },
     { name: 'Purchases', icon: ShoppingCart, path: '/purchases', end: true, roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
     { name: 'Purchase Order', icon: ShoppingCart, path: '/purchase-order', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
-    { name: 'Receive Order', icon: PackageCheck, path: '/receive-order', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'], moduleKey: 'PURCHASES' },
     { name: 'Weighbridge', icon: Scale, path: '/weighbridge', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'], moduleKey: 'WEIGHBRIDGE' },
     { name: 'Gate Pass', icon: Ticket, path: '/gate-passes', roles: ['SUPER_ADMIN', 'CEO', 'ADMIN', 'WEIGHBRIDGE_CONTROLLER', 'OPERATIONS_BILLING'], moduleKey: 'GATE_PASS' },
     { name: 'Payments', icon: CreditCard, path: '#', disabled: true },

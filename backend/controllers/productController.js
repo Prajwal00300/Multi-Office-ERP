@@ -13,12 +13,14 @@ const {
   verifyRecordOwnership,
   buildOfficeWhereClause
 } = require('../utils/scopeFilter');
+const { syncExistingPurchasePartiesAndProducts } = require('../utils/syncPurchaseMasterData');
 
 // Product Controller
 
 // GET /api/products
 exports.getProducts = async (req, res) => {
   try {
+    await syncExistingPurchasePartiesAndProducts();
     const { search, status, organizationId } = req.query;
 
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);

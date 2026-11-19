@@ -11,9 +11,7 @@ const Layout = () => {
     location.pathname.startsWith('/purchase-estimate') || 
     location.pathname.startsWith('/estimate-voucher') || 
     location.pathname.startsWith('/purchase-order') ||
-    location.pathname.startsWith('/place-order') ||
-    location.pathname.startsWith('/receive-order') ||
-    location.pathname.startsWith('/purchases/receive');
+    location.pathname.startsWith('/place-order');
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('officeflow_sidebar_open');

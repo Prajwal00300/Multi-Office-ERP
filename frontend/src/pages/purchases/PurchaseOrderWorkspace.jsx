@@ -173,20 +173,21 @@ export default function PurchaseOrderWorkspace() {
     const fetchMasterData = async () => {
       try {
         const orgQuery = effectiveOrgId ? `?organizationId=${effectiveOrgId}` : '';
-        const [prodRes, purRes] = await Promise.all([
+        const [prodRes, purRes, custRes] = await Promise.all([
           api.get(`/products${orgQuery}`),
-          api.get(`/purchases${orgQuery}`)
+          api.get(`/purchases${orgQuery}`),
+          api.get(`/customers${orgQuery}`).catch(() => ({ data: [] }))
         ]);
         setProducts(prodRes.data || []);
 
-        // Collect distinct vendor/party names
+        // Collect distinct vendor/party names from both Customer Master and previous Purchase Orders
         const purchasesList = purRes.data || [];
+        const customersList = custRes.data || [];
         const parties = Array.from(
-          new Set(
-            purchasesList
-              .map(p => p.vendorName || p.partyName)
-              .filter(name => Boolean(name && name.trim()))
-          )
+          new Set([
+            ...customersList.map(c => c.name),
+            ...purchasesList.map(p => p.vendorName || p.partyName)
+          ].filter(name => Boolean(name && name.trim())))
         );
         setPartySuggestions(parties);
       } catch (err) {

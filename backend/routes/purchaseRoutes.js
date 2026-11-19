@@ -23,6 +23,7 @@ router.use(checkModulePermission('PURCHASES'));
 // Purchase routes
 router.get('/', purchaseController.getPurchases);
 router.get('/next-number', purchaseController.getNextPurchaseNumber);
+router.get('/in-hand-order-summary', purchaseController.getInHandOrderSummary);
 // Navigation routes (declared before /:id)
 router.get('/navigation/previous', purchaseController.getPreviousPurchase);
 router.get('/navigation/next', purchaseController.getNextPurchase);
@@ -36,10 +37,6 @@ router.get('/:id', purchaseController.getPurchaseById);
 router.post('/', purchaseController.createPurchase);
 router.put('/:id', purchaseController.updatePurchase);
 router.delete('/:id', purchaseController.deletePurchase);
-
-// Order Received / Goods Receipt
-router.post('/receive', purchaseController.receiveGoods);
-router.post('/:id/receive', purchaseController.receiveGoods);
 
 // Cancellation
 router.post('/:id/cancel', purchaseController.cancelPurchase);

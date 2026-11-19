@@ -11,8 +11,10 @@ import {
   getPurchaseEstimateById as getEstimateById,
   createPurchaseEstimate as createEstimate,
   updatePurchaseEstimate as updateEstimate,
-  deletePurchaseEstimate as deleteEstimate
+  deletePurchaseEstimate as deleteEstimate,
+  getPendingOrderSummary
 } from '../../services/purchaseEstimateService';
+import { getPurchaseById } from '../../services/purchaseService';
 
 const DEFAULT_ROWS_COUNT = 30;
 
@@ -71,6 +73,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialEstimateId = searchParams.get('estimateId');
+  const initialPurchaseId = searchParams.get('purchaseId');
   const { user } = useContext(AuthContext);
 
   // Mode: 'VIEW' | 'ADD' | 'EDIT' | 'SAVING'
@@ -148,6 +151,10 @@ export default function PurchaseEstimateVoucherWorkspace() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Linked Purchase Order pending/received tracking (read-only display)
+  const [pendingOrderSummary, setPendingOrderSummary] = useState(null);
+  const prefilledPurchaseRef = useRef(null);
+
   const remarkTextareaRef = useRef(null);
   const refDate = useRef(null);
   const refCustomer = useRef(null);
@@ -218,21 +225,65 @@ export default function PurchaseEstimateVoucherWorkspace() {
     fetchOffices();
   }, [user]);
 
-  // Load Master Data (Customers & Products)
-  useEffect(() => {
-    const loadMasterData = async () => {
-      if (!effectiveOrgId) return;
-      try {
-        const [custRes, prodRes] = await Promise.all([
-          api.get(`/customers?organizationId=${effectiveOrgId}`),
-          api.get(`/products?organizationId=${effectiveOrgId}`)
-        ]);
-        setCustomers(custRes.data || []);
-        setProducts(prodRes.data || []);
-      } catch (err) {
-        console.error('Master data load failed:', err);
+  // Load Master Data (Customers, Products, and any parties/products from existing Purchase Orders)
+  const loadMasterData = async () => {
+    if (!effectiveOrgId) return;
+    try {
+      const [custRes, prodRes, purRes] = await Promise.all([
+        api.get(`/customers?organizationId=${effectiveOrgId}`),
+        api.get(`/products?organizationId=${effectiveOrgId}`),
+        api.get(`/purchases?organizationId=${effectiveOrgId}`).catch(() => ({ data: [] }))
+      ]);
+
+      const masterCustomers = custRes.data || [];
+      const masterProducts = prodRes.data || [];
+      const officePurchases = purRes.data || [];
+
+      // Merge any PO party/vendor names not yet in Customer Master
+      const existingCustNames = new Set(masterCustomers.map(c => String(c.name || '').trim().toLowerCase()));
+      const mergedCustomers = [...masterCustomers];
+      for (const po of officePurchases) {
+        const vName = String(po.vendorName || po.partyName || '').trim();
+        if (vName && !existingCustNames.has(vName.toLowerCase())) {
+          existingCustNames.add(vName.toLowerCase());
+          mergedCustomers.push({
+            id: `party:${vName}`,
+            name: vName,
+            city: '',
+            tin: '',
+            isPurchaseParty: true
+          });
+        }
       }
-    };
+
+      // Merge any PO product names not yet in Product Master
+      const existingProdNames = new Set(masterProducts.map(p => String(p.name || '').trim().toLowerCase()));
+      const mergedProducts = [...masterProducts];
+      for (const po of officePurchases) {
+        for (const it of (po.items || [])) {
+          const pName = String(it.productNameSnapshot || '').trim();
+          if (pName && !existingProdNames.has(pName.toLowerCase())) {
+            existingProdNames.add(pName.toLowerCase());
+            mergedProducts.push({
+              id: `po-prod:${pName}`,
+              name: pName,
+              specifications: it.productSpecificationsSnapshot || '',
+              unit: it.unit || 'Ton',
+              difference: 0,
+              isPurchaseProduct: true
+            });
+          }
+        }
+      }
+
+      setCustomers(mergedCustomers);
+      setProducts(mergedProducts);
+    } catch (err) {
+      console.error('Master data load failed:', err);
+    }
+  };
+
+  useEffect(() => {
     loadMasterData();
   }, [effectiveOrgId]);
 
@@ -246,11 +297,109 @@ export default function PurchaseEstimateVoucherWorkspace() {
     }
   }, [selectedCustomerId, customers]);
 
+  // Fetch pending Purchase Order summary whenever customer/party or office changes
+  const refreshPendingOrderSummary = async (orgId, custId, partyNameStr) => {
+    const numericCustId = custId && !String(custId).startsWith('party:') && !isNaN(Number(custId))
+      ? custId
+      : undefined;
+    if (!orgId || (!numericCustId && !partyNameStr)) {
+      setPendingOrderSummary(null);
+      return;
+    }
+    try {
+      const data = await getPendingOrderSummary({
+        organizationId: orgId,
+        customerId: numericCustId,
+        partyName: partyNameStr || undefined
+      });
+      setPendingOrderSummary(data || null);
+    } catch (err) {
+      setPendingOrderSummary(null);
+    }
+  };
+
+  // Handle party selection with automatic pre-fill of products ordered from selected party
+  const handleCustomerSelection = async (newCustomerId) => {
+    markDirtyAndEdit();
+    setSelectedCustomerId(newCustomerId);
+
+    if (!newCustomerId) {
+      setSelectedCustomer(null);
+      setPendingOrderSummary(null);
+      setTransactionItems(createBlankRows(DEFAULT_ROWS_COUNT));
+      return;
+    }
+
+    const match = customers.find(c => String(c.id) === String(newCustomerId));
+    setSelectedCustomer(match || null);
+
+    const isSynthetic = String(newCustomerId).startsWith('party:');
+    const partyNameStr = match?.name || (isSynthetic ? String(newCustomerId).slice(6) : '');
+    const numericCustId = !isSynthetic && !isNaN(Number(newCustomerId)) ? newCustomerId : undefined;
+
+    try {
+      const summary = await getPendingOrderSummary({
+        organizationId: effectiveOrgId,
+        customerId: numericCustId,
+        partyName: partyNameStr || undefined
+      });
+      setPendingOrderSummary(summary || null);
+
+      if (summary && summary.products && summary.products.length > 0) {
+        const autoRows = summary.products
+          .filter(p => (parseFloat(p.pendingQuantity) || 0) > 0.0001 || (parseFloat(p.orderedQuantity) || 0) > 0.0001)
+          .map(p => {
+            const rateNum = parseFloat(p.rate) || 0;
+            return {
+              productId: p.productId ? String(p.productId) : '',
+              productName: p.productName || '',
+              description: p.description || '',
+              difference: '0.00',
+              pcs: '0',
+              quantity: '',
+              basicRate: rateNum > 0 ? String(rateNum) : '',
+              finalRate: rateNum > 0 ? String(rateNum) : '0.00',
+              amount: '0.00',
+              unit: p.unit || 'Ton'
+            };
+          });
+
+        if (autoRows.length > 0) {
+          while (autoRows.length < DEFAULT_ROWS_COUNT) {
+            autoRows.push({ ...BLANK_TRANSACTION_ROW });
+          }
+          setTransactionItems(autoRows);
+          setSuccessMsg(`Auto-filled ${autoRows.filter(r => r.productName).length} ordered product(s) for ${partyNameStr}. Please enter the received quantity.`);
+        } else {
+          setTransactionItems(createBlankRows(DEFAULT_ROWS_COUNT));
+        }
+      } else {
+        setTransactionItems(createBlankRows(DEFAULT_ROWS_COUNT));
+      }
+    } catch (err) {
+      console.warn('Failed to auto-fetch pending products for selected party:', err);
+    }
+  };
+
+  useEffect(() => {
+    const partyNameForLookup = selectedCustomer?.name || currentEstimate?.partyName || '';
+    if (effectiveOrgId && (selectedCustomerId || partyNameForLookup)) {
+      refreshPendingOrderSummary(effectiveOrgId, selectedCustomerId, partyNameForLookup);
+    } else {
+      setPendingOrderSummary(null);
+    }
+  }, [effectiveOrgId, selectedCustomerId, selectedCustomer?.name, currentEstimate?.id]);
+
   // Load Initial Transaction
   useEffect(() => {
     const loadInitialEstimate = async () => {
       setErrorMsg('');
       try {
+        if (initialPurchaseId) {
+          await resetToAddMode();
+          return;
+        }
+
         let estData = null;
         if (initialEstimateId) {
           estData = await getEstimateById(initialEstimateId);
@@ -280,7 +429,75 @@ export default function PurchaseEstimateVoucherWorkspace() {
     };
 
     loadInitialEstimate();
-  }, [effectiveOrgId, initialEstimateId]);
+  }, [effectiveOrgId, initialEstimateId, initialPurchaseId]);
+
+  // Pre-fill existing fields when navigated from Purchases ("Receive") with ?purchaseId=...
+  useEffect(() => {
+    const prefillFromPurchaseOrder = async () => {
+      if (!initialPurchaseId || !effectiveOrgId) return;
+      if (prefilledPurchaseRef.current === `${initialPurchaseId}-${customers.length}-${products.length}`) return;
+      if (customers.length === 0 && products.length === 0) return;
+
+      try {
+        const pur = await getPurchaseById(initialPurchaseId);
+        if (!pur) return;
+
+        prefilledPurchaseRef.current = `${initialPurchaseId}-${customers.length}-${products.length}`;
+
+        // Match customer by vendorName
+        const vendorKey = (pur.vendorName || '').trim().toLowerCase();
+        if (vendorKey && customers.length > 0) {
+          const matchedCustomer = customers.find(c => (c.name || '').trim().toLowerCase() === vendorKey);
+          if (matchedCustomer) {
+            setSelectedCustomerId(String(matchedCustomer.id));
+            setSelectedCustomer(matchedCustomer);
+          }
+        }
+
+        // Populate pending PO items into existing ledger rows
+        const pendingLines = (pur.items || []).filter(it => {
+          const ord = parseFloat(it.quantity) || 0;
+          const rec = parseFloat(it.receivedQuantity) || 0;
+          return ord - rec > 0.0001;
+        });
+
+        if (pendingLines.length > 0) {
+          const mappedRows = pendingLines.map(it => {
+            const ord = parseFloat(it.quantity) || 0;
+            const rec = parseFloat(it.receivedQuantity) || 0;
+            const pen = Math.max(0, parseFloat((ord - rec).toFixed(3)));
+            const rateNum = parseFloat(it.rate) || 0;
+            const prodMatch = products.find(p => String(p.id) === String(it.productId));
+            const diffNum = prodMatch?.difference !== undefined && prodMatch?.difference !== null
+              ? parseFloat(prodMatch.difference)
+              : 0;
+            const bRateNum = Math.max(0, rateNum - diffNum);
+            return {
+              productId: it.productId ? String(it.productId) : '',
+              productName: it.productNameSnapshot || prodMatch?.name || '',
+              description: it.productSpecificationsSnapshot || prodMatch?.specifications || '',
+              difference: diffNum.toFixed(2),
+              pcs: '0',
+              quantity: '',
+              basicRate: rateNum > 0 ? bRateNum.toFixed(2) : '',
+              finalRate: rateNum > 0 ? rateNum.toFixed(2) : '0.00',
+              amount: '0.00'
+            };
+          });
+          while (mappedRows.length < DEFAULT_ROWS_COUNT) {
+            mappedRows.push({ ...BLANK_TRANSACTION_ROW });
+          }
+          setTransactionItems(mappedRows);
+        }
+
+        setSuccessMsg(`Loaded Purchase Order #${pur.purchaseNumber} (${pur.vendorName || 'Party'}) for receiving. Fill voucher details and save.`);
+      } catch (err) {
+        console.error('Failed to prefill from Purchase Order:', err);
+      }
+    };
+
+    prefillFromPurchaseOrder();
+  }, [initialPurchaseId, effectiveOrgId, customers, products]);
 
   // ==========================================
   // Populate state from saved estimate
@@ -525,7 +742,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
     }
 
     const boundedRow = Math.max(0, Math.min(rowIdx, transactionItems.length - 1));
-    const boundedCol = Math.max(0, Math.min(colIdx, 7));
+    const boundedCol = Math.max(0, Math.min(colIdx, 2));
 
     setActiveRowIdx(boundedRow);
     currentFocusedCol.current = boundedCol;
@@ -659,7 +876,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
         return;
       }
 
-      if (colIdx < 7) {
+      if (colIdx < 2) {
         focusCell(rowIdx, colIdx + 1);
       } else {
         if (rowIdx === transactionItems.length - 1) {
@@ -699,19 +916,10 @@ export default function PurchaseEstimateVoucherWorkspace() {
 
     // 6. ARROW RIGHT
     if (e.key === 'ArrowRight') {
-      if (colIdx === 0 || colIdx === 1) {
-        const atEnd = e.target.selectionStart === e.target.value.length;
-        if (atEnd) {
-          e.preventDefault();
-          if (colIdx < 7) {
-            focusCell(rowIdx, colIdx + 1);
-          } else {
-            focusCell(rowIdx + 1, 0);
-          }
-        }
-      } else {
+      const atEnd = e.target.selectionStart === e.target.value?.length;
+      if (atEnd) {
         e.preventDefault();
-        if (colIdx < 7) {
+        if (colIdx < 2) {
           focusCell(rowIdx, colIdx + 1);
         } else {
           focusCell(rowIdx + 1, 0);
@@ -722,22 +930,8 @@ export default function PurchaseEstimateVoucherWorkspace() {
 
     // 7. ARROW LEFT
     if (e.key === 'ArrowLeft') {
-      if (colIdx === 0 || colIdx === 1) {
-        const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
-        if (atStart) {
-          e.preventDefault();
-          if (colIdx > 0) {
-            focusCell(rowIdx, colIdx - 1);
-          } else {
-            if (rowIdx === 0 && refVehicle.current) {
-              refVehicle.current.focus();
-              refVehicle.current.select?.();
-            } else if (rowIdx > 0) {
-              focusCell(rowIdx - 1, 7);
-            }
-          }
-        }
-      } else {
+      const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
+      if (atStart) {
         e.preventDefault();
         if (colIdx > 0) {
           focusCell(rowIdx, colIdx - 1);
@@ -746,7 +940,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
             refVehicle.current.focus();
             refVehicle.current.select?.();
           } else if (rowIdx > 0) {
-            focusCell(rowIdx - 1, 7);
+            focusCell(rowIdx - 1, 2);
           }
         }
       }
@@ -1175,9 +1369,12 @@ export default function PurchaseEstimateVoucherWorkspace() {
         if (!prod && item.productName) {
           prod = products.find(p => p.name.toLowerCase() === item.productName.trim().toLowerCase());
         }
-        const resolvedProdId = item.productId ? parseInt(item.productId, 10) : (prod ? prod.id : null);
+        const rawProdId = item.productId || (prod ? prod.id : null);
+        const parsedProdId = rawProdId && !String(rawProdId).startsWith('po-prod:') && !isNaN(Number(rawProdId))
+          ? parseInt(rawProdId, 10)
+          : null;
         return {
-          productId: resolvedProdId,
+          productId: parsedProdId,
           productNameSnapshot: item.productName.trim(),
           productCategorySnapshot: prod?.category || null,
           productSizeSnapshot: prod?.size || null,
@@ -1189,9 +1386,16 @@ export default function PurchaseEstimateVoucherWorkspace() {
         };
       });
 
+      const isSyntheticParty = String(selectedCustomerId).startsWith('party:');
+      const parsedCustomerId = !isSyntheticParty && !isNaN(Number(selectedCustomerId))
+        ? parseInt(selectedCustomerId, 10)
+        : null;
+      const resolvedPartyName = selectedCustomer?.name || (isSyntheticParty ? String(selectedCustomerId).slice(6) : undefined);
+
       const estimatePayload = {
         organizationId: effectiveOrgId,
-        customerId: parseInt(selectedCustomerId, 10),
+        customerId: parsedCustomerId,
+        partyName: resolvedPartyName,
         estimateDate: estimateDate,
         basic: headerBRate ? headerBRate.trim() : null,
         terms: terms ? terms.trim() : null,
@@ -1222,6 +1426,8 @@ export default function PurchaseEstimateVoucherWorkspace() {
       setIsDirty(false);
       populateEstimateIntoState(savedRecord);
       setMode('VIEW');
+      loadMasterData();
+      refreshPendingOrderSummary(effectiveOrgId, savedRecord.customerId || selectedCustomerId, savedRecord.partyName || selectedCustomer?.name);
       return savedRecord;
     } catch (err) {
       console.error('Error saving estimate:', err);
@@ -1242,16 +1448,17 @@ export default function PurchaseEstimateVoucherWorkspace() {
     }
   };
 
-  // PRINT & SAVE: saves the estimate voucher and prints
+  // PRINT & SAVE: saves the estimate voucher and opens slip in print format
   const handlePrintAndSave = async () => {
-    if (!isDirty && currentEstimate?.id && currentEstimate?.status === 'GENERATED') {
-      window.print();
-      return;
+    let idToPrint = currentEstimate?.id;
+    if (isDirty || !idToPrint || currentEstimate?.status !== 'GENERATED') {
+      const saved = await saveEstimateRecord();
+      if (!saved) return;
+      idToPrint = saved.id;
     }
-
-    const savedRecord = await saveEstimateRecord();
-    if (savedRecord) {
-      window.print();
+    if (idToPrint) {
+      const printUrl = `/purchase-estimate/${idToPrint}/print`;
+      window.open(printUrl, '_blank') || navigate(printUrl);
     }
   };
 
@@ -1262,6 +1469,162 @@ export default function PurchaseEstimateVoucherWorkspace() {
   const todayDateObj = new Date();
   const todayDateStr = `${String(todayDateObj.getDate()).padStart(2, '0')}-${String(todayDateObj.getMonth() + 1).padStart(2, '0')}-${todayDateObj.getFullYear()}`;
   const todayDayStr = todayDateObj.toLocaleDateString('en-US', { weekday: 'long' });
+
+  // Compute read-only PO Received & Pending summary for display in Purchase Estimate Voucher
+  const poTrackingDisplay = useMemo(() => {
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    // 1. In VIEW mode, if this saved voucher has linked PO allocations, display them
+    if (mode === 'VIEW' && currentEstimate?.poAllocations && currentEstimate.poAllocations.length > 0) {
+      const poNumbers = new Set();
+      const byPurchaseItem = new Map();
+
+      for (const alloc of currentEstimate.poAllocations) {
+        if (alloc.purchase?.purchaseNumber) {
+          poNumbers.add(alloc.purchase.purchaseNumber);
+        }
+        const pi = alloc.purchaseItem;
+        const key = pi ? `pi:${pi.id}` : `alloc:${alloc.id}`;
+        if (!byPurchaseItem.has(key)) {
+          const ordered = parseFloat(pi?.quantity) || 0;
+          const received = parseFloat(pi?.receivedQuantity) || 0;
+          byPurchaseItem.set(key, {
+            productName: pi?.productNameSnapshot || 'Product',
+            unit: pi?.unit || 'Ton',
+            ordered,
+            received,
+            pending: Math.max(0, parseFloat((ordered - received).toFixed(3))),
+            receivedThisVoucher: parseFloat(alloc.allocatedQuantity) || 0
+          });
+        } else {
+          const entry = byPurchaseItem.get(key);
+          entry.receivedThisVoucher = parseFloat((entry.receivedThisVoucher + (parseFloat(alloc.allocatedQuantity) || 0)).toFixed(3));
+        }
+      }
+
+      const lines = Array.from(byPurchaseItem.values());
+      const totalOrdered = parseFloat(lines.reduce((s, l) => s + l.ordered, 0).toFixed(3));
+      const totalReceived = parseFloat(lines.reduce((s, l) => s + l.received, 0).toFixed(3));
+      const totalPending = Math.max(0, parseFloat((totalOrdered - totalReceived).toFixed(3)));
+
+      return {
+        isSavedLink: true,
+        poNumbers: Array.from(poNumbers),
+        lines,
+        totalOrdered,
+        totalReceived,
+        totalPending,
+        receivingNow: 0,
+        projectedReceived: totalReceived,
+        projectedPending: totalPending
+      };
+    }
+
+    // 2. Otherwise (ADD / EDIT, or VIEW with open POs for this customer), display live open POs
+    if (!pendingOrderSummary || !pendingOrderSummary.products || pendingOrderSummary.products.length === 0) {
+      return null;
+    }
+
+    // Map quantities currently entered in the voucher table by productId / productName
+    const typedByProdId = new Map();
+    const typedByProdName = new Map();
+    const enteredProductIds = new Set();
+    const enteredProductNames = new Set();
+
+    for (const row of transactionItems) {
+      const hasName = Boolean(row.productName && row.productName.trim());
+      if (!row.productId && !hasName) continue;
+      const qty = parseFloat(row.quantity) || 0;
+      if (row.productId) {
+        const idKey = String(row.productId);
+        enteredProductIds.add(idKey);
+        typedByProdId.set(idKey, (typedByProdId.get(idKey) || 0) + qty);
+      }
+      if (hasName) {
+        const nameKey = norm(row.productName);
+        enteredProductNames.add(nameKey);
+        typedByProdName.set(nameKey, (typedByProdName.get(nameKey) || 0) + qty);
+      }
+    }
+
+    // In EDIT mode, subtract this voucher's existing allocations so projected numbers aren't double-counted
+    const prevAllocByProdId = new Map();
+    const prevAllocByProdName = new Map();
+    if (mode === 'EDIT' && currentEstimate?.poAllocations) {
+      for (const alloc of currentEstimate.poAllocations) {
+        const allocQty = parseFloat(alloc.allocatedQuantity) || 0;
+        const pi = alloc.purchaseItem;
+        if (pi?.productId) {
+          const k = String(pi.productId);
+          prevAllocByProdId.set(k, (prevAllocByProdId.get(k) || 0) + allocQty);
+        }
+        if (pi?.productNameSnapshot) {
+          const nk = norm(pi.productNameSnapshot);
+          prevAllocByProdName.set(nk, (prevAllocByProdName.get(nk) || 0) + allocQty);
+        }
+      }
+    }
+
+    const allOpenProducts = pendingOrderSummary.products;
+    const matchedOpenProducts = allOpenProducts.filter(p =>
+      (p.productId && enteredProductIds.has(String(p.productId))) ||
+      enteredProductNames.has(norm(p.productName))
+    );
+    const displayProducts = matchedOpenProducts.length > 0 ? matchedOpenProducts : allOpenProducts;
+
+    const poNumbers = new Set();
+    const lines = displayProducts.map(p => {
+      (p.purchaseNumbers || []).forEach(num => poNumbers.add(num));
+      const pIdKey = p.productId ? String(p.productId) : null;
+      const pNameKey = norm(p.productName);
+
+      const prevAlloc = mode === 'EDIT'
+        ? (pIdKey && prevAllocByProdId.has(pIdKey) ? prevAllocByProdId.get(pIdKey) : (prevAllocByProdName.get(pNameKey) || 0))
+        : 0;
+
+      const ordered = parseFloat(p.orderedQuantity) || 0;
+      const baseReceived = Math.max(0, parseFloat(((parseFloat(p.receivedQuantity) || 0) - prevAlloc).toFixed(3)));
+      const basePending = Math.max(0, parseFloat((ordered - baseReceived).toFixed(3)));
+
+      const typedNow = (mode === 'ADD' || mode === 'EDIT')
+        ? (pIdKey && typedByProdId.has(pIdKey) ? typedByProdId.get(pIdKey) : (typedByProdName.get(pNameKey) || 0))
+        : 0;
+
+      const allocPreview = Math.min(typedNow, basePending);
+      const projectedReceived = parseFloat((baseReceived + allocPreview).toFixed(3));
+      const projectedPending = Math.max(0, parseFloat((basePending - allocPreview).toFixed(3)));
+
+      return {
+        productName: p.productName,
+        unit: p.unit || 'Ton',
+        ordered,
+        received: baseReceived,
+        pending: basePending,
+        receivingNow: typedNow,
+        projectedReceived,
+        projectedPending
+      };
+    });
+
+    const totalOrdered = parseFloat(lines.reduce((s, l) => s + l.ordered, 0).toFixed(3));
+    const totalReceived = parseFloat(lines.reduce((s, l) => s + l.received, 0).toFixed(3));
+    const totalPending = parseFloat(lines.reduce((s, l) => s + l.pending, 0).toFixed(3));
+    const receivingNow = parseFloat(lines.reduce((s, l) => s + l.receivingNow, 0).toFixed(3));
+    const projectedReceived = parseFloat(lines.reduce((s, l) => s + l.projectedReceived, 0).toFixed(3));
+    const projectedPending = parseFloat(lines.reduce((s, l) => s + l.projectedPending, 0).toFixed(3));
+
+    return {
+      isSavedLink: false,
+      poNumbers: Array.from(poNumbers),
+      lines,
+      totalOrdered,
+      totalReceived,
+      totalPending,
+      receivingNow,
+      projectedReceived,
+      projectedPending
+    };
+  }, [mode, currentEstimate, pendingOrderSummary, transactionItems]);
 
   // Filtered estimates for Search Modal
   const filteredSearchEstimates = useMemo(() => {
@@ -1396,10 +1759,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
                   ref={refCustomer}
                   value={selectedCustomerId}
                   disabled={!isEditable}
-                  onChange={(e) => {
-                    markDirtyAndEdit();
-                    setSelectedCustomerId(e.target.value);
-                  }}
+                  onChange={(e) => handleCustomerSelection(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === 'ArrowRight') {
                       e.preventDefault();
@@ -1582,6 +1942,40 @@ export default function PurchaseEstimateVoucherWorkspace() {
         </div>
 
         {/* ─────────────────────────────────────────────────────────────
+            READ-ONLY PURCHASE ORDER RECEIVED & PENDING STATUS STRIP
+           ───────────────────────────────────────────────────────────── */}
+        {poTrackingDisplay && (
+          <div className="shrink-0 bg-[#eef6ff] border border-[#7f9db9] px-2 py-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold text-blue-900">
+                {poTrackingDisplay.isSavedLink ? 'Linked PO' : 'Open PO'}
+                {poTrackingDisplay.poNumbers.length > 0 ? ` #${poTrackingDisplay.poNumbers.join(', #')}` : ''}:
+              </span>
+              {poTrackingDisplay.lines.slice(0, 3).map((line, i) => (
+                <span key={i} className="inline-flex items-center gap-1 bg-white border border-[#b5cce3] px-1.5 py-0 rounded text-[10px]">
+                  <span className="font-bold text-slate-800">{line.productName}</span>
+                  <span className="text-slate-600">Ord: <strong className="font-mono text-black">{line.ordered.toFixed(3)}</strong></span>
+                  <span className="text-emerald-700">Rec: <strong className="font-mono">{(line.receivingNow > 0 ? line.projectedReceived : line.received).toFixed(3)}</strong></span>
+                  <span className="text-amber-700">Pend: <strong className="font-mono">{(line.receivingNow > 0 ? line.projectedPending : line.pending).toFixed(3)}</strong></span>
+                </span>
+              ))}
+              {poTrackingDisplay.lines.length > 3 && (
+                <span className="text-[10px] text-slate-600 font-semibold">+{poTrackingDisplay.lines.length - 3} more</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 font-mono text-[11px]">
+              <span>Ordered: <strong className="text-black">{poTrackingDisplay.totalOrdered.toFixed(3)}</strong></span>
+              <span className="text-emerald-800">
+                Received: <strong>{(poTrackingDisplay.receivingNow > 0 ? poTrackingDisplay.projectedReceived : poTrackingDisplay.totalReceived).toFixed(3)}</strong>
+              </span>
+              <span className="text-amber-800">
+                Pending: <strong>{(poTrackingDisplay.receivingNow > 0 ? poTrackingDisplay.projectedPending : poTrackingDisplay.totalPending).toFixed(3)}</strong>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────────────────────────────────────────────────────
             LEDGER PRODUCT TABLE (FLEXIBLE HEIGHT, INNER SCROLL ONLY)
            ───────────────────────────────────────────────────────────── */}
         <div className="flex-1 min-h-[140px] border border-[#7f9db9] bg-white flex flex-col overflow-hidden relative" ref={autocompleteContainerRef}>
@@ -1591,15 +1985,10 @@ export default function PurchaseEstimateVoucherWorkspace() {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="h-5">
-                  <th className="w-6 border-r border-[#7f9db9] py-0.5 text-center font-mono">▸</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[150px]">Product Name</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[150px]">Description</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">Difference</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-16">Pcs</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-20">Quantity</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">B.Rate</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">Rate</th>
-                  <th className="px-2 py-0.5 text-right w-28">Amount</th>
+                  <th className="w-8 border-r border-[#7f9db9] py-0.5 text-center font-mono">▸</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left w-[48%] min-w-[200px]">Product Name</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left w-[36%] min-w-[160px]">Description</th>
+                  <th className="px-2 py-0.5 text-right w-[16%] min-w-[90px]">Quantity</th>
                 </tr>
               </thead>
             </table>
@@ -1612,13 +2001,6 @@ export default function PurchaseEstimateVoucherWorkspace() {
                 {transactionItems.map((item, idx) => {
                   const isActive = idx === activeRowIdx;
                   const filtered = getFilteredProducts(item.productName);
-                  const hasProduct = Boolean(item.productId || (item.productName && item.productName.trim()));
-                  const hasRowData = Boolean(
-                    hasProduct ||
-                    (item.quantity && item.quantity !== '') ||
-                    (item.difference && item.difference !== '0.00' && item.difference !== '') ||
-                    (item.pcs && item.pcs !== '0' && item.pcs !== '')
-                  );
 
                   return (
                     <tr
@@ -1639,14 +2021,14 @@ export default function PurchaseEstimateVoucherWorkspace() {
                     >
                       {/* Active Row Indicator */}
                       <td
-                        className="w-6 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none cursor-pointer"
+                        className="w-8 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none cursor-pointer"
                         title="Press Ctrl+Delete to remove this row"
                       >
                         {isActive ? '▸' : ''}
                       </td>
 
                       {/* Product Name (Col 0) */}
-                      <td className="border-r border-[#7f9db9] p-0 relative min-w-[150px]">
+                      <td className="border-r border-[#7f9db9] p-0 relative w-[48%] min-w-[200px]">
                         <input
                           ref={(el) => {
                             if (el) cellRefs.current[`${idx}-0`] = el;
@@ -1667,10 +2049,10 @@ export default function PurchaseEstimateVoucherWorkspace() {
                             }
                           }}
                           onKeyDown={(e) => handleCellKeyDown(e, idx, 0)}
-                          className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none font-medium"
+                          className="w-full h-5 px-1.5 text-xs text-black bg-transparent border-0 outline-none font-medium"
                         />
 
-                        {/* Autocomplete Suggestions Box (only shown when typing) */}
+                        {/* Autocomplete Suggestions Box */}
                         {!isSaving && activeAutocompleteIdx === idx && Boolean(item.productName && item.productName.trim()) && (
                           <div className="absolute top-full left-0 z-50 min-w-[280px] bg-white border border-[#7f9db9] shadow-lg text-xs">
                             <div className="bg-[#b3d1f5] text-slate-900 px-2 py-0.5 text-[10px] font-bold border-b border-[#7f9db9]">
@@ -1692,9 +2074,11 @@ export default function PurchaseEstimateVoucherWorkspace() {
                                     }`}
                                   >
                                     <span>{p.name}</span>
-                                    <span className="font-mono text-[11px] text-slate-600">
-                                      Diff: {p.difference !== undefined ? p.difference : '0.00'}
-                                    </span>
+                                    {p.unit && (
+                                      <span className="font-mono text-[10px] text-slate-500">
+                                        ({p.unit})
+                                      </span>
+                                    )}
                                   </div>
                                 ))
                               )}
@@ -1704,7 +2088,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
                       </td>
 
                       {/* Description (Col 1) */}
-                      <td className="border-r border-[#7f9db9] p-0 min-w-[150px]">
+                      <td className="border-r border-[#7f9db9] p-0 w-[36%] min-w-[160px]">
                         <input
                           ref={(el) => {
                             if (el) cellRefs.current[`${idx}-1`] = el;
@@ -1719,57 +2103,16 @@ export default function PurchaseEstimateVoucherWorkspace() {
                             currentFocusedCol.current = 1;
                           }}
                           onKeyDown={(e) => handleCellKeyDown(e, idx, 1)}
-                          className="w-full h-5 px-1 text-xs text-black bg-transparent border-0 outline-none"
+                          className="w-full h-5 px-1.5 text-xs text-black bg-transparent border-0 outline-none"
                         />
                       </td>
 
-                      {/* Difference (Col 2) */}
-                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
+                      {/* Quantity (Col 2) */}
+                      <td className="p-0 text-right w-[16%] min-w-[90px]">
                         <input
                           ref={(el) => {
                             if (el) cellRefs.current[`${idx}-2`] = el;
                             else delete cellRefs.current[`${idx}-2`];
-                          }}
-                          type="number"
-                          step="any"
-                          value={hasRowData ? item.difference : ''}
-                          disabled={!isEditable}
-                          onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
-                          onFocus={() => {
-                            setActiveRowIdx(idx);
-                            currentFocusedCol.current = 2;
-                          }}
-                          onKeyDown={(e) => handleCellKeyDown(e, idx, 2)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
-                        />
-                      </td>
-
-                      {/* Pcs (Col 3) */}
-                      <td className="border-r border-[#7f9db9] p-0 text-right w-16">
-                        <input
-                          ref={(el) => {
-                            if (el) cellRefs.current[`${idx}-3`] = el;
-                            else delete cellRefs.current[`${idx}-3`];
-                          }}
-                          type="number"
-                          value={hasRowData ? item.pcs : ''}
-                          disabled={!isEditable}
-                          onChange={(e) => handleItemPcsChange(idx, e.target.value)}
-                          onFocus={() => {
-                            setActiveRowIdx(idx);
-                            currentFocusedCol.current = 3;
-                          }}
-                          onKeyDown={(e) => handleCellKeyDown(e, idx, 3)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
-                        />
-                      </td>
-
-                      {/* Quantity (Col 4) */}
-                      <td className="border-r border-[#7f9db9] p-0 text-right w-20">
-                        <input
-                          ref={(el) => {
-                            if (el) cellRefs.current[`${idx}-4`] = el;
-                            else delete cellRefs.current[`${idx}-4`];
                           }}
                           type="number"
                           step="any"
@@ -1778,73 +2121,10 @@ export default function PurchaseEstimateVoucherWorkspace() {
                           onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
-                            currentFocusedCol.current = 4;
+                            currentFocusedCol.current = 2;
                           }}
-                          onKeyDown={(e) => handleCellKeyDown(e, idx, 4)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
-                        />
-                      </td>
-
-                      {/* B.Rate (Col 5) */}
-                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
-                        <input
-                          ref={(el) => {
-                            if (el) cellRefs.current[`${idx}-5`] = el;
-                            else delete cellRefs.current[`${idx}-5`];
-                          }}
-                          type="number"
-                          step="any"
-                          value={hasProduct ? (item.basicRate || headerBRate || '') : (item.basicRate || '')}
-                          disabled={!isEditable}
-                          onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
-                          onFocus={() => {
-                            setActiveRowIdx(idx);
-                            currentFocusedCol.current = 5;
-                          }}
-                          onKeyDown={(e) => handleCellKeyDown(e, idx, 5)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
-                        />
-                      </td>
-
-                      {/* Rate (Col 6: Calculated / Editable: B.Rate + Diff) */}
-                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
-                        <input
-                          ref={(el) => {
-                            if (el) cellRefs.current[`${idx}-6`] = el;
-                            else delete cellRefs.current[`${idx}-6`];
-                          }}
-                          type="number"
-                          step="any"
-                          value={hasProduct ? (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : (item.finalRate || '')) : (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : '')}
-                          disabled={!isEditable}
-                          onChange={(e) => handleItemRateChange(idx, e.target.value)}
-                          onFocus={() => {
-                            setActiveRowIdx(idx);
-                            currentFocusedCol.current = 6;
-                          }}
-                          onKeyDown={(e) => handleCellKeyDown(e, idx, 6)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono font-medium text-black bg-transparent border-0 outline-none focus:bg-white"
-                        />
-                      </td>
-
-                      {/* Amount (Col 7: Calculated / Editable: Rate * Qty) */}
-                      <td className="p-0 text-right w-28">
-                        <input
-                          ref={(el) => {
-                            if (el) cellRefs.current[`${idx}-7`] = el;
-                            else delete cellRefs.current[`${idx}-7`];
-                          }}
-                          type="number"
-                          step="any"
-                          value={hasProduct ? (item.amount && item.amount !== '0.00' ? item.amount : '') : (item.amount && item.amount !== '0.00' ? item.amount : '')}
-                          disabled={!isEditable}
-                          onChange={(e) => handleItemAmountChange(idx, e.target.value)}
-                          onFocus={() => {
-                            setActiveRowIdx(idx);
-                            currentFocusedCol.current = 7;
-                          }}
-                          onKeyDown={(e) => handleCellKeyDown(e, idx, 7)}
-                          className="w-full h-5 px-1 text-right text-xs font-mono font-semibold text-black bg-transparent border-0 outline-none focus:bg-white"
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 2)}
+                          className="w-full h-5 px-1.5 text-right text-xs font-mono font-bold text-black bg-transparent border-0 outline-none focus:bg-white"
                         />
                       </td>
                     </tr>
@@ -1858,31 +2138,13 @@ export default function PurchaseEstimateVoucherWorkspace() {
         {/* TOTALS ROW DIRECTLY UNDER GRID COLUMNS */}
         <div className="shrink-0 flex items-center justify-end space-x-2 text-xs pt-0.5">
           <div className="flex items-center space-x-1">
-            <input
-              type="text"
-              readOnly
-              value={calculations.totalPcs}
-              className="w-16 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
-              title="Total Pieces"
-            />
-          </div>
-          <div className="flex items-center space-x-1">
+            <span className="font-bold text-[11px] text-black">Total Qty:</span>
             <input
               type="text"
               readOnly
               value={calculations.totalQty}
-              className="w-20 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+              className="w-24 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
               title="Total Quantity"
-            />
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="font-bold text-[11px] text-black">Value</span>
-            <input
-              type="text"
-              readOnly
-              value={calculations.value}
-              className="w-28 h-5 bg-white border border-[#7f9db9] px-2 text-right font-mono font-bold text-black text-[11px]"
-              title="Total Value"
             />
           </div>
         </div>

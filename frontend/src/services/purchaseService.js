@@ -17,6 +17,11 @@ export const getNextPurchaseNumber = async (params = {}) => {
   return res.data;
 };
 
+export const getInHandOrderSummary = async (params = {}) => {
+  const res = await api.get('/purchases/in-hand-order-summary', { params });
+  return res.data;
+};
+
 export const lookupPurchaseByNumber = async (orderId, params = {}) => {
   const res = await api.get(`/purchases/lookup/${encodeURIComponent(orderId)}`, { params });
   return res.data;
@@ -52,11 +57,6 @@ export const getPurchaseAudits = async (id) => {
 
 export const createPurchase = async (data) => {
   const res = await api.post('/purchases', data);
-  return res.data;
-};
-
-export const receiveGoods = async (data) => {
-  const res = await api.post('/purchases/receive', data);
   return res.data;
 };
 
@@ -104,7 +104,6 @@ export default {
   getNextPurchase,
   getPurchaseAudits,
   createPurchase,
-  receiveGoods,
   updatePurchase,
   cancelPurchase,
   submitPurchase,

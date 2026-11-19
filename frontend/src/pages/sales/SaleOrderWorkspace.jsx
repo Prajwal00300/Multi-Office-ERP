@@ -1,0 +1,1250 @@
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import api from '../../services/api';
+import { AuthContext } from '../../context/AuthContext';
+import {
+  getPreviousSaleOrder,
+  getNextSaleOrder,
+  getNextSaleOrderNumber,
+  getSaleOrderById,
+  createSaleOrder,
+  updateSaleOrder,
+  deleteSaleOrder
+} from '../../services/saleOrderService';
+
+const DEFAULT_ROWS_COUNT = 30;
+
+const BLANK_ORDER_ROW = {
+  productId: '',
+  productName: '',
+  description: '',
+  quantity: '',
+  price: '',
+  amount: '0.00'
+};
+
+const createBlankRows = (count = DEFAULT_ROWS_COUNT) => {
+  return Array.from({ length: count }, () => ({ ...BLANK_ORDER_ROW }));
+};
+
+// Date utilities
+const formatToDisplayDate = (isoStr) => {
+  if (!isoStr) return '';
+  const parts = isoStr.split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return isoStr;
+};
+
+const parseDisplayDateToIso = (dispStr) => {
+  if (!dispStr) return '';
+  const parts = dispStr.split('-');
+  if (parts.length === 3 && parts[2].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return dispStr;
+};
+
+const getDayOfWeekName = (dateStr) => {
+  if (!dateStr) return '';
+  let d;
+  if (dateStr.includes('-') && dateStr.split('-')[0].length === 4) {
+    const [y, m, day] = dateStr.split('-');
+    d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(day, 10));
+  } else if (dateStr.includes('-')) {
+    const [day, m, y] = dateStr.split('-');
+    d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(day, 10));
+  } else {
+    d = new Date(dateStr);
+  }
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { weekday: 'long' });
+};
+
+const cleanSerialNumber = (val) => {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (/^[0-9]+$/.test(str)) {
+    return String(parseInt(str, 10));
+  }
+  const match = str.match(/\d+$/);
+  if (match) {
+    return String(parseInt(match[0], 10));
+  }
+  return str;
+};
+
+export default function SaleOrderWorkspace() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialSaleId = searchParams.get('saleId') || searchParams.get('id');
+  const { user } = useContext(AuthContext);
+
+  // Mode: 'VIEW' | 'ADD' | 'EDIT' | 'SAVING'
+  const [mode, setMode] = useState('VIEW');
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Office context
+  const [organizations, setOrganizations] = useState([]);
+  const [selectedOrgId, setSelectedOrgId] = useState('');
+
+  const effectiveOrgId = useMemo(() => {
+    if (user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') {
+      return selectedOrgId || user?.organizationId || '';
+    }
+    return user?.organizationId || '';
+  }, [user, selectedOrgId]);
+
+  // Master Data
+  const [products, setProducts] = useState([]);
+  const [partySuggestions, setPartySuggestions] = useState([]);
+
+  // Active / Current Loaded Sale Order Record
+  const [currentSale, setCurrentSale] = useState(null);
+
+  // Header Fields
+  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [orderNumber, setOrderNumber] = useState('');
+  const [partyName, setPartyName] = useState('');
+
+  // Table Grid Items State
+  const [orderItems, setOrderItems] = useState(createBlankRows(DEFAULT_ROWS_COUNT));
+  const [activeRowIdx, setActiveRowIdx] = useState(0);
+
+  // Autocomplete suggestions popover state
+  const [activeAutocompleteIdx, setActiveAutocompleteIdx] = useState(null);
+  const [highlightedSuggestionIdx, setHighlightedSuggestionIdx] = useState(0);
+
+  // Party suggestions dropdown
+  const [showPartySuggestions, setShowPartySuggestions] = useState(false);
+
+  // Lower Section Fields
+  const [orderRemark, setOrderRemark] = useState('');
+  const remarkTextareaRef = useRef(null);
+
+  // UI Status
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Search Modal State
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [allSales, setAllSales] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const isSaving = mode === 'SAVING' || actionLoading;
+  const isEditable = (mode === 'ADD' || mode === 'EDIT') && !isSaving;
+
+  const markDirtyAndEdit = () => {
+    if (mode === 'VIEW') return;
+    setIsDirty(true);
+  };
+
+  // 1. Fetch Organizations for Super Admin / CEO
+  useEffect(() => {
+    const fetchOrgs = async () => {
+      try {
+        if (user?.role === 'SUPER_ADMIN') {
+          const res = await api.get('/organizations');
+          setOrganizations(res.data || []);
+          if (!selectedOrgId && res.data?.length > 0) {
+            setSelectedOrgId(res.data[0].id);
+          }
+        } else if (user?.role === 'CEO') {
+          const res = await api.get('/ceo/offices');
+          setOrganizations(res.data || []);
+          if (!selectedOrgId && res.data?.length > 0) {
+            setSelectedOrgId(res.data[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load organizations:', err);
+      }
+    };
+    if (user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') {
+      fetchOrgs();
+    }
+  }, [user]);
+
+  // 2. Fetch Products and Previous Parties for the active Office
+  useEffect(() => {
+    const fetchMasterData = async () => {
+      try {
+        const orgQuery = effectiveOrgId ? `?organizationId=${effectiveOrgId}` : '';
+        const [prodRes, saleRes, custRes] = await Promise.all([
+          api.get(`/products${orgQuery}`),
+          api.get(`/sale-orders${orgQuery}`).catch(() => ({ data: [] })),
+          api.get(`/customers${orgQuery}`).catch(() => ({ data: [] }))
+        ]);
+        setProducts(prodRes.data || []);
+
+        // Collect distinct customer/party names from both Customer Master and previous Sale Orders
+        const salesList = saleRes.data || [];
+        const customersList = custRes.data || [];
+        const parties = Array.from(
+          new Set([
+            ...customersList.map(c => c.name),
+            ...salesList.map(s => s.customerName || s.partyName)
+          ].filter(name => Boolean(name && name.trim())))
+        );
+        setPartySuggestions(parties);
+      } catch (err) {
+        console.error('Failed to load master data for Sale Order:', err);
+      }
+    };
+
+    fetchMasterData();
+  }, [effectiveOrgId]);
+
+  // Helper: Populate a Sale Record into State
+  const populateSaleIntoState = (sale) => {
+    if (!sale) return;
+    setCurrentSale(sale);
+    setIsDirty(false);
+
+    setOrderDate(sale.orderDate || new Date().toISOString().split('T')[0]);
+    setOrderNumber(cleanSerialNumber(sale.orderNumber) || '');
+    setPartyName(sale.customerName || sale.partyName || '');
+    setOrderRemark(sale.remarks || sale.orderDetails || '');
+
+    if (sale.items && sale.items.length > 0) {
+      const mapped = sale.items.map(item => {
+        const q = parseFloat(item.quantity) || 0;
+        const p = parseFloat(item.rate || item.price) || 0;
+        const amt = parseFloat(item.amount) || (q * p);
+        return {
+          productId: item.productId ? String(item.productId) : '',
+          productName: item.productNameSnapshot || item.Product?.name || '',
+          description: item.productSpecificationsSnapshot || item.specifications || '',
+          quantity: q > 0 ? String(q) : '',
+          price: p > 0 ? String(p) : '',
+          amount: amt > 0 ? amt.toFixed(2) : '0.00'
+        };
+      });
+
+      const padded = [...mapped];
+      while (padded.length < DEFAULT_ROWS_COUNT) {
+        padded.push({ ...BLANK_ORDER_ROW });
+      }
+      setOrderItems(padded);
+    } else {
+      setOrderItems(createBlankRows(DEFAULT_ROWS_COUNT));
+    }
+  };
+
+  // Reset Workspace for New ADD Entry
+  const resetToAddMode = async () => {
+    const orgId = effectiveOrgId;
+    setCurrentSale(null);
+    setOrderDate(new Date().toISOString().split('T')[0]);
+    setPartyName('');
+    setOrderItems(createBlankRows(DEFAULT_ROWS_COUNT));
+    setOrderRemark('');
+    setIsDirty(false);
+    setMode('ADD');
+
+    // Fetch next sequential sale order number preview (1, 2, 3, 4...)
+    try {
+      const numRes = await getNextSaleOrderNumber(orgId ? { organizationId: orgId } : {});
+      setOrderNumber(cleanSerialNumber(numRes?.nextOrderNumber || numRes?.nextSaleOrderNumber) || '1');
+    } catch (err) {
+      console.warn('Failed to preview next sale order number:', err);
+      setOrderNumber('1');
+    }
+  };
+
+  // Initial Load: Either specific saleId or latest order / new entry
+  useEffect(() => {
+    const loadInitialSale = async () => {
+      setErrorMsg('');
+      try {
+        let saleData = null;
+        if (initialSaleId) {
+          saleData = await getSaleOrderById(initialSaleId);
+        } else {
+          try {
+            saleData = await getPreviousSaleOrder(null, effectiveOrgId);
+          } catch (navErr) {
+            saleData = null;
+          }
+        }
+
+        if (saleData) {
+          populateSaleIntoState(saleData);
+          if (searchParams.get('mode') === 'edit') {
+            setMode('EDIT');
+            setSuccessMsg(`Loaded Serial Number #${cleanSerialNumber(saleData.orderNumber)} in Edit mode.`);
+          } else {
+            setMode('VIEW');
+          }
+        } else {
+          await resetToAddMode();
+        }
+      } catch (err) {
+        console.error('Initial sale load error:', err);
+        await resetToAddMode();
+      }
+    };
+
+    loadInitialSale();
+  }, [effectiveOrgId, initialSaleId]);
+
+  // Filtered products for autocomplete
+  const getFilteredProducts = (query) => {
+    if (!query || !query.trim()) return [];
+    const q = query.toLowerCase().trim();
+    return products.filter(p =>
+      (p.name && p.name.toLowerCase().includes(q)) ||
+      (p.specifications && p.specifications.toLowerCase().includes(q))
+    ).slice(0, 15);
+  };
+
+  // Product Name input change
+  const handleProductNameInputChange = (index, text) => {
+    if (!isEditable) return;
+    markDirtyAndEdit();
+    setActiveRowIdx(index);
+    if (text && text.trim()) {
+      setActiveAutocompleteIdx(index);
+      setHighlightedSuggestionIdx(0);
+    } else {
+      setActiveAutocompleteIdx(null);
+    }
+
+    setOrderItems(prev => {
+      const updated = [...prev];
+      if (!text.trim()) {
+        updated[index] = { ...BLANK_ORDER_ROW };
+        return updated;
+      }
+
+      const match = products.find(p => p.name.toLowerCase() === text.trim().toLowerCase());
+      let prodId = updated[index].productId;
+      let desc = updated[index].description;
+      if (match) {
+        prodId = String(match.id);
+        desc = match.specifications || match.description || desc;
+      }
+
+      const q = parseFloat(updated[index].quantity) || 0;
+      const p = parseFloat(updated[index].price) || 0;
+      const amt = q * p;
+
+      updated[index] = {
+        ...updated[index],
+        productId: prodId,
+        productName: text,
+        description: desc,
+        amount: amt > 0 ? amt.toFixed(2) : '0.00'
+      };
+      return updated;
+    });
+  };
+
+  // Select product from suggestion popup
+  const handleSelectProductSuggestion = (index, prod) => {
+    if (!isEditable) return;
+    markDirtyAndEdit();
+    setActiveRowIdx(index);
+
+    setOrderItems(prev => {
+      const updated = [...prev];
+      const q = parseFloat(updated[index].quantity) || 0;
+      const p = parseFloat(updated[index].price) || 0;
+      const amt = q * p;
+
+      updated[index] = {
+        ...updated[index],
+        productId: String(prod.id),
+        productName: prod.name,
+        description: prod.specifications || prod.description || prod.name,
+        amount: amt > 0 ? amt.toFixed(2) : '0.00'
+      };
+      return updated;
+    });
+    setActiveAutocompleteIdx(null);
+    setHighlightedSuggestionIdx(0);
+  };
+
+  // Keyboard navigation for product autocomplete
+  const handleProductInputKeyDown = (e, idx, filtered) => {
+    if (!isEditable) return;
+    const hasTyped = Boolean(orderItems[idx]?.productName && orderItems[idx]?.productName.trim());
+    if (activeAutocompleteIdx !== idx || filtered.length === 0 || !hasTyped) {
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedSuggestionIdx(prev => (prev + 1) % filtered.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedSuggestionIdx(prev => (prev - 1 + filtered.length) % filtered.length);
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (highlightedSuggestionIdx >= 0 && highlightedSuggestionIdx < filtered.length) {
+        e.preventDefault();
+        handleSelectProductSuggestion(idx, filtered[highlightedSuggestionIdx]);
+      } else {
+        setActiveAutocompleteIdx(null);
+      }
+    } else if (e.key === 'Escape') {
+      setActiveAutocompleteIdx(null);
+    }
+  };
+
+  // Description input change
+  const handleItemDescriptionChange = (index, val) => {
+    if (!isEditable) return;
+    markDirtyAndEdit();
+    setOrderItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], description: val };
+      return updated;
+    });
+  };
+
+  // Quantity input change: calculate Amount = Quantity * Price
+  const handleItemQuantityChange = (index, val) => {
+    if (!isEditable) return;
+    markDirtyAndEdit();
+    setOrderItems(prev => {
+      const updated = [...prev];
+      const q = parseFloat(val) || 0;
+      const p = parseFloat(updated[index].price) || 0;
+      const amt = q * p;
+
+      updated[index] = {
+        ...updated[index],
+        quantity: val,
+        amount: amt > 0 ? amt.toFixed(2) : '0.00'
+      };
+      return updated;
+    });
+  };
+
+  // Price input change: calculate Amount = Quantity * Price
+  const handleItemPriceChange = (index, val) => {
+    if (!isEditable) return;
+    markDirtyAndEdit();
+    setOrderItems(prev => {
+      const updated = [...prev];
+      const p = parseFloat(val) || 0;
+      const q = parseFloat(updated[index].quantity) || 0;
+      const amt = q * p;
+
+      updated[index] = {
+        ...updated[index],
+        price: val,
+        amount: amt > 0 ? amt.toFixed(2) : '0.00'
+      };
+      return updated;
+    });
+  };
+
+  // ==========================================
+  // CALCULATIONS (Matches Purchase Order exactly)
+  // ==========================================
+  const calculations = useMemo(() => {
+    let totalQty = 0;
+    let totalVal = 0;
+    let validRows = 0;
+
+    orderItems.forEach(item => {
+      const hasProduct = Boolean(item.productId || (item.productName && item.productName.trim()));
+      const q = parseFloat(item.quantity) || 0;
+      const p = parseFloat(item.price) || 0;
+      const amt = parseFloat(item.amount) || (q * p);
+
+      if (hasProduct || q > 0 || amt > 0) {
+        validRows += 1;
+        totalQty += q;
+        totalVal += amt;
+      }
+    });
+
+    const averagePrice = totalQty > 0 ? (totalVal / totalQty).toFixed(2) : '0.00';
+
+    return {
+      validRows,
+      totalQty: totalQty.toFixed(3),
+      value: totalVal.toFixed(2),
+      averagePrice,
+      grandTotal: totalVal.toFixed(2)
+    };
+  }, [orderItems]);
+
+  // ==========================================
+  // ACTION BAR HANDLERS
+  // ==========================================
+
+  // 1. ADD
+  const handleAdd = async () => {
+    if (isDirty) {
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and start a new sale order?');
+      if (!confirmDiscard) return;
+    }
+    setErrorMsg('');
+    setSuccessMsg('');
+    await resetToAddMode();
+  };
+
+  // 2. EDIT
+  const handleEdit = () => {
+    if (actionLoading || isSaving) return;
+    if (!currentSale) {
+      setErrorMsg('No sale order loaded to edit.');
+      return;
+    }
+    setMode('EDIT');
+    setIsDirty(false);
+    setErrorMsg('');
+    setSuccessMsg(`Editing Sale Order #${cleanSerialNumber(orderNumber) || currentSale.orderNumber}.`);
+  };
+
+  // 3. DELETE
+  const handleDeleteRecord = async () => {
+    if (actionLoading || isSaving) return;
+    if (!currentSale || !currentSale.id) {
+      setErrorMsg('No saved sale order loaded to delete.');
+      return;
+    }
+
+    const sNum = cleanSerialNumber(orderNumber) || currentSale.orderNumber || currentSale.id;
+    const confirmed = window.confirm(`Are you sure you want to delete Sale Order #${sNum}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await deleteSaleOrder(currentSale.id);
+      setSuccessMsg(`Sale Order #${sNum} deleted successfully.`);
+
+      try {
+        const prevData = await getPreviousSaleOrder(currentSale.id, effectiveOrgId);
+        if (prevData && prevData.id) {
+          populateSaleIntoState(prevData);
+          setMode('VIEW');
+        } else {
+          const nextData = await getNextSaleOrder(currentSale.id, effectiveOrgId);
+          if (nextData && nextData.id) {
+            populateSaleIntoState(nextData);
+            setMode('VIEW');
+          } else {
+            await resetToAddMode();
+          }
+        }
+      } catch (navErr) {
+        await resetToAddMode();
+      }
+    } catch (err) {
+      console.error('Failed to delete sale order:', err);
+      setErrorMsg(err.response?.data?.error || 'Failed to delete sale order.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 4. PREVIOUS
+  const handlePrevious = async () => {
+    if (isDirty) {
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and load the previous sale order?');
+      if (!confirmDiscard) return;
+    }
+    setErrorMsg('');
+    setSuccessMsg('');
+    setActionLoading(true);
+    try {
+      const prevData = await getPreviousSaleOrder(currentSale?.id, effectiveOrgId);
+      if (prevData) {
+        populateSaleIntoState(prevData);
+        setMode('VIEW');
+        setSuccessMsg(`Loaded Serial Number #${cleanSerialNumber(prevData.orderNumber)}`);
+      }
+    } catch (err) {
+      setErrorMsg(err.response?.data?.error || 'No preceding record found for this office.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 5. NEXT
+  const handleNext = async () => {
+    if (isDirty) {
+      const confirmDiscard = window.confirm('You have unsaved changes. Discard and load the next record?');
+      if (!confirmDiscard) return;
+    }
+    setErrorMsg('');
+    setSuccessMsg('');
+    setActionLoading(true);
+    try {
+      const nextData = await getNextSaleOrder(currentSale?.id, effectiveOrgId);
+      if (nextData) {
+        populateSaleIntoState(nextData);
+        setMode('VIEW');
+        setSuccessMsg(`Loaded Serial Number #${cleanSerialNumber(nextData.orderNumber)}`);
+      }
+    } catch (err) {
+      setErrorMsg(err.response?.data?.error || 'No subsequent record found for this office.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 6. CORE SAVE LOGIC
+  const executeSave = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!partyName || !partyName.trim()) {
+      setErrorMsg('Party Name is required before saving.');
+      return null;
+    }
+
+    const validLines = orderItems
+      .filter(item => Boolean(item.productId || (item.productName && item.productName.trim())))
+      .map(item => {
+        const q = parseFloat(item.quantity) || 0;
+        const p = parseFloat(item.price) || 0;
+        const amt = parseFloat(item.amount) || (q * p);
+        return {
+          productId: item.productId ? parseInt(item.productId, 10) : null,
+          productNameSnapshot: item.productName.trim(),
+          productCategorySnapshot: 'General',
+          productSizeSnapshot: '-',
+          productSpecificationsSnapshot: item.description?.trim() || null,
+          quantity: q,
+          carbonType: 'Low Carbon',
+          unit: 'Ton',
+          rate: p,
+          amount: amt
+        };
+      });
+
+    if (validLines.length === 0) {
+      setErrorMsg('Please add at least one product row with a product name.');
+      return null;
+    }
+
+    const invalidQtyRow = validLines.find(line => line.quantity <= 0);
+    if (invalidQtyRow) {
+      setErrorMsg(`Product "${invalidQtyRow.productNameSnapshot}" must have a quantity greater than 0.`);
+      return null;
+    }
+
+    const payload = {
+      orderNumber: cleanSerialNumber(orderNumber) || undefined,
+      orderDate: orderDate,
+      partyName: partyName.trim(),
+      customerName: partyName.trim(),
+      orderDetails: orderRemark || null,
+      remarks: orderRemark || null,
+      items: validLines,
+      organizationId: effectiveOrgId ? parseInt(effectiveOrgId, 10) : undefined
+    };
+
+    const prevMode = mode;
+    setMode('SAVING');
+    setActionLoading(true);
+
+    try {
+      let savedRecord = null;
+      if (prevMode === 'EDIT' && currentSale?.id) {
+        savedRecord = await updateSaleOrder(currentSale.id, payload);
+        setSuccessMsg(`Serial Number #${cleanSerialNumber(savedRecord.orderNumber || orderNumber)} updated successfully.`);
+      } else {
+        const res = await createSaleOrder(payload);
+        savedRecord = res.saleOrder || res;
+        setSuccessMsg(`Serial Number #${cleanSerialNumber(savedRecord.orderNumber || orderNumber)} created successfully.`);
+      }
+
+      populateSaleIntoState(savedRecord);
+      setMode('VIEW');
+      setIsDirty(false);
+      return savedRecord;
+    } catch (err) {
+      console.error('Failed to save record:', err);
+      setErrorMsg(err.response?.data?.error || 'Failed to save record. Please check inputs.');
+      setMode(prevMode === 'ADD' ? 'ADD' : 'EDIT');
+      return null;
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 7. SAVE BUTTON (No print redirect)
+  const handleSaveOnly = async () => {
+    await executeSave();
+  };
+
+  // 8. PRINT & SAVE BUTTON
+  const handlePrintAndSave = async () => {
+    if (mode === 'VIEW' && currentSale?.id && !isDirty) {
+      navigate(`/sales/${currentSale.id}/print`);
+      return;
+    }
+
+    const savedRecord = await executeSave();
+    if (savedRecord?.id) {
+      navigate(`/sales/${savedRecord.id}/print`);
+    }
+  };
+
+  // 9. OPEN SEARCH MODAL
+  const handleOpenSearchModal = async () => {
+    setShowSearchModal(true);
+    setSearchQuery('');
+    try {
+      const res = await api.get(`/sale-orders${effectiveOrgId ? `?organizationId=${effectiveOrgId}` : ''}`);
+      setAllSales(res.data || []);
+    } catch (err) {
+      console.error('Failed to load sale orders for search:', err);
+    }
+  };
+
+  const filteredSales = useMemo(() => {
+    if (!searchQuery.trim()) return allSales.slice(0, 50);
+    const q = searchQuery.toLowerCase().trim();
+    return allSales.filter(s =>
+      (s.orderNumber && String(s.orderNumber).toLowerCase().includes(q)) ||
+      (s.customerName && s.customerName.toLowerCase().includes(q)) ||
+      (s.orderDate && s.orderDate.includes(q))
+    ).slice(0, 50);
+  }, [allSales, searchQuery]);
+
+  return (
+    <div className="w-full h-full flex flex-col bg-[#e6e9ed] border border-[#7f9db9] text-black text-xs select-none overflow-hidden font-sans">
+      
+      {/* Notifications */}
+      {errorMsg && (
+        <div className="shrink-0 bg-red-100 border-b border-red-300 text-red-800 px-3 py-0.5 flex items-center justify-between text-[11px] font-medium">
+          <span>⚠ {errorMsg}</span>
+          <button type="button" onClick={() => setErrorMsg('')} className="font-bold text-red-900 ml-2 cursor-pointer">✕</button>
+        </div>
+      )}
+      {successMsg && (
+        <div className="shrink-0 bg-emerald-100 border-b border-emerald-300 text-emerald-900 px-3 py-0.5 flex items-center justify-between text-[11px] font-medium">
+          <span>✓ {successMsg}</span>
+          <button type="button" onClick={() => setSuccessMsg('')} className="font-bold text-emerald-900 ml-2 cursor-pointer">✕</button>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────
+          VOUCHER BODY (LOCKED HEIGHT, ZERO VERTICAL SCROLLBAR)
+         ───────────────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col p-1.5 space-y-1 bg-[#e6e9ed] overflow-hidden min-h-0">
+
+        {/* TOP SECTION: Date, Serial Number, Center Title, Mode Indicator, Right Info */}
+        <div className="shrink-0 grid grid-cols-12 gap-1 items-start">
+          
+          {/* Top Left: Date and Serial Number */}
+          <div className="col-span-12 md:col-span-4 space-y-0.5">
+            <div className="flex items-center space-x-1.5">
+              <span className="font-bold text-[11px] text-black w-22">Date</span>
+              <input
+                type="text"
+                value={formatToDisplayDate(orderDate)}
+                disabled={!isEditable}
+                onChange={(e) => {
+                  if (!isEditable) return;
+                  markDirtyAndEdit();
+                  setOrderDate(parseDisplayDateToIso(e.target.value));
+                }}
+                placeholder="DD-MM-YYYY"
+                className={`w-24 h-5 border border-[#7f9db9] px-1 text-[11px] font-semibold focus:outline-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-700 cursor-not-allowed select-none'}`}
+              />
+              <span className="font-bold text-[11px] text-black">
+                {getDayOfWeekName(orderDate)}
+              </span>
+            </div>
+
+            <div className="flex items-center space-x-1.5">
+              <span className="font-bold text-[11px] text-black w-22">Serial Number</span>
+              <input
+                type="text"
+                readOnly
+                value={orderNumber || ''}
+                placeholder="Serial No."
+                className="w-24 h-5 bg-[#e4ebf5] border border-[#7f9db9] px-1 text-[11px] text-black font-bold cursor-not-allowed select-none"
+                title="Serial Number is generated automatically and cannot be edited"
+              />
+            </div>
+          </div>
+
+          {/* Top Center: "Sale Order" and Mode in RED */}
+          <div className="col-span-12 md:col-span-4 text-center">
+            <h1 className="font-serif text-[22px] leading-tight text-black font-normal tracking-wide">
+              Sale Order
+            </h1>
+            <div className="text-red-600 font-bold text-[12px] leading-tight">
+              {mode === 'VIEW' ? 'View' : mode === 'ADD' ? 'Add' : mode === 'EDIT' ? 'Edit' : 'Saving'}
+            </div>
+          </div>
+
+          {/* Top Right: Office dropdown + Search / Date */}
+          <div className="col-span-12 md:col-span-4 flex flex-col items-end text-right space-y-0.5 text-[11px]">
+            <div className="flex items-center space-x-2 text-black font-medium">
+              {(user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') && organizations.length > 1 && (
+                <span className="text-[10px] font-normal bg-white/80 px-1.5 py-0.5 rounded border border-slate-300">
+                  Office:
+                  <select
+                    value={effectiveOrgId}
+                    disabled={isDirty}
+                    onChange={(e) => {
+                      setSelectedOrgId(e.target.value);
+                      setCurrentSale(null);
+                    }}
+                    className="ml-1 bg-transparent font-medium text-black focus:outline-none"
+                  >
+                    {organizations.map(org => (
+                      <option key={org.id} value={org.id}>{org.name}</option>
+                    ))}
+                  </select>
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleOpenSearchModal}
+                className="text-blue-800 hover:underline font-bold cursor-pointer"
+              >
+                Search
+              </button>
+            </div>
+            <div className="text-black font-bold text-[11px]">
+              {formatToDisplayDate(new Date().toISOString().split('T')[0])} {getDayOfWeekName(new Date().toISOString().split('T')[0])}
+            </div>
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            HEADER FORM FIELDS: Party Name (Customer / Buyer)
+           ───────────────────────────────────────────────────────────── */}
+        <div className="shrink-0 bg-[#d9e8fb] border border-[#7f9db9] p-1 text-xs">
+          <div className="flex items-center space-x-2">
+            <label className="font-bold text-[11px] text-black w-22 shrink-0">Party Name</label>
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={partyName}
+                disabled={!isEditable}
+                placeholder={isEditable ? "Enter party name..." : ""}
+                onFocus={() => {
+                  if (isEditable) setShowPartySuggestions(true);
+                }}
+                onChange={(e) => {
+                  if (!isEditable) return;
+                  markDirtyAndEdit();
+                  setPartyName(e.target.value);
+                  setShowPartySuggestions(true);
+                }}
+                className={`w-full h-5 border border-[#7f9db9] px-1 text-[11px] font-bold focus:outline-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-800 cursor-not-allowed select-none'}`}
+              />
+
+              {/* Suggestions Dropdown for Party Name */}
+              {isEditable && showPartySuggestions && partySuggestions.length > 0 && (
+                <div className="absolute top-full left-0 z-50 w-full bg-white border border-[#7f9db9] shadow-lg max-h-40 overflow-y-auto text-xs">
+                  <div className="bg-[#b3d1f5] text-slate-900 px-2 py-0.5 text-[10px] font-bold border-b border-[#7f9db9]">
+                    Previous Parties ({partySuggestions.filter(p => !partyName || p.toLowerCase().includes(partyName.toLowerCase())).length})
+                  </div>
+                  {partySuggestions
+                    .filter(p => !partyName || p.toLowerCase().includes(partyName.toLowerCase()))
+                    .map((p, idx) => (
+                      <div
+                        key={idx}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          if (!isEditable) return;
+                          markDirtyAndEdit();
+                          setPartyName(p);
+                          setShowPartySuggestions(false);
+                        }}
+                        className="px-2 py-1 cursor-pointer hover:bg-blue-100 flex items-center justify-between font-medium"
+                      >
+                        <span>{p}</span>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center space-x-1 shrink-0 text-slate-700 pl-2">
+              <span className="font-bold text-[11px]">Items:</span>
+              <span className="font-mono font-bold bg-white px-1.5 py-0.5 border border-[#7f9db9] text-[11px]">{calculations.validRows}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            TRANSACTION PRODUCT ITEMS GRID (30 Rows, Clean, Desktop ERP)
+           ───────────────────────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col min-h-0 border border-[#7f9db9] bg-white">
+          
+          {/* Table Header (Fixed) */}
+          <div className="shrink-0 bg-[#d9e8fb] border-b border-[#7f9db9]">
+            <table className="w-full border-collapse text-xs font-bold text-slate-800">
+              <thead>
+                <tr className="h-5">
+                  <th className="w-6 border-r border-[#7f9db9] text-center p-0"></th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[200px]">Product Name</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[220px]">Description</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-32">Quantity</th>
+                  <th className="px-2 py-0.5 text-right w-36">Price</th>
+                </tr>
+              </thead>
+            </table>
+          </div>
+
+          {/* Table Body (Scrolls internally if rows exceed container) */}
+          <div className="flex-1 overflow-y-auto">
+            <table className="w-full border-collapse text-xs">
+              <tbody>
+                {orderItems.map((item, idx) => {
+                  const isActive = idx === activeRowIdx;
+                  const filtered = getFilteredProducts(item.productName);
+                  const hasProduct = Boolean(item.productId || (item.productName && item.productName.trim()));
+                  const hasRowData = Boolean(
+                    hasProduct ||
+                    (item.quantity && item.quantity !== '') ||
+                    (item.price && item.price !== '')
+                  );
+
+                  return (
+                    <tr
+                      key={idx}
+                      onClick={() => setActiveRowIdx(idx)}
+                      className={`h-5 border-b border-[#c0c0c0] ${isActive ? 'bg-[#f4f7fc]' : 'bg-white hover:bg-slate-50'}`}
+                    >
+                      {/* Active Row Indicator */}
+                      <td className="w-6 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none">
+                        {isActive ? '▸' : ''}
+                      </td>
+
+                      {/* Product Name */}
+                      <td className="border-r border-[#7f9db9] p-0 relative min-w-[200px]">
+                        <input
+                          type="text"
+                          value={item.productName}
+                          disabled={!isEditable}
+                          onChange={(e) => handleProductNameInputChange(idx, e.target.value)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            if (isEditable && item.productName && item.productName.trim()) {
+                              setActiveAutocompleteIdx(idx);
+                              setHighlightedSuggestionIdx(0);
+                            } else {
+                              setActiveAutocompleteIdx(null);
+                            }
+                          }}
+                          onKeyDown={(e) => handleProductInputKeyDown(e, idx, filtered)}
+                          className={`w-full h-5 px-1 text-xs border-0 outline-none font-medium ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
+                        />
+
+                        {/* Autocomplete Suggestions Box (only shown when typing) */}
+                        {isEditable && activeAutocompleteIdx === idx && Boolean(item.productName && item.productName.trim()) && (
+                          <div className="absolute top-full left-0 z-50 min-w-[280px] bg-white border border-[#7f9db9] shadow-lg text-xs">
+                            <div className="bg-[#b3d1f5] text-slate-900 px-2 py-0.5 text-[10px] font-bold border-b border-[#7f9db9]">
+                              Product Suggestions ({filtered.length})
+                            </div>
+                            <div className="max-h-40 overflow-y-auto">
+                              {filtered.length === 0 ? (
+                                <div className="p-2 text-slate-500 italic">No products found</div>
+                              ) : (
+                                filtered.map((p, pIdx) => (
+                                  <div
+                                    key={p.id}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      handleSelectProductSuggestion(idx, p);
+                                    }}
+                                    className={`px-2 py-1 cursor-pointer flex justify-between items-center ${
+                                      pIdx === highlightedSuggestionIdx ? 'bg-[#cce4f7] font-bold' : 'hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    <span>{p.name}</span>
+                                    {p.specifications && (
+                                      <span className="font-mono text-[11px] text-slate-600 truncate max-w-[120px]">
+                                        {p.specifications}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Description (Optional) */}
+                      <td className="border-r border-[#7f9db9] p-0 min-w-[220px]">
+                        <input
+                          type="text"
+                          value={item.description}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className={`w-full h-5 px-1 text-xs border-0 outline-none ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
+                        />
+                      </td>
+
+                      {/* Quantity */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-32">
+                        <input
+                          type="number"
+                          step="any"
+                          value={item.quantity}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className={`w-full h-5 px-1 text-right text-xs font-mono border-0 outline-none ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
+                        />
+                      </td>
+
+                      {/* Price */}
+                      <td className="p-0 text-right w-36">
+                        <input
+                          type="number"
+                          step="any"
+                          value={hasRowData ? item.price : ''}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemPriceChange(idx, e.target.value)}
+                          onFocus={() => setActiveRowIdx(idx)}
+                          className={`w-full h-5 px-1 text-right text-xs font-mono font-medium border-0 outline-none ${isEditable ? 'text-black bg-transparent focus:bg-white' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* TOTALS ROW DIRECTLY UNDER GRID COLUMNS */}
+        <div className="shrink-0 flex items-center justify-end space-x-2 text-xs pt-0.5">
+          <div className="flex items-center space-x-1">
+            <span className="font-bold text-[11px] text-black">Total Qty</span>
+            <input
+              type="text"
+              readOnly
+              value={calculations.totalQty}
+              className="w-28 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+              title="Total Quantity"
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="font-bold text-[11px] text-black">Average Price</span>
+            <input
+              type="text"
+              readOnly
+              value={calculations.averagePrice}
+              className="w-36 h-5 bg-white border border-[#7f9db9] px-2 text-right font-mono font-bold text-black text-[11px]"
+              title="Average Price"
+            />
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            LOWER SECTION: REMARK (LEFT) & GRAND TOTAL (RIGHT)
+           ───────────────────────────────────────────────────────────── */}
+        <div className="bg-[#d9e8fb] border border-[#7f9db9] p-1.5 grid grid-cols-1 md:grid-cols-12 gap-2 text-xs shrink-0">
+          
+          {/* Lower Left: Remark Textarea */}
+          <div className="md:col-span-8 flex items-start">
+            <label className="w-16 font-bold text-[11px] text-black pt-0.5 shrink-0">Remark:</label>
+            <textarea
+              ref={remarkTextareaRef}
+              rows={2}
+              value={orderRemark}
+              disabled={!isEditable}
+              onChange={(e) => {
+                if (!isEditable) return;
+                markDirtyAndEdit();
+                setOrderRemark(e.target.value);
+              }}
+              className={`flex-1 h-12 border border-[#7f9db9] px-1.5 py-0.5 text-xs focus:outline-none resize-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-800 cursor-not-allowed select-none'}`}
+            />
+          </div>
+
+          {/* Lower Right: Average Price */}
+          <div className="md:col-span-4 flex flex-col justify-end space-y-1 text-right">
+            <div className="flex items-center justify-between">
+              <span className="font-black text-[12px] text-black uppercase">Average Price</span>
+              <input
+                type="text"
+                readOnly
+                value={calculations.averagePrice}
+                className="w-32 h-6 bg-[#cce4f7] border border-[#7f9db9] px-1.5 text-right font-mono font-black text-[13px] text-black"
+                title="Average Price"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            BOTTOM BUTTONS BAR
+           ───────────────────────────────────────────────────────────── */}
+        <div className="shrink-0 pt-1 border-t border-[#7f9db9]">
+          <div className="flex items-center justify-between gap-1 flex-wrap">
+            
+            {/* Left: Add, Edit, Delete, < Previous, Next >, Save */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* 1. Add */}
+              <button
+                type="button"
+                onClick={handleAdd}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer outline-dotted outline-1 outline-[#404040] outline-offset-[-3px]"
+              >
+                Add
+              </button>
+
+              {/* 2. Edit */}
+              <button
+                type="button"
+                onClick={handleEdit}
+                disabled={actionLoading || mode === 'EDIT' || mode === 'ADD' || !currentSale}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Edit current Sale Order"
+              >
+                Edit
+              </button>
+
+              {/* 3. Delete */}
+              <button
+                type="button"
+                onClick={handleDeleteRecord}
+                disabled={actionLoading || mode === 'ADD' || !currentSale}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-red-700 font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title="Delete current Sale Order"
+              >
+                Delete
+              </button>
+
+              {/* 4. Previous */}
+              <button
+                type="button"
+                onClick={handlePrevious}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+              >
+                &lt; Previous
+              </button>
+
+              {/* 5. Next */}
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={actionLoading}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+              >
+                Next &gt;
+              </button>
+
+              {/* 6. Save */}
+              <button
+                type="button"
+                onClick={handleSaveOnly}
+                disabled={actionLoading || mode === 'VIEW'}
+                className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                title={mode === 'VIEW' ? 'Click Edit to modify this record before saving' : 'Save record only without printing'}
+              >
+                {actionLoading && mode === 'SAVING' ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+
+            {/* Right: Print & Save */}
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={handlePrintAndSave}
+                disabled={actionLoading}
+                className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+              >
+                {actionLoading && mode === 'SAVING' ? 'Saving...' : 'Print & Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          SEARCH MODAL (Matches Purchase Order Search Modal)
+         ───────────────────────────────────────────────────────────── */}
+      {showSearchModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-[#ece9d8] border-2 border-[#7f9db9] w-full max-w-2xl shadow-xl flex flex-col max-h-[80vh]">
+            <div className="bg-[#0a246a] text-white px-2 py-1 text-xs font-bold flex justify-between items-center">
+              <span>Search Sale Orders</span>
+              <button
+                type="button"
+                onClick={() => setShowSearchModal(false)}
+                className="text-white hover:bg-red-600 px-1 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-2 border-b border-[#7f9db9]">
+              <input
+                type="text"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by Serial Number, Party Name, or Date..."
+                className="w-full h-7 px-2 text-xs border border-[#7f9db9] bg-white text-black outline-none"
+              />
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2">
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="bg-[#d9e8fb] border-b border-[#7f9db9] text-left">
+                    <th className="p-1 border-r border-[#7f9db9]">Serial No.</th>
+                    <th className="p-1 border-r border-[#7f9db9]">Date</th>
+                    <th className="p-1 border-r border-[#7f9db9]">Party Name</th>
+                    <th className="p-1 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSales.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="p-4 text-center text-slate-500">No matching orders found</td>
+                    </tr>
+                  ) : (
+                    filteredSales.map(s => (
+                      <tr
+                        key={s.id}
+                        onClick={() => {
+                          populateSaleIntoState(s);
+                          setShowSearchModal(false);
+                          setMode('VIEW');
+                        }}
+                        className="hover:bg-blue-100 cursor-pointer border-b border-slate-200"
+                      >
+                        <td className="p-1 border-r border-[#7f9db9] font-mono font-bold text-blue-800">{cleanSerialNumber(s.orderNumber)}</td>
+                        <td className="p-1 border-r border-[#7f9db9]">{s.orderDate}</td>
+                        <td className="p-1 border-r border-[#7f9db9] font-bold">{s.customerName || s.partyName}</td>
+                        <td className="p-1 text-right font-mono font-bold">{parseFloat(s.totalAmount || 0).toFixed(2)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-2 border-t border-[#7f9db9] bg-[#d9e8fb] flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowSearchModal(false)}
+                className="px-4 py-1 bg-white border border-[#7f9db9] text-xs font-bold text-black cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -68,6 +68,16 @@ export const deletePurchaseEstimate = async (id) => {
   return res.data;
 };
 
+export const getPendingOrderSummary = async (params = {}) => {
+  const query = new URLSearchParams();
+  if (params.organizationId) query.append('organizationId', params.organizationId);
+  if (params.customerId) query.append('customerId', params.customerId);
+  if (params.partyName) query.append('partyName', params.partyName);
+  const queryString = query.toString();
+  const res = await api.get(`/purchase-estimates/pending-order-summary${queryString ? `?${queryString}` : ''}`);
+  return res.data;
+};
+
 export default {
   getPurchaseEstimates,
   getPurchaseEstimateById,
@@ -78,5 +88,6 @@ export default {
   getLastPurchaseEstimate,
   createPurchaseEstimate,
   updatePurchaseEstimate,
-  deletePurchaseEstimate
+  deletePurchaseEstimate,
+  getPendingOrderSummary
 };

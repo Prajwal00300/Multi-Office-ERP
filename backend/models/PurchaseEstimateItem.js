@@ -68,6 +68,31 @@ const PurchaseEstimateItem = sequelize.define('PurchaseEstimateItem', {
     type: DataTypes.DECIMAL(15, 2),
     allowNull: false,
     defaultValue: 0,
+  },
+  purchaseId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Primary linked Purchase Order ID (if matched)'
+  },
+  purchaseItemId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Primary linked Purchase Order Item ID (if matched)'
+  },
+  orderedQuantity: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: true,
+    comment: 'Snapshot of ordered quantity on linked PO(s)'
+  },
+  receivedQuantityAfter: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: true,
+    comment: 'Snapshot of cumulative received quantity after this voucher'
+  },
+  pendingQuantityAfter: {
+    type: DataTypes.DECIMAL(15, 3),
+    allowNull: true,
+    comment: 'Snapshot of remaining pending quantity after this voucher'
   }
 }, {
   tableName: 'purchase_estimate_items',

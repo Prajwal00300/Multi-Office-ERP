@@ -24,14 +24,18 @@ import EstimateDetail from '../pages/estimates/EstimateDetail';
 import EstimatePrint from '../pages/estimates/EstimatePrint';
 import EstimateVoucherWorkspace from '../pages/estimates/EstimateVoucherWorkspace';
 import PurchaseEstimateVoucherWorkspace from '../pages/estimates/PurchaseEstimateVoucherWorkspace';
+import PurchaseEstimatePrint from '../pages/estimates/PurchaseEstimatePrint';
 import BillsList from '../pages/billing/BillsList';
 import BillForm from '../pages/billing/BillForm';
 import BillDetail from '../pages/billing/BillDetail';
 import BillPrint from '../pages/billing/BillPrint';
 import CombinedTransactionWorkspace from '../pages/billing/CombinedTransactionWorkspace';
+import SalesList from '../pages/sales/SalesList';
+import SaleOrderWorkspace from '../pages/sales/SaleOrderWorkspace';
+import SaleDetail from '../pages/sales/SaleDetail';
+import SaleOrderPrint from '../pages/sales/SaleOrderPrint';
 import PurchasesList from '../pages/purchases/PurchasesList';
 import PurchaseForm from '../pages/purchases/PurchaseForm';
-import OrderReceived from '../pages/purchases/OrderReceived';
 import PurchaseDetail from '../pages/purchases/PurchaseDetail';
 import PurchaseOrderWorkspace from '../pages/purchases/PurchaseOrderWorkspace';
 import PurchasePrint from '../pages/purchases/PurchasePrint';
@@ -48,6 +52,7 @@ const getAdminHomeRoute = (perms) => {
   const order = [
     { key: 'BILLING', path: '/bills' },
     { key: 'ESTIMATES', path: '/estimates' },
+    { key: 'SALES', path: '/sales' },
     { key: 'PURCHASES', path: '/purchases' },
     { key: 'CUSTOMER_MASTER', path: '/customers' },
     { key: 'PRODUCT_MASTER', path: '/products' },
@@ -152,18 +157,27 @@ const AppRoutes = () => {
         </Route>
       </Route>
 
+      {/* Sales Management Routes */}
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="SALES" />}>
+        <Route element={<Layout />}>
+          <Route path="/sales" element={<SalesList />} />
+          <Route path="/sale-order" element={<SaleOrderWorkspace />} />
+          <Route path="/sales/:id" element={<SaleDetail />} />
+          <Route path="/sales/:id/print" element={<SaleOrderPrint />} />
+        </Route>
+      </Route>
+
       {/* Purchase Management Routes */}
       <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING']} requiredModule="PURCHASES" />}>
         <Route element={<Layout />}>
           <Route path="/purchases" element={<PurchasesList />} />
           <Route path="/purchase-estimate" element={<PurchaseEstimateVoucherWorkspace />} />
+          <Route path="/purchase-estimate/:id/print" element={<PurchaseEstimatePrint />} />
+          <Route path="/purchase-estimates/:id/print" element={<PurchaseEstimatePrint />} />
           <Route path="/purchase-order" element={<PurchaseOrderWorkspace />} />
-          <Route path="/receive-order" element={<OrderReceived />} />
           <Route path="/place-order" element={<Navigate to="/purchase-order" replace />} />
           <Route path="/purchases/place-order" element={<Navigate to="/purchase-order" replace />} />
           <Route path="/purchases/new" element={<Navigate to="/purchase-order" replace />} />
-          <Route path="/purchases/receive" element={<OrderReceived />} />
-          <Route path="/order-received" element={<Navigate to="/receive-order" replace />} />
           <Route path="/purchases/:id" element={<PurchaseDetail />} />
           <Route path="/purchases/:id/edit" element={<PurchaseForm />} />
           <Route path="/purchases/:id/print" element={<PurchasePrint />} />
