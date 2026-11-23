@@ -285,18 +285,53 @@ exports.getInHandOrderSummary = async (req, res) => {
     });
 
     let totalPurchasePending = 0;
+    let sumOfOrderAvgPrices = 0;
+    let totalPurchasesOrderedTons = 0;
+    let totalPurchasesValue = 0;
+
     for (const po of purchases) {
-      for (const it of (po.items || [])) {
+      const pJson = po.toJSON();
+      let poOrdered = parseFloat(pJson.totalOrderedQuantity) || parseFloat(pJson.totalQuantity) || 0;
+      let poValue = parseFloat(pJson.totalAmount) || 0;
+      let itemsVal = 0;
+      let itemsQty = 0;
+
+      for (const it of (pJson.items || [])) {
         const ord = parseFloat(it.quantity) || 0;
         const rec = parseFloat(it.receivedQuantity) || 0;
+        const rate = parseFloat(it.rate) || 0;
+        const amt = parseFloat(it.amount) || (ord * rate);
         const pen = Math.max(0, ord - rec);
+
+        itemsQty += ord;
+        itemsVal += amt;
+
+        const entry = findOrAddProduct(it.productId, it.productNameSnapshot);
         if (pen > 0) {
           totalPurchasePending += pen;
-          const entry = findOrAddProduct(it.productId, it.productNameSnapshot);
           entry.purchasePending += pen;
         }
+
+        if (!entry.productPurchaseVal) entry.productPurchaseVal = 0;
+        if (!entry.productPurchaseQty) entry.productPurchaseQty = 0;
+        entry.productPurchaseVal += amt;
+        entry.productPurchaseQty += ord;
+      }
+
+      if (poOrdered <= 0) poOrdered = itemsQty;
+      if (poValue <= 0) poValue = itemsVal;
+      const poAvgPrice = poOrdered > 0 ? (poValue / poOrdered) : (parseFloat(pJson.averagePrice) || 0);
+
+      if (poOrdered > 0 && poAvgPrice > 0) {
+        sumOfOrderAvgPrices += poAvgPrice;
+        totalPurchasesOrderedTons += poOrdered;
+        totalPurchasesValue += poValue;
       }
     }
+
+    // Formula: (avgPrice1 + avgPrice2 + ...) / (qty1 + qty2 + ...) e.g. (69000 + 58000) / (140 + 100)
+    const inHandAveragePrice = totalPurchasesOrderedTons > 0 ? parseFloat((sumOfOrderAvgPrices / totalPurchasesOrderedTons).toFixed(2)) : 0;
+    const weightedAveragePrice = totalPurchasesOrderedTons > 0 ? parseFloat((totalPurchasesValue / totalPurchasesOrderedTons).toFixed(2)) : 0;
 
     // 3. Fetch Pending Quantities from Sale Orders
     let totalSalesPending = 0;
@@ -346,6 +381,9 @@ exports.getInHandOrderSummary = async (req, res) => {
       const sStock = parseFloat(p.inHouseStock.toFixed(3));
       const sPend = parseFloat(p.salesPending.toFixed(3));
       const inHand = parseFloat((pPend + sStock - sPend).toFixed(3));
+      const pVal = p.productPurchaseVal || 0;
+      const pQty = p.productPurchaseQty || 0;
+      const avgPrice = pQty > 0 ? parseFloat((pVal / pQty).toFixed(2)) : 0;
       return {
         productId: p.productId,
         productName: p.productName,
@@ -353,7 +391,8 @@ exports.getInHandOrderSummary = async (req, res) => {
         purchasePending: pPend,
         inHouseStock: sStock,
         salesPending: sPend,
-        inHandOrder: inHand
+        inHandOrder: inHand,
+        averagePrice: avgPrice
       };
     }).sort((a, b) => a.productName.localeCompare(b.productName));
 
@@ -362,6 +401,8 @@ exports.getInHandOrderSummary = async (req, res) => {
       inHouseStock: totalInHouseStock,
       salesTotalOrderPending: totalSalesPending,
       inHandOrder: totalInHandOrder,
+      inHandAveragePrice,
+      weightedAveragePrice,
       productBreakdown
     });
   } catch (error) {

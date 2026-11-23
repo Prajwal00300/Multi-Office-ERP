@@ -223,13 +223,20 @@ exports.getSaleOrders = async (req, res) => {
       const o = order.toJSON();
       let totOrd = 0;
       let totProc = 0;
+      let totAmt = 0;
       for (const it of (o.items || [])) {
-        totOrd += parseFloat(it.quantity) || 0;
+        const q = parseFloat(it.quantity) || 0;
+        const r = parseFloat(it.rate) || 0;
+        totOrd += q;
         totProc += parseFloat(it.processedQuantity) || 0;
+        totAmt += q * r;
       }
       o.totalOrderedQuantity = parseFloat(totOrd.toFixed(3));
       o.totalProcessedQuantity = parseFloat(totProc.toFixed(3));
       o.pendingQuantity = Math.max(0, parseFloat((totOrd - totProc).toFixed(3)));
+      const finalAmt = parseFloat(o.totalAmount) || totAmt;
+      o.totalAmount = parseFloat(finalAmt.toFixed(2));
+      o.averagePrice = totOrd > 0 ? parseFloat((finalAmt / totOrd).toFixed(2)) : 0;
       return o;
     });
 
@@ -439,7 +446,41 @@ exports.getSaleOrderById = async (req, res) => {
     }
 
     await verifyRecordOwnership(order, req.user);
-    res.status(200).json(order);
+
+    const oJson = order.toJSON();
+    let totOrd = 0;
+    let totProc = 0;
+    let itemsTotalAmount = 0;
+
+    oJson.items = (oJson.items || []).map(item => {
+      const ord = parseFloat(item.quantity) || 0;
+      const proc = parseFloat(item.processedQuantity) || 0;
+      const pen = Math.max(0, parseFloat((ord - proc).toFixed(3)));
+      const rate = parseFloat(item.rate) || 0;
+      const itemAmt = parseFloat(item.amount) || (ord * rate);
+
+      totOrd += ord;
+      totProc += proc;
+      itemsTotalAmount += itemAmt;
+
+      return {
+        ...item,
+        orderedQuantity: ord,
+        processedQuantity: proc,
+        pendingQuantity: pen,
+        rate,
+        amount: itemAmt
+      };
+    });
+
+    const finalTotalAmount = parseFloat(oJson.totalAmount) || itemsTotalAmount;
+    oJson.totalOrderedQuantity = parseFloat(totOrd.toFixed(3));
+    oJson.totalProcessedQuantity = parseFloat(totProc.toFixed(3));
+    oJson.pendingQuantity = Math.max(0, parseFloat((totOrd - totProc).toFixed(3)));
+    oJson.totalAmount = parseFloat(finalTotalAmount.toFixed(2));
+    oJson.averagePrice = totOrd > 0 ? parseFloat((finalTotalAmount / totOrd).toFixed(2)) : 0;
+
+    res.status(200).json(oJson);
   } catch (error) {
     if (error.statusCode) {
       return res.status(error.statusCode).json({ error: error.message });

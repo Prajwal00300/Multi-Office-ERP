@@ -124,6 +124,8 @@ const PurchasesList = () => {
     inHouseStock: 0,
     salesTotalOrderPending: 0,
     inHandOrder: 0,
+    inHandAveragePrice: 0,
+    weightedAveragePrice: 0,
     productBreakdown: []
   });
   const [inHandLoading, setInHandLoading] = useState(false);
@@ -153,6 +155,67 @@ const PurchasesList = () => {
   useEffect(() => {
     fetchInHandData();
   }, [fetchInHandData]);
+
+  // Quick Stats
+  const totalCount = purchases.length;
+  const pendingCount = purchases.filter(p => p.status === 'Pending' || p.status === 'DRAFT' || p.status === 'PENDING_APPROVAL').length;
+  const partialCount = purchases.filter(p => p.status === 'Partially Received').length;
+  const fullyReceivedCount = purchases.filter(p => p.status === 'Fully Received' || p.status === 'APPROVED').length;
+  const totalOrderedTons = purchases.reduce((acc, curr) => acc + (parseFloat(curr.totalOrderedQuantity) || parseFloat(curr.totalQuantity) || 0), 0);
+  const totalPurchaseValue = purchases.reduce((acc, curr) => {
+    const amt = parseFloat(curr.totalAmount);
+    if (!isNaN(amt) && amt > 0) return acc + amt;
+    const itemsSum = (curr.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+    return acc + itemsSum;
+  }, 0);
+  const overallAveragePrice = totalOrderedTons > 0 ? (totalPurchaseValue / totalOrderedTons) : 0;
+
+  // Average Price formula as requested: (avgPrice1 + avgPrice2 + ...) / (qty1 + qty2 + ...)
+  // e.g. for 140 ton (avg 69000) and 100 ton (avg 58000) => (69000 + 58000) / (140 + 100)
+  const inHandAvgPrice = useMemo(() => {
+    let sumOfAvgPrices = 0;
+    let totalOrderedTons = 0;
+
+    (purchases || []).forEach(p => {
+      const q = parseFloat(p.totalOrderedQuantity) || parseFloat(p.totalQuantity) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity) || 0), 0);
+      const amt = parseFloat(p.totalAmount) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+      const avg = q > 0 ? (amt / q) : (parseFloat(p.averagePrice) || 0);
+
+      if (q > 0 && avg > 0) {
+        sumOfAvgPrices += avg;
+        totalOrderedTons += q;
+      }
+    });
+
+    if (totalOrderedTons > 0 && sumOfAvgPrices > 0) {
+      return sumOfAvgPrices / totalOrderedTons;
+    }
+    if (inHandSummary && parseFloat(inHandSummary.inHandAveragePrice) > 0) {
+      return parseFloat(inHandSummary.inHandAveragePrice);
+    }
+    return overallAveragePrice || 0;
+  }, [purchases, inHandSummary.inHandAveragePrice, overallAveragePrice]);
+
+  // Standard Weighted Average Price: sum(qty * rate) / sum(qty)
+  const weightedAvgPrice = useMemo(() => {
+    let totalVal = 0;
+    let totalQty = 0;
+
+    (purchases || []).forEach(p => {
+      const q = parseFloat(p.totalOrderedQuantity) || parseFloat(p.totalQuantity) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity) || 0), 0);
+      const amt = parseFloat(p.totalAmount) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+
+      if (q > 0) {
+        totalVal += amt;
+        totalQty += q;
+      }
+    });
+
+    if (totalQty > 0) {
+      return totalVal / totalQty;
+    }
+    return parseFloat(inHandSummary.weightedAveragePrice) || 0;
+  }, [purchases, inHandSummary.weightedAveragePrice]);
 
   const filteredProductBreakdown = useMemo(() => {
     const list = inHandSummary.productBreakdown || [];
@@ -198,20 +261,6 @@ const PurchasesList = () => {
         );
     }
   };
-
-  // Quick Stats
-  const totalCount = purchases.length;
-  const pendingCount = purchases.filter(p => p.status === 'Pending' || p.status === 'DRAFT' || p.status === 'PENDING_APPROVAL').length;
-  const partialCount = purchases.filter(p => p.status === 'Partially Received').length;
-  const fullyReceivedCount = purchases.filter(p => p.status === 'Fully Received' || p.status === 'APPROVED').length;
-  const totalOrderedTons = purchases.reduce((acc, curr) => acc + (parseFloat(curr.totalOrderedQuantity) || parseFloat(curr.totalQuantity) || 0), 0);
-  const totalPurchaseValue = purchases.reduce((acc, curr) => {
-    const amt = parseFloat(curr.totalAmount);
-    if (!isNaN(amt) && amt > 0) return acc + amt;
-    const itemsSum = (curr.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
-    return acc + itemsSum;
-  }, 0);
-  const overallAveragePrice = totalOrderedTons > 0 ? (totalPurchaseValue / totalOrderedTons) : 0;
 
   return (
     <div className="space-y-6 pb-12">
@@ -391,19 +440,29 @@ const PurchasesList = () => {
           
           {/* Box 1: Purchase Total Order Pending */}
           <div className="flex-1 bg-amber-50/80 border-2 border-amber-300 rounded-xl p-4 flex flex-col justify-between shadow-sm min-w-[210px]">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-amber-900 uppercase tracking-wider">
-                Purchase Total Order Pending
-              </span>
-              <ShoppingCart className="w-4 h-4 text-amber-600 shrink-0" />
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-amber-900 uppercase tracking-wider">
+                  Purchase Total Order Pending
+                </span>
+                <ShoppingCart className="w-4 h-4 text-amber-600 shrink-0" />
+              </div>
+              <div className="mt-2.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-amber-950 font-mono">
+                  {Number(inHandSummary.purchaseTotalOrderPending || 0).toFixed(3)}
+                </span>
+                <span className="text-xs font-semibold text-amber-700">Tons</span>
+              </div>
             </div>
-            <div className="mt-3 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-amber-950 font-mono">
-                {Number(inHandSummary.purchaseTotalOrderPending || 0).toFixed(3)}
-              </span>
-              <span className="text-xs font-semibold text-amber-700">Tons</span>
-            </div>
-            <p className="text-[11px] text-amber-700/80 mt-1">Pending to receive from suppliers</p>
+            {inHandAvgPrice > 0 && (
+              <div className="mt-2.5 pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs">
+                <span className="text-[10px] font-semibold text-amber-800 uppercase">Avg. Price:</span>
+                <span className="font-mono font-bold text-amber-900">
+                  ₹{inHandAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
+            <p className="text-[10px] text-amber-700/80 mt-1">Pending to receive from suppliers</p>
           </div>
 
           {/* Plus Sign */}
@@ -462,26 +521,49 @@ const PurchasesList = () => {
           </div>
 
           {/* Box 4: In Hand Order (Highlighted Result Box) */}
-          <div className={`flex-1 border-2 rounded-xl p-4 flex flex-col justify-between shadow-md min-w-[210px] ${
+          <div className={`flex-1 border-2 rounded-xl p-4 flex flex-col justify-between shadow-md min-w-[220px] ${
             Number(inHandSummary.inHandOrder || 0) >= 0 
               ? 'bg-gradient-to-br from-emerald-600 to-teal-700 border-emerald-600 text-white' 
               : 'bg-gradient-to-br from-red-600 to-rose-700 border-red-600 text-white'
           }`}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-emerald-100 uppercase tracking-wider">
-                In Hand Order
-              </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white backdrop-blur-xs">
-                {Number(inHandSummary.inHandOrder || 0) >= 0 ? 'Surplus Balance' : 'Deficit / Shortfall'}
-              </span>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-emerald-100 uppercase tracking-wider">
+                  In Hand Order
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white backdrop-blur-xs">
+                  {Number(inHandSummary.inHandOrder || 0) >= 0 ? 'Surplus Balance' : 'Deficit / Shortfall'}
+                </span>
+              </div>
+              <div className="mt-2.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-white font-mono">
+                  {Number(inHandSummary.inHandOrder || 0).toFixed(3)}
+                </span>
+                <span className="text-xs font-semibold text-emerald-100">Tons</span>
+              </div>
             </div>
-            <div className="mt-3 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-white font-mono">
-                {Number(inHandSummary.inHandOrder || 0).toFixed(3)}
-              </span>
-              <span className="text-xs font-semibold text-emerald-100">Tons</span>
+
+            {/* Inner Average Price Box */}
+            <div className="mt-3 bg-black/25 rounded-lg p-2.5 border border-white/20 shadow-inner">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-emerald-100 uppercase tracking-wider">
+                  Average Price
+                </span>
+                <span className="text-base font-black font-mono text-white tracking-wide">
+                  ₹{inHandAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              {weightedAvgPrice > 0 && Math.abs(weightedAvgPrice - inHandAvgPrice) > 1 && (
+                <div className="flex items-center justify-between text-[10px] text-emerald-200/90 pt-1 mt-1 border-t border-white/10">
+                  <span>Weighted Average:</span>
+                  <span className="font-mono font-semibold">
+                    ₹{weightedAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              )}
             </div>
-            <p className="text-[11px] text-white/80 mt-1">Net uncommitted order balance</p>
+
+            <p className="text-[10px] text-white/80 mt-1.5">Net uncommitted order balance</p>
           </div>
 
         </div>
@@ -549,7 +631,12 @@ const PurchasesList = () => {
                           <td className={`py-2 px-3 text-right font-bold bg-emerald-50/30 ${
                             isInHandPositive ? 'text-emerald-700' : 'text-rose-700'
                           }`}>
-                            {Number(prod.inHandOrder || 0).toFixed(3)} T
+                            <div>{Number(prod.inHandOrder || 0).toFixed(3)} T</div>
+                            {prod.averagePrice > 0 && (
+                              <div className="text-[10px] font-mono text-emerald-800 font-semibold">
+                                Avg: ₹{Number(prod.averagePrice).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -572,7 +659,12 @@ const PurchasesList = () => {
                     </td>
                     <td className="py-2.5 px-2 text-center font-sans">=</td>
                     <td className="py-2.5 px-3 text-right text-emerald-800 font-black">
-                      {Number(inHandSummary.inHandOrder || 0).toFixed(3)} T
+                      <div>{Number(inHandSummary.inHandOrder || 0).toFixed(3)} T</div>
+                      {inHandAvgPrice > 0 && (
+                        <div className="text-[10px] text-emerald-700 font-medium">
+                          Avg: ₹{inHandAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 </tfoot>

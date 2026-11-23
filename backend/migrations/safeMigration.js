@@ -162,7 +162,7 @@ async function runSafeHierarchyMigration() {
       console.log("   ✅ products.difference added.");
     }
 
-    // 3d. Safely drop 'category' and 'price' columns from products table if they exist
+    // 3d. Safely drop 'category' and 'size' columns from products table if they exist
     try {
       const [prodColsNow] = await sequelize.query(`
         SELECT COLUMN_NAME 
@@ -185,10 +185,6 @@ async function runSafeHierarchyMigration() {
         await sequelize.query('ALTER TABLE products DROP COLUMN category');
         console.log("   ✅ products.category dropped successfully.");
       }
-      if (prodColNamesNow.includes('price')) {
-        await sequelize.query('ALTER TABLE products DROP COLUMN price');
-        console.log("   ✅ products.price dropped successfully.");
-      }
       if (prodColNamesNow.includes('size')) {
         await sequelize.query('ALTER TABLE products DROP COLUMN size');
         console.log("   ✅ products.size dropped successfully.");
@@ -197,7 +193,7 @@ async function runSafeHierarchyMigration() {
         await sequelize.query('ALTER TABLE products ADD INDEX products_org_name (organizationId, name)');
       }
     } catch (dropErr) {
-      console.warn('   ⚠️ Note on dropping product category/price:', dropErr.message);
+      console.warn('   ⚠️ Note on dropping product category/size:', dropErr.message);
     }
 
     // 4. Remove bill_audits and estimate_audits tables as requested

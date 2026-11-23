@@ -12,7 +12,8 @@ import {
   Package,
   FileText,
   Layers,
-  Printer
+  Printer,
+  TrendingUp
 } from 'lucide-react';
 import { AuthContext } from '../../context/AuthContext';
 import { getSaleOrderById } from '../../services/saleOrderService';
@@ -123,6 +124,8 @@ const SaleDetail = () => {
   const totalProcessed = items.reduce((s, i) => s + (parseFloat(i.processedQuantity) || 0), 0);
   const totalPending = Math.max(0, totalOrdered - totalProcessed);
   const allocations = sale.allocations || [];
+  const totalAmt = parseFloat(sale.totalAmount) || items.reduce((s, i) => s + (parseFloat(i.amount) || (parseFloat(i.quantity || 0) * parseFloat(i.rate || 0))), 0);
+  const averagePrice = totalOrdered > 0 ? (totalAmt / totalOrdered) : (parseFloat(sale.averagePrice) || 0);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
@@ -180,7 +183,7 @@ const SaleDetail = () => {
       </div>
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         {/* Customer Info */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
@@ -233,6 +236,28 @@ const SaleDetail = () => {
             <div>
               <p className="text-[10px] text-gray-400 font-semibold uppercase">Pending</p>
               <p className="text-sm font-bold text-amber-600">{totalPending.toFixed(2)} T</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Pricing Summary Card */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+            Pricing Summary
+          </h2>
+          <div className="grid grid-cols-2 gap-2 text-center pt-1">
+            <div>
+              <p className="text-[10px] text-gray-400 font-semibold uppercase">Avg. Price</p>
+              <p className="text-sm font-bold text-emerald-700">
+                ₹{averagePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] text-gray-400 font-semibold uppercase">Total Value</p>
+              <p className="text-sm font-bold text-gray-900">
+                ₹{totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
             </div>
           </div>
         </div>
@@ -320,9 +345,13 @@ const SaleDetail = () => {
                 <td className="py-3 px-4 text-right">{totalOrdered.toFixed(3)} T</td>
                 <td className="py-3 px-4 text-right text-emerald-700">{totalProcessed.toFixed(3)} T</td>
                 <td className="py-3 px-4 text-right text-amber-700">{totalPending.toFixed(3)} T</td>
-                <td></td>
-                <td className="py-3 px-4 text-right text-blue-700">
-                  ₹{(parseFloat(sale.totalAmount) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <td className="py-3 px-4 text-right text-xs text-gray-600 font-mono">
+                  {averagePrice > 0 ? (
+                    <span title="Average Price">Avg: ₹{averagePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  ) : '-'}
+                </td>
+                <td className="py-3 px-4 text-right text-blue-700 font-mono">
+                  ₹{totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
               </tr>
             </tfoot>

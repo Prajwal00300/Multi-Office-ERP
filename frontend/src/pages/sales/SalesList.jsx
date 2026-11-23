@@ -166,6 +166,13 @@ const SalesList = () => {
   const partialCount = sales.filter(s => s.status === 'Partially Processed').length;
   const fullyProcessedCount = sales.filter(s => s.status === 'Fully Processed').length;
   const totalOrderedTons = sales.reduce((acc, curr) => acc + (parseFloat(curr.totalOrderedQuantity) || parseFloat(curr.totalQuantity) || 0), 0);
+  const totalSaleValue = sales.reduce((acc, curr) => {
+    const amt = parseFloat(curr.totalAmount);
+    if (!isNaN(amt) && amt > 0) return acc + amt;
+    const itemsSum = (curr.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+    return acc + itemsSum;
+  }, 0);
+  const overallAveragePrice = totalOrderedTons > 0 ? (totalSaleValue / totalOrderedTons) : 0;
 
   return (
     <div className="space-y-6 pb-12">
@@ -220,7 +227,7 @@ const SalesList = () => {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
             <ShoppingBag className="w-5 h-5" />
@@ -269,6 +276,18 @@ const SalesList = () => {
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Ordered</p>
             <p className="text-lg font-bold text-slate-800">
               {totalOrderedTons.toFixed(2)} Tons
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
+          <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-lg">
+            <TrendingUp className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Average Price</p>
+            <p className="text-lg font-bold text-emerald-700">
+              ₹{overallAveragePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
         </div>
@@ -409,6 +428,7 @@ const SalesList = () => {
                   <th className="py-3.5 px-4 text-right">Ordered</th>
                   <th className="py-3.5 px-4 text-right">Processed</th>
                   <th className="py-3.5 px-4 text-right">Pending</th>
+                  <th className="py-3.5 px-4 text-right">Avg. Price</th>
                   {user?.role === 'SUPER_ADMIN' && <th className="py-3.5 px-4">Office</th>}
                   <th className="py-3.5 px-4 text-center">Status</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
@@ -420,6 +440,8 @@ const SalesList = () => {
                   const totalProc = parseFloat(order.totalProcessedQuantity) || 0;
                   const totalPen = Math.max(0, totalOrd - totalProc);
                   const itemsList = order.items || [];
+                  const orderAmt = parseFloat(order.totalAmount) || (order.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+                  const orderAvgPrice = totalOrd > 0 ? (orderAmt / totalOrd) : (parseFloat(order.averagePrice) || 0);
 
                   return (
                     <tr key={order.id} className="hover:bg-gray-50/75 transition-colors">
@@ -491,6 +513,15 @@ const SalesList = () => {
                           <span className="font-bold text-amber-600">
                             {totalPen.toFixed(3)} <span className="text-xs font-normal text-gray-400">T</span>
                           </span>
+                        )}
+                      </td>
+
+                      {/* Avg. Price */}
+                      <td className="py-3 px-4 text-right font-medium text-slate-800 text-sm">
+                        {orderAvgPrice > 0 ? (
+                          <>₹{orderAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
+                        ) : (
+                          <span className="text-gray-400">-</span>
                         )}
                       </td>
 

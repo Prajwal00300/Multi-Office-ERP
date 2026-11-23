@@ -17,9 +17,32 @@ const { syncExistingPurchasePartiesAndProducts } = require('../utils/syncPurchas
 
 // Product Controller
 
+let priceColumnVerified = false;
+async function ensureProductPriceColumn() {
+  if (priceColumnVerified) return;
+  try {
+    const [productColumns] = await sequelize.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products'
+    `);
+    const colNames = (productColumns || []).map(c => (c.COLUMN_NAME || c.column_name || '').toLowerCase());
+    if (!colNames.includes('price')) {
+      await sequelize.query(`
+        ALTER TABLE products 
+        ADD COLUMN price DECIMAL(15, 2) NOT NULL DEFAULT 0.00
+      `);
+    }
+    priceColumnVerified = true;
+  } catch (colErr) {
+    console.warn('Note verifying product price column:', colErr.message);
+  }
+}
+
 // GET /api/products
 exports.getProducts = async (req, res) => {
   try {
+    await ensureProductPriceColumn();
     await syncExistingPurchasePartiesAndProducts();
     const { search, status, organizationId } = req.query;
 
@@ -68,6 +91,7 @@ exports.getProducts = async (req, res) => {
 // GET /api/products/:id
 exports.getProductById = async (req, res) => {
   try {
+    await ensureProductPriceColumn();
     const { id } = req.params;
 
     const product = await Product.findByPk(id, {
@@ -99,9 +123,11 @@ exports.getProductById = async (req, res) => {
 // POST /api/products
 exports.createProduct = async (req, res) => {
   try {
+    await ensureProductPriceColumn();
     const {
       name,
       unit,
+      price,
       difference,
       quantity,
       currentStock,
@@ -118,6 +144,15 @@ exports.createProduct = async (req, res) => {
       return res.status(400).json({ error: 'Product name is required' });
     }
     const productUnit = (unit && unit.trim()) ? unit.trim() : 'Ton';
+
+    // Base Price per Ton (optional, default 0.00)
+    let parsedPrice = 0.00;
+    if (price !== undefined && price !== null && price !== '') {
+      parsedPrice = parseFloat(price);
+      if (isNaN(parsedPrice) || parsedPrice < 0) {
+        return res.status(400).json({ error: 'Product price must be a valid non-negative number' });
+      }
+    }
 
     // Difference: rate difference per Ton (supports positive, zero, and negative values)
     if (difference === undefined || difference === null || difference === '') {
@@ -170,6 +205,7 @@ exports.createProduct = async (req, res) => {
       organizationId: targetOrgId,
       name: name.trim(),
       unit: productUnit,
+      price: parsedPrice,
       difference: parsedDiff,
       currentStock: parsedStock,
       description: description ? description.trim() : null,
@@ -220,10 +256,12 @@ exports.createProduct = async (req, res) => {
 // PUT /api/products/:id
 exports.updateProduct = async (req, res) => {
   try {
+    await ensureProductPriceColumn();
     const { id } = req.params;
     const {
       name,
       unit,
+      price,
       difference,
       quantity,
       currentStock,
@@ -249,6 +287,15 @@ exports.updateProduct = async (req, res) => {
     }
     if (status !== undefined && !['ACTIVE', 'INACTIVE'].includes(status.toUpperCase())) {
       return res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
+    }
+
+    let targetPrice = product.price !== undefined && product.price !== null ? parseFloat(product.price) : 0.00;
+    if (price !== undefined && price !== null && price !== '') {
+      const parsedPrice = parseFloat(price);
+      if (isNaN(parsedPrice) || parsedPrice < 0) {
+        return res.status(400).json({ error: 'Product price must be a valid non-negative number' });
+      }
+      targetPrice = parsedPrice;
     }
 
     let targetDiff = product.difference;
@@ -303,6 +350,7 @@ exports.updateProduct = async (req, res) => {
     await product.update({
       name: targetName,
       unit: unit !== undefined ? unit.trim() : product.unit,
+      price: targetPrice,
       difference: targetDiff,
       currentStock: targetStock,
       description: description !== undefined ? (description ? description.trim() : null) : product.description,

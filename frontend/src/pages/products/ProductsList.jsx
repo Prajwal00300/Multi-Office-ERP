@@ -42,6 +42,7 @@ const ProductsList = () => {
   const [formData, setFormData] = useState({
     name: '',
     unit: 'Ton', // Standard Ton in background
+    price: '',
     difference: '',
     quantity: '',
     description: '',
@@ -109,6 +110,7 @@ const ProductsList = () => {
     setFormData({
       name: '',
       unit: 'Ton',
+      price: '',
       difference: '',
       quantity: '',
       description: '',
@@ -140,9 +142,12 @@ const ProductsList = () => {
       }
     }
 
+    const priceVal = product.price !== undefined && product.price !== null 
+      ? String(product.price) 
+      : '';
     const diffVal = product.difference !== undefined && product.difference !== null 
       ? String(product.difference) 
-      : (product.price !== undefined && product.price !== null ? String(product.price) : '');
+      : '';
     const stockVal = product.currentStock !== undefined && product.currentStock !== null 
       ? String(product.currentStock) 
       : '';
@@ -150,6 +155,7 @@ const ProductsList = () => {
     setFormData({
       name: product.name || '',
       unit: product.unit || 'Ton',
+      price: priceVal,
       difference: diffVal,
       quantity: stockVal,
       description: product.description || '',
@@ -228,6 +234,10 @@ const ProductsList = () => {
       return setModalError('Product name is required.');
     }
 
+    if (formData.price !== '' && formData.price !== null && (isNaN(parseFloat(formData.price)) || parseFloat(formData.price) < 0)) {
+      return setModalError('Product price must be a valid non-negative number.');
+    }
+
     if (formData.difference === '' || formData.difference === null || isNaN(parseFloat(formData.difference))) {
       return setModalError('Product difference is required and must be a valid number (e.g. 0, 500, -200).');
     }
@@ -244,15 +254,19 @@ const ProductsList = () => {
       setModalLoading(true);
       setModalError('');
 
+      const parsedPrice = formData.price !== '' && formData.price !== null && !isNaN(parseFloat(formData.price))
+        ? parseFloat(formData.price)
+        : 0;
       const parsedDiff = parseFloat(formData.difference) || 0;
       const parsedQty = formData.quantity !== '' && formData.quantity !== null 
         ? parseFloat(formData.quantity) 
         : 0;
 
-      // Payload with difference, quantity, and unit in tons
+      // Payload with price, difference, quantity, and unit in tons
       const payload = {
         name: formData.name.trim(),
         unit: 'Ton',
+        price: parsedPrice,
         difference: parsedDiff,
         quantity: parsedQty,
         currentStock: parsedQty,
@@ -475,6 +489,7 @@ const ProductsList = () => {
             <thead>
               <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100 font-semibold">
                 <th className="px-6 py-4">Product Name</th>
+                <th className="px-6 py-4 text-right">Price (₹)</th>
                 <th className="px-6 py-4 text-right">Stock Left</th>
                 <th className="px-6 py-4">Difference (₹)</th>
                 <th className="px-6 py-4">Specifications & Details</th>
@@ -485,7 +500,7 @@ const ProductsList = () => {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
                     <div className="flex justify-center items-center space-x-2">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                       <span className="text-sm font-medium">Loading catalogue...</span>
@@ -494,7 +509,7 @@ const ProductsList = () => {
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="px-6 py-14 text-center">
+                  <td colSpan="7" className="px-6 py-14 text-center">
                     <div className="flex flex-col items-center justify-center space-y-3">
                       <div className="bg-blue-50 text-blue-600 p-3.5 rounded-full">
                         <Package className="h-7 w-7" />
@@ -539,6 +554,16 @@ const ProductsList = () => {
                           )}
                         </div>
                       </div>
+                    </td>
+
+                    {/* Price */}
+                    <td className="px-6 py-4 text-right text-sm font-semibold font-mono text-slate-900 whitespace-nowrap">
+                      {parseFloat(product.price || 0) > 0 ? (
+                        <>₹{parseFloat(product.price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
+                      ) : (
+                        <span className="text-gray-400 font-normal">₹0.00</span>
+                      )}
+                      <span className="text-[11px] text-gray-500 font-sans ml-1 font-normal">/ Ton</span>
                     </td>
 
                     {/* Stock Left */}
@@ -640,7 +665,7 @@ const ProductsList = () => {
                     {editingProduct ? 'Edit Product' : 'Add New Product'}
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Enter product rate difference and current inventory quantity.
+                    Enter product price, rate difference, and current inventory quantity.
                   </p>
                 </div>
               </div>
@@ -700,8 +725,29 @@ const ProductsList = () => {
                 />
               </div>
 
-              {/* Difference, Quantity, and Status (Units removed from popup) */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Price, Difference, Quantity, and Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
+                    Price (₹)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 font-bold text-xs pointer-events-none">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.price}
+                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                      placeholder="0.00"
+                      className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm font-mono font-bold focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Base price per Ton</p>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
                     Difference (₹) <span className="text-red-500">*</span>

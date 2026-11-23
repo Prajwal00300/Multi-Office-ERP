@@ -55,6 +55,7 @@ async function ensureProductForOrderLine(organizationId, { name, unit, specifica
     organizationId: parseInt(organizationId, 10),
     name: cleanName,
     unit: unit ? String(unit).trim() : 'Ton',
+    price: 0.00,
     difference: 0,
     specifications: specifications ? String(specifications).trim() : null,
     currentStock: 0,
