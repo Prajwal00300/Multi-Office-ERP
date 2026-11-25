@@ -558,9 +558,10 @@ export default function EstimateVoucherWorkspace() {
     setMode('ADD');
     setActiveRowIdx(0);
 
-    // Fetch next upcoming estimate number preview
+    // Fetch next upcoming estimate number preview for today
     try {
-      const estRes = await getNextEstimateNumber(orgId);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const estRes = await getNextEstimateNumber(orgId, todayStr);
       if (estRes?.nextEstimateNumber) {
         setEstimateNumber(estRes.nextEstimateNumber);
       }
@@ -574,6 +575,20 @@ export default function EstimateVoucherWorkspace() {
       }
     }, 50);
   };
+
+  // Keep estimateNumber in sync with date changes in ADD mode (daily sequential numbering)
+  useEffect(() => {
+    if (mode === 'ADD') {
+      const targetDate = estimateDate || new Date().toISOString().split('T')[0];
+      getNextEstimateNumber(effectiveOrgId, targetDate)
+        .then(res => {
+          if (res?.nextEstimateNumber) {
+            setEstimateNumber(res.nextEstimateNumber);
+          }
+        })
+        .catch(err => console.warn('Could not update estimate number for date:', err));
+    }
+  }, [estimateDate, effectiveOrgId, mode]);
 
   // ==========================================
   // Real-Time Calculations Engine (No GST)
@@ -1105,6 +1120,18 @@ export default function EstimateVoucherWorkspace() {
     }
     await resetToAddMode();
     setSuccessMsg('Ready for new entry. Select customer, enter products and quantities.');
+  };
+
+  // CANCEL (only active when making a new entry)
+  const handleCancel = async () => {
+    if (mode !== 'ADD' || actionLoading) return;
+    if (isDirty) {
+      const confirmCancel = window.confirm('Are you sure you want to cancel? All entered details will be removed.');
+      if (!confirmCancel) return;
+    }
+    await resetToAddMode();
+    setErrorMsg('');
+    setSuccessMsg('Entry cancelled. All details have been removed.');
   };
 
   // EDIT
@@ -2723,6 +2750,17 @@ export default function EstimateVoucherWorkspace() {
                 title="Delete current Sale Voucher Estimate"
               >
                 Delete
+              </button>
+
+              {/* 4. Cancel */}
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={actionLoading || mode !== 'ADD'}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-gray-800 font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer"
+                title={mode === 'ADD' ? 'Cancel entry and remove all details' : 'Cancel is only active when making a new entry'}
+              >
+                Cancel
               </button>
 
               {/* 4. Previous */}

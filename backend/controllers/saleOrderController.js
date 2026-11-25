@@ -118,16 +118,33 @@ const computeSaleOrderStatus = (items) => {
   return 'Fully Processed';
 };
 
-const generateUniqueSaleOrderNumber = async (organizationId, transaction) => {
+const generateUniqueSaleOrderNumber = async (organizationId, transaction, targetDate) => {
+  if (organizationId && typeof organizationId === 'object' && organizationId.commit) {
+    targetDate = transaction;
+    transaction = organizationId;
+    organizationId = null;
+  }
+
+  // Normalize date string (YYYY-MM-DD)
+  let effectiveDate = targetDate;
+  if (!effectiveDate) {
+    effectiveDate = new Date().toISOString().split('T')[0];
+  } else if (effectiveDate instanceof Date) {
+    effectiveDate = effectiveDate.toISOString().split('T')[0];
+  } else {
+    effectiveDate = String(effectiveDate).split('T')[0].trim();
+  }
+
   await ensureSaleOrderTablesExist();
   let query;
   let replacements = [];
 
   if (organizationId) {
-    query = "SELECT MAX(CAST(orderNumber AS UNSIGNED)) AS maxNum FROM sale_orders WHERE organizationId = ? AND orderNumber REGEXP '^[0-9]+$'";
-    replacements = [parseInt(organizationId, 10)];
+    query = "SELECT MAX(CAST(orderNumber AS UNSIGNED)) AS maxNum FROM sale_orders WHERE organizationId = ? AND orderDate = ? AND orderNumber REGEXP '^[0-9]+$'";
+    replacements = [parseInt(organizationId, 10), effectiveDate];
   } else {
-    query = "SELECT MAX(CAST(orderNumber AS UNSIGNED)) AS maxNum FROM sale_orders WHERE orderNumber REGEXP '^[0-9]+$'";
+    query = "SELECT MAX(CAST(orderNumber AS UNSIGNED)) AS maxNum FROM sale_orders WHERE orderDate = ? AND orderNumber REGEXP '^[0-9]+$'";
+    replacements = [effectiveDate];
   }
 
   const options = { replacements };
@@ -150,7 +167,7 @@ const generateUniqueSaleOrderNumber = async (organizationId, transaction) => {
 
   while (true) {
     const candidate = String(nextSequence);
-    const where = { orderNumber: candidate };
+    const where = { orderNumber: candidate, orderDate: effectiveDate };
     if (organizationId) {
       where.organizationId = parseInt(organizationId, 10);
     }
@@ -254,10 +271,10 @@ exports.getSaleOrders = async (req, res) => {
 exports.getNextSaleOrderNumber = async (req, res) => {
   try {
     await ensureSaleOrderTablesExist();
-    const { organizationId } = req.query;
+    const { organizationId, date } = req.query;
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
     const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : (req.user.organizationId || null);
-    const nextNumber = await generateUniqueSaleOrderNumber(effectiveOrgId);
+    const nextNumber = await generateUniqueSaleOrderNumber(effectiveOrgId, null, date);
     res.status(200).json({ nextOrderNumber: nextNumber });
   } catch (error) {
     if (error.statusCode) {
@@ -526,19 +543,21 @@ exports.createSaleOrder = async (req, res) => {
     }
 
     // Determine unique sequential order number
+    const effectiveOrderDate = orderDate ? String(orderDate).split('T')[0] : new Date().toISOString().split('T')[0];
     let finalOrderNumber = orderNumber ? String(orderNumber).trim() : '';
     if (!finalOrderNumber) {
-      finalOrderNumber = await generateUniqueSaleOrderNumber(targetOrgId, t);
+      finalOrderNumber = await generateUniqueSaleOrderNumber(targetOrgId, t, effectiveOrderDate);
     } else {
       const existing = await SaleOrder.findOne({
         where: {
           organizationId: targetOrgId,
-          orderNumber: finalOrderNumber
+          orderNumber: finalOrderNumber,
+          orderDate: effectiveOrderDate
         },
         transaction: t
       });
       if (existing) {
-        finalOrderNumber = await generateUniqueSaleOrderNumber(targetOrgId, t);
+        finalOrderNumber = await generateUniqueSaleOrderNumber(targetOrgId, t, effectiveOrderDate);
       }
     }
 

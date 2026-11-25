@@ -191,7 +191,7 @@ const Estimate = sequelize.define('Estimate', {
   indexes: [
     {
       unique: true,
-      fields: ['organizationId', 'estimateNumber']
+      fields: ['organizationId', 'estimateDate', 'estimateNumber']
     },
     {
       unique: false,

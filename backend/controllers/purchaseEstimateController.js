@@ -826,10 +826,10 @@ exports.getPendingOrderSummary = async (req, res) => {
 exports.getNextPurchaseEstimateNumber = async (req, res) => {
   try {
     await ensurePurchaseEstimateTablesExist();
-    const { organizationId } = req.query;
+    const { organizationId, date } = req.query;
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
     const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : (req.user.organizationId || null);
-    const nextNumber = await generateUniquePurchaseEstimateNumber(effectiveOrgId);
+    const nextNumber = await generateUniquePurchaseEstimateNumber(effectiveOrgId, null, date);
     res.status(200).json({ nextEstimateNumber: nextNumber });
   } catch (error) {
     if (error.statusCode) {
@@ -1027,7 +1027,8 @@ exports.createPurchaseEstimate = async (req, res) => {
       expAfterTax
     });
 
-    const estimateNumber = await generateUniquePurchaseEstimateNumber(targetOrgId, t);
+    const effectiveEstDate = estimateDate ? String(estimateDate).split('T')[0] : new Date().toISOString().split('T')[0];
+    const estimateNumber = await generateUniquePurchaseEstimateNumber(targetOrgId, t, effectiveEstDate);
     const isGenerated = status === 'GENERATED';
 
     const newEstimate = await PurchaseEstimate.create({

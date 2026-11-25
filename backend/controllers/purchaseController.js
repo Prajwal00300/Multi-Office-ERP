@@ -192,10 +192,10 @@ exports.getPurchases = async (req, res) => {
  */
 exports.getNextPurchaseNumber = async (req, res) => {
   try {
-    const { organizationId } = req.query;
+    const { organizationId, date } = req.query;
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
     const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : req.user.organizationId;
-    const nextPurchaseNumber = await generateUniquePurchaseNumber(effectiveOrgId);
+    const nextPurchaseNumber = await generateUniquePurchaseNumber(effectiveOrgId, null, date);
     res.status(200).json({ nextPurchaseNumber });
   } catch (error) {
     console.error('Error generating next purchase number preview:', error);
@@ -937,20 +937,21 @@ exports.createPurchase = async (req, res) => {
     }
 
     // 3. Resolve Serial Number (purchaseNumber: sequential integer 1, 2, 3, 4...)
+    const effectivePurchaseDate = purchaseDate ? String(purchaseDate).split('T')[0] : new Date().toISOString().split('T')[0];
     let finalOrderNumber = (purchaseNumber && /^[0-9]+$/.test(String(purchaseNumber).trim()))
       ? String(parseInt(purchaseNumber, 10))
       : null;
 
     if (finalOrderNumber) {
       const existing = await Purchase.findOne({
-        where: { purchaseNumber: finalOrderNumber, organizationId: targetOrgId },
+        where: { purchaseNumber: finalOrderNumber, organizationId: targetOrgId, purchaseDate: effectivePurchaseDate },
         transaction
       });
       if (existing) {
-        finalOrderNumber = await generateUniquePurchaseNumber(targetOrgId, transaction);
+        finalOrderNumber = await generateUniquePurchaseNumber(targetOrgId, transaction, effectivePurchaseDate);
       }
     } else {
-      finalOrderNumber = await generateUniquePurchaseNumber(targetOrgId, transaction);
+      finalOrderNumber = await generateUniquePurchaseNumber(targetOrgId, transaction, effectivePurchaseDate);
     }
 
     // 4. Create Parent Purchase Order

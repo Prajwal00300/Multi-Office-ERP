@@ -35,8 +35,11 @@ export const getNextPurchaseEstimate = async (currentId, organizationId) => {
   return res.data;
 };
 
-export const getNextPurchaseEstimateNumber = async (organizationId) => {
-  const query = organizationId ? `?organizationId=${organizationId}` : '';
+export const getNextPurchaseEstimateNumber = async (organizationId, date) => {
+  const params = new URLSearchParams();
+  if (organizationId) params.append('organizationId', organizationId);
+  if (date) params.append('date', date);
+  const query = params.toString() ? `?${params.toString()}` : '';
   const res = await api.get(`/purchase-estimates/next-number${query}`);
   return res.data;
 };

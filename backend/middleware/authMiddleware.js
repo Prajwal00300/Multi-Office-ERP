@@ -19,9 +19,18 @@ const authMiddleware = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Verify user exists and check active status
-    const user = await User.findByPk(decoded.userId, {
+    let user = await User.findByPk(decoded.userId, {
       attributes: ['id', 'username', 'role', 'status', 'organizationId']
     });
+
+    // Graceful backward-compatibility fallback for sessions created before ID reset (e.g. 30001 -> 1)
+    if (!user && (decoded.userId === 30001 || decoded.userId === 60001 || decoded.userId === 60002)) {
+      const fallbackUsername = decoded.userId === 30001 ? 'prajwal' : (decoded.userId === 60001 ? 'manjit' : 'kevin');
+      user = await User.findOne({
+        where: { username: fallbackUsername },
+        attributes: ['id', 'username', 'role', 'status', 'organizationId']
+      });
+    }
 
     if (!user) {
       return res.status(401).json({ error: 'User account not found' });

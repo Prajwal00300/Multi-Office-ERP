@@ -2,28 +2,41 @@ const sequelize = require('../config/database');
 const Estimate = require('../models/Estimate');
 
 /**
- * Generates a persistent, sequential, unique estimate number for a specific office.
- * Format: simple sequential integer string (1, 2, 3, 4, 5...) isolated per organizationId.
+ * Generates a persistent, sequential, unique estimate number for a specific office,
+ * refreshed daily per estimateDate (1, 2, 3, 4, 5... each day).
  *
  * @param {number|string} [organizationId] - Office ID to scope the estimate number sequence
  * @param {Object} [transaction] - Sequelize transaction for concurrency lock
+ * @param {string|Date} [targetDate] - Date of the estimate (defaults to today)
  * @returns {Promise<string>}
  */
-const generateUniqueEstimateNumber = async (organizationId, transaction) => {
+const generateUniqueEstimateNumber = async (organizationId, transaction, targetDate) => {
   // If only 1 argument passed and it's a transaction object
   if (organizationId && typeof organizationId === 'object' && organizationId.commit) {
+    targetDate = transaction;
     transaction = organizationId;
     organizationId = null;
+  }
+
+  // Normalize date string (YYYY-MM-DD)
+  let effectiveDate = targetDate;
+  if (!effectiveDate) {
+    effectiveDate = new Date().toISOString().split('T')[0];
+  } else if (effectiveDate instanceof Date) {
+    effectiveDate = effectiveDate.toISOString().split('T')[0];
+  } else {
+    effectiveDate = String(effectiveDate).split('T')[0].trim();
   }
 
   let query;
   let replacements = [];
 
   if (organizationId) {
-    query = "SELECT MAX(CAST(estimateNumber AS UNSIGNED)) AS maxNum FROM estimates WHERE organizationId = ? AND estimateNumber REGEXP '^[0-9]+$'";
-    replacements = [parseInt(organizationId, 10)];
+    query = "SELECT MAX(CAST(estimateNumber AS UNSIGNED)) AS maxNum FROM estimates WHERE organizationId = ? AND estimateDate = ? AND estimateNumber REGEXP '^[0-9]+$'";
+    replacements = [parseInt(organizationId, 10), effectiveDate];
   } else {
-    query = "SELECT MAX(CAST(estimateNumber AS UNSIGNED)) AS maxNum FROM estimates WHERE estimateNumber REGEXP '^[0-9]+$'";
+    query = "SELECT MAX(CAST(estimateNumber AS UNSIGNED)) AS maxNum FROM estimates WHERE estimateDate = ? AND estimateNumber REGEXP '^[0-9]+$'";
+    replacements = [effectiveDate];
   }
 
   const options = { replacements };
@@ -44,10 +57,10 @@ const generateUniqueEstimateNumber = async (organizationId, transaction) => {
     }
   }
 
-  // Safety check: ensure string sequence doesn't collide within this organization
+  // Safety check: ensure string sequence doesn't collide within this organization and date
   while (true) {
     const candidate = String(nextSequence);
-    const where = { estimateNumber: candidate };
+    const where = { estimateNumber: candidate, estimateDate: effectiveDate };
     if (organizationId) {
       where.organizationId = parseInt(organizationId, 10);
     }

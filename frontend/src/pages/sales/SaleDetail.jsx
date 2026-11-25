@@ -230,7 +230,7 @@ const SaleDetail = () => {
               <p className="text-sm font-bold text-gray-900">{totalOrdered.toFixed(2)} T</p>
             </div>
             <div>
-              <p className="text-[10px] text-gray-400 font-semibold uppercase">Processed</p>
+              <p className="text-[10px] text-gray-400 font-semibold uppercase">Delivered</p>
               <p className="text-sm font-bold text-emerald-600">{totalProcessed.toFixed(2)} T</p>
             </div>
             <div>
@@ -284,7 +284,7 @@ const SaleDetail = () => {
                 <th className="py-3 px-4">Specifications</th>
                 <th className="py-3 px-4 text-center">Carbon Type</th>
                 <th className="py-3 px-4 text-right">Ordered (T)</th>
-                <th className="py-3 px-4 text-right">Processed (T)</th>
+                <th className="py-3 px-4 text-right">Delivered (T)</th>
                 <th className="py-3 px-4 text-right">Pending (T)</th>
                 <th className="py-3 px-4 text-right">Rate (₹)</th>
                 <th className="py-3 px-4 text-right">Amount (₹)</th>

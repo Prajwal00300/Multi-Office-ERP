@@ -426,7 +426,7 @@ const SalesList = () => {
                   <th className="py-3.5 px-4">Customer / Buyer</th>
                   <th className="py-3.5 px-4 min-w-[220px]">Products & Carbon Types</th>
                   <th className="py-3.5 px-4 text-right">Ordered</th>
-                  <th className="py-3.5 px-4 text-right">Processed</th>
+                  <th className="py-3.5 px-4 text-right">Delivered</th>
                   <th className="py-3.5 px-4 text-right">Pending</th>
                   <th className="py-3.5 px-4 text-right">Avg. Price</th>
                   {user?.role === 'SUPER_ADMIN' && <th className="py-3.5 px-4">Office</th>}
@@ -498,7 +498,7 @@ const SalesList = () => {
                         {totalOrd.toFixed(3)} <span className="text-xs font-normal text-gray-500">T</span>
                       </td>
 
-                      {/* Processed Qty */}
+                      {/* Delivered Qty */}
                       <td className="py-3 px-4 text-right font-medium text-emerald-700 text-sm">
                         {totalProc.toFixed(3)} <span className="text-xs font-normal text-gray-400">T</span>
                       </td>

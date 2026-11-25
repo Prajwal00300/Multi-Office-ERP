@@ -596,14 +596,15 @@ export default function PurchaseEstimateVoucherWorkspace() {
     setMode('ADD');
     setActiveRowIdx(0);
 
-    // Fetch next upcoming estimate number preview
+    // Fetch next upcoming purchase estimate number preview for today
     try {
-      const estRes = await getNextEstimateNumber(orgId);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const estRes = await getNextPurchaseEstimateNumber(orgId, todayStr);
       if (estRes?.nextEstimateNumber) {
         setEstimateNumber(estRes.nextEstimateNumber);
       }
     } catch (err) {
-      console.warn('Could not fetch next estimate number preview:', err);
+      console.warn('Could not fetch next purchase estimate number preview:', err);
     }
 
     setTimeout(() => {
@@ -612,6 +613,20 @@ export default function PurchaseEstimateVoucherWorkspace() {
       }
     }, 50);
   };
+
+  // Keep estimateNumber in sync with date changes in ADD mode (daily sequential numbering)
+  useEffect(() => {
+    if (mode === 'ADD') {
+      const targetDate = estimateDate || new Date().toISOString().split('T')[0];
+      getNextPurchaseEstimateNumber(effectiveOrgId, targetDate)
+        .then(res => {
+          if (res?.nextEstimateNumber) {
+            setEstimateNumber(res.nextEstimateNumber);
+          }
+        })
+        .catch(err => console.warn('Could not update purchase estimate number for date:', err));
+    }
+  }, [estimateDate, effectiveOrgId, mode]);
 
   // ==========================================
   // Real-Time Calculations Engine (No GST)
@@ -876,7 +891,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
         return;
       }
 
-      if (colIdx < 2) {
+      if (colIdx < 7) {
         focusCell(rowIdx, colIdx + 1);
       } else {
         if (rowIdx === transactionItems.length - 1) {
@@ -916,10 +931,19 @@ export default function PurchaseEstimateVoucherWorkspace() {
 
     // 6. ARROW RIGHT
     if (e.key === 'ArrowRight') {
-      const atEnd = e.target.selectionStart === e.target.value?.length;
-      if (atEnd) {
+      if (colIdx === 0 || colIdx === 1) {
+        const atEnd = e.target.selectionStart === e.target.value?.length;
+        if (atEnd) {
+          e.preventDefault();
+          if (colIdx < 7) {
+            focusCell(rowIdx, colIdx + 1);
+          } else {
+            focusCell(rowIdx + 1, 0);
+          }
+        }
+      } else {
         e.preventDefault();
-        if (colIdx < 2) {
+        if (colIdx < 7) {
           focusCell(rowIdx, colIdx + 1);
         } else {
           focusCell(rowIdx + 1, 0);
@@ -930,8 +954,22 @@ export default function PurchaseEstimateVoucherWorkspace() {
 
     // 7. ARROW LEFT
     if (e.key === 'ArrowLeft') {
-      const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
-      if (atStart) {
+      if (colIdx === 0 || colIdx === 1) {
+        const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
+        if (atStart) {
+          e.preventDefault();
+          if (colIdx > 0) {
+            focusCell(rowIdx, colIdx - 1);
+          } else {
+            if (rowIdx === 0 && refVehicle.current) {
+              refVehicle.current.focus();
+              refVehicle.current.select?.();
+            } else if (rowIdx > 0) {
+              focusCell(rowIdx - 1, 7);
+            }
+          }
+        }
+      } else {
         e.preventDefault();
         if (colIdx > 0) {
           focusCell(rowIdx, colIdx - 1);
@@ -940,7 +978,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
             refVehicle.current.focus();
             refVehicle.current.select?.();
           } else if (rowIdx > 0) {
-            focusCell(rowIdx - 1, 2);
+            focusCell(rowIdx - 1, 7);
           }
         }
       }
@@ -1120,6 +1158,18 @@ export default function PurchaseEstimateVoucherWorkspace() {
     }
     await resetToAddMode();
     setSuccessMsg('Ready for new entry. Select customer, enter products and quantities.');
+  };
+
+  // CANCEL (only active when making a new entry)
+  const handleCancel = async () => {
+    if (mode !== 'ADD' || actionLoading) return;
+    if (isDirty) {
+      const confirmCancel = window.confirm('Are you sure you want to cancel? All entered details will be removed.');
+      if (!confirmCancel) return;
+    }
+    await resetToAddMode();
+    setErrorMsg('');
+    setSuccessMsg('Entry cancelled. All details have been removed.');
   };
 
   // EDIT
@@ -1985,10 +2035,15 @@ export default function PurchaseEstimateVoucherWorkspace() {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="h-5">
-                  <th className="w-8 border-r border-[#7f9db9] py-0.5 text-center font-mono">▸</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left w-[48%] min-w-[200px]">Product Name</th>
-                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left w-[36%] min-w-[160px]">Description</th>
-                  <th className="px-2 py-0.5 text-right w-[16%] min-w-[90px]">Quantity</th>
+                  <th className="w-6 border-r border-[#7f9db9] py-0.5 text-center font-mono">▸</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[150px]">Product Name</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-left min-w-[150px]">Description</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">Difference</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-16">Pcs</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-20">Quantity</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">B.Rate</th>
+                  <th className="border-r border-[#7f9db9] px-2 py-0.5 text-right w-24">Rate</th>
+                  <th className="px-2 py-0.5 text-right w-28">Amount</th>
                 </tr>
               </thead>
             </table>
@@ -2001,6 +2056,13 @@ export default function PurchaseEstimateVoucherWorkspace() {
                 {transactionItems.map((item, idx) => {
                   const isActive = idx === activeRowIdx;
                   const filtered = getFilteredProducts(item.productName);
+                  const hasProduct = Boolean(item.productId || (item.productName && item.productName.trim()));
+                  const hasRowData = Boolean(
+                    hasProduct ||
+                    (item.quantity && item.quantity !== '') ||
+                    (item.difference && item.difference !== '0.00' && item.difference !== '') ||
+                    (item.pcs && item.pcs !== '0' && item.pcs !== '')
+                  );
 
                   return (
                     <tr
@@ -2021,14 +2083,14 @@ export default function PurchaseEstimateVoucherWorkspace() {
                     >
                       {/* Active Row Indicator */}
                       <td
-                        className="w-8 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none cursor-pointer"
+                        className="w-6 border-r border-[#7f9db9] text-center text-black font-bold p-0 select-none cursor-pointer"
                         title="Press Ctrl+Delete to remove this row"
                       >
                         {isActive ? '▸' : ''}
                       </td>
 
                       {/* Product Name (Col 0) */}
-                      <td className="border-r border-[#7f9db9] p-0 relative w-[48%] min-w-[200px]">
+                      <td className="border-r border-[#7f9db9] p-0 relative min-w-[150px]">
                         <input
                           ref={(el) => {
                             if (el) cellRefs.current[`${idx}-0`] = el;
@@ -2088,7 +2150,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
                       </td>
 
                       {/* Description (Col 1) */}
-                      <td className="border-r border-[#7f9db9] p-0 w-[36%] min-w-[160px]">
+                      <td className="border-r border-[#7f9db9] p-0 min-w-[150px]">
                         <input
                           ref={(el) => {
                             if (el) cellRefs.current[`${idx}-1`] = el;
@@ -2107,12 +2169,53 @@ export default function PurchaseEstimateVoucherWorkspace() {
                         />
                       </td>
 
-                      {/* Quantity (Col 2) */}
-                      <td className="p-0 text-right w-[16%] min-w-[90px]">
+                      {/* Difference (Col 2) */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
                         <input
                           ref={(el) => {
                             if (el) cellRefs.current[`${idx}-2`] = el;
                             else delete cellRefs.current[`${idx}-2`];
+                          }}
+                          type="number"
+                          step="any"
+                          value={hasRowData ? item.difference : ''}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemDifferenceChange(idx, e.target.value)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 2;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 2)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
+                        />
+                      </td>
+
+                      {/* Pcs (Col 3) */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-16">
+                        <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-3`] = el;
+                            else delete cellRefs.current[`${idx}-3`];
+                          }}
+                          type="number"
+                          value={hasRowData ? item.pcs : ''}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemPcsChange(idx, e.target.value)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 3;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 3)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
+                        />
+                      </td>
+
+                      {/* Quantity (Col 4) */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-20">
+                        <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-4`] = el;
+                            else delete cellRefs.current[`${idx}-4`];
                           }}
                           type="number"
                           step="any"
@@ -2121,10 +2224,73 @@ export default function PurchaseEstimateVoucherWorkspace() {
                           onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
-                            currentFocusedCol.current = 2;
+                            currentFocusedCol.current = 4;
                           }}
-                          onKeyDown={(e) => handleCellKeyDown(e, idx, 2)}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 4)}
                           className="w-full h-5 px-1.5 text-right text-xs font-mono font-bold text-black bg-transparent border-0 outline-none focus:bg-white"
+                        />
+                      </td>
+
+                      {/* B.Rate (Col 5) */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
+                        <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-5`] = el;
+                            else delete cellRefs.current[`${idx}-5`];
+                          }}
+                          type="number"
+                          step="any"
+                          value={hasProduct ? (item.basicRate || headerBRate || '') : (item.basicRate || '')}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 5;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 5)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono text-black bg-transparent border-0 outline-none"
+                        />
+                      </td>
+
+                      {/* Rate (Col 6: Calculated / Editable: B.Rate + Diff) */}
+                      <td className="border-r border-[#7f9db9] p-0 text-right w-24">
+                        <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-6`] = el;
+                            else delete cellRefs.current[`${idx}-6`];
+                          }}
+                          type="number"
+                          step="any"
+                          value={hasProduct ? (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : (item.finalRate || '')) : (item.finalRate && item.finalRate !== '0.00' ? item.finalRate : '')}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemRateChange(idx, e.target.value)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 6;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 6)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono font-medium text-black bg-transparent border-0 outline-none focus:bg-white"
+                        />
+                      </td>
+
+                      {/* Amount (Col 7: Calculated / Editable: Rate * Qty) */}
+                      <td className="p-0 text-right w-28">
+                        <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-7`] = el;
+                            else delete cellRefs.current[`${idx}-7`];
+                          }}
+                          type="number"
+                          step="any"
+                          value={hasProduct ? (item.amount && item.amount !== '0.00' ? item.amount : '') : (item.amount && item.amount !== '0.00' ? item.amount : '')}
+                          disabled={!isEditable}
+                          onChange={(e) => handleItemAmountChange(idx, e.target.value)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 7;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 7)}
+                          className="w-full h-5 px-1 text-right text-xs font-mono font-semibold text-black bg-transparent border-0 outline-none focus:bg-white"
                         />
                       </td>
                     </tr>
@@ -2138,13 +2304,31 @@ export default function PurchaseEstimateVoucherWorkspace() {
         {/* TOTALS ROW DIRECTLY UNDER GRID COLUMNS */}
         <div className="shrink-0 flex items-center justify-end space-x-2 text-xs pt-0.5">
           <div className="flex items-center space-x-1">
-            <span className="font-bold text-[11px] text-black">Total Qty:</span>
+            <input
+              type="text"
+              readOnly
+              value={calculations.totalPcs}
+              className="w-16 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+              title="Total Pieces"
+            />
+          </div>
+          <div className="flex items-center space-x-1">
             <input
               type="text"
               readOnly
               value={calculations.totalQty}
-              className="w-24 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
+              className="w-20 h-5 bg-white border border-[#7f9db9] px-1 text-right font-mono font-bold text-black text-[11px]"
               title="Total Quantity"
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="font-bold text-[11px] text-black">Value</span>
+            <input
+              type="text"
+              readOnly
+              value={calculations.value}
+              className="w-28 h-5 bg-white border border-[#7f9db9] px-2 text-right font-mono font-bold text-black text-[11px]"
+              title="Total Value"
             />
           </div>
         </div>
@@ -2633,6 +2817,17 @@ export default function PurchaseEstimateVoucherWorkspace() {
                 title="Delete current Purchase Estimate"
               >
                 Delete
+              </button>
+
+              {/* 4. Cancel */}
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={actionLoading || mode !== 'ADD'}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-gray-800 font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer"
+                title={mode === 'ADD' ? 'Cancel entry and remove all details' : 'Cancel is only active when making a new entry'}
+              >
+                Cancel
               </button>
 
               {/* 4. Previous */}

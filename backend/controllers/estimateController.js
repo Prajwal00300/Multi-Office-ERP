@@ -722,10 +722,10 @@ exports.getEstimateByNumber = async (req, res) => {
  */
 exports.getNextEstimateNumber = async (req, res) => {
   try {
-    const { organizationId } = req.query;
+    const { organizationId, date } = req.query;
     const { targetOfficeIds } = await getAuthorizedOfficeScope(req.user, organizationId);
     const effectiveOrgId = (targetOfficeIds && targetOfficeIds.length > 0) ? targetOfficeIds[0] : req.user.organizationId;
-    const nextEstimateNumber = await generateUniqueEstimateNumber(effectiveOrgId);
+    const nextEstimateNumber = await generateUniqueEstimateNumber(effectiveOrgId, null, date);
     res.status(200).json({ nextEstimateNumber });
   } catch (error) {
     console.error('Error generating next estimate number preview:', error);
@@ -918,8 +918,9 @@ exports.createEstimate = async (req, res) => {
       expAfterTax
     });
 
-    // 5. Generate persistent unique estimate number scoped to this office
-    const estimateNumber = await generateUniqueEstimateNumber(targetOrgId, t);
+    // 5. Generate persistent unique estimate number scoped to this office and date
+    const effectiveEstDate = estimateDate ? String(estimateDate).split('T')[0] : new Date().toISOString().split('T')[0];
+    const estimateNumber = await generateUniqueEstimateNumber(targetOrgId, t, effectiveEstDate);
 
     const isGenerated = status === 'GENERATED';
 

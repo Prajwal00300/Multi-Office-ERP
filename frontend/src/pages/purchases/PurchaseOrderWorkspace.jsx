@@ -122,6 +122,9 @@ export default function PurchaseOrderWorkspace() {
   // Lower Section Fields
   const [orderRemark, setOrderRemark] = useState('');
   const remarkTextareaRef = useRef(null);
+  const partyInputRef = useRef(null);
+  const cellRefs = useRef({});
+  const currentFocusedCol = useRef(0);
 
   // UI Status
   const [errorMsg, setErrorMsg] = useState('');
@@ -245,15 +248,30 @@ export default function PurchaseOrderWorkspace() {
     setIsDirty(false);
     setMode('ADD');
 
-    // Fetch next sequential purchase number preview (1, 2, 3, 4...)
+    // Fetch next sequential purchase number preview (1, 2, 3, 4...) for today
     try {
-      const numRes = await getNextPurchaseNumber(orgId ? { organizationId: orgId } : {});
+      const todayStr = new Date().toISOString().split('T')[0];
+      const numRes = await getNextPurchaseNumber({ organizationId: orgId, date: todayStr });
       setOrderNumber(cleanSerialNumber(numRes?.nextPurchaseNumber) || '1');
     } catch (err) {
       console.warn('Failed to preview next purchase number:', err);
       setOrderNumber('1');
     }
   };
+
+  // Keep orderNumber in sync with date changes in ADD mode (daily sequential numbering)
+  useEffect(() => {
+    if (mode === 'ADD') {
+      const targetDate = orderDate || new Date().toISOString().split('T')[0];
+      getNextPurchaseNumber({ organizationId: effectiveOrgId, date: targetDate })
+        .then(res => {
+          if (res?.nextPurchaseNumber) {
+            setOrderNumber(cleanSerialNumber(res.nextPurchaseNumber) || '1');
+          }
+        })
+        .catch(err => console.warn('Could not update purchase order number for date:', err));
+    }
+  }, [orderDate, effectiveOrgId, mode]);
 
   // Initial Load: Either specific purchaseId or latest order / new entry
   useEffect(() => {
@@ -343,6 +361,52 @@ export default function PurchaseOrderWorkspace() {
     });
   };
 
+  const focusCell = (rowIdx, colIdx) => {
+    if (rowIdx < 0) {
+      if (partyInputRef.current) {
+        partyInputRef.current.focus();
+        partyInputRef.current.select?.();
+      }
+      return;
+    }
+
+    const boundedRow = Math.max(0, Math.min(rowIdx, orderItems.length - 1));
+    const boundedCol = Math.max(0, Math.min(colIdx, 3));
+
+    setActiveRowIdx(boundedRow);
+    currentFocusedCol.current = boundedCol;
+
+    const key = `${boundedRow}-${boundedCol}`;
+    const target = cellRefs.current[key];
+    if (target) {
+      target.focus();
+      if (target.select) {
+        target.select();
+      }
+      target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+  };
+
+  const handleDeleteRow = (indexToDelete, colIdx = 0) => {
+    if (!isEditable || actionLoading) return;
+    markDirtyAndEdit();
+
+    setOrderItems(prev => {
+      const updated = prev.filter((_, i) => i !== indexToDelete);
+      while (updated.length < DEFAULT_ROWS_COUNT) {
+        updated.push({ ...BLANK_ORDER_ROW });
+      }
+      return updated;
+    });
+
+    setActiveAutocompleteIdx(null);
+    const targetRow = Math.max(0, Math.min(indexToDelete, orderItems.length - 2));
+    setActiveRowIdx(targetRow);
+    setTimeout(() => {
+      focusCell(targetRow, colIdx);
+    }, 20);
+  };
+
   // Select product from suggestion popup
   const handleSelectProductSuggestion = (index, prod) => {
     if (!isEditable) return;
@@ -352,7 +416,9 @@ export default function PurchaseOrderWorkspace() {
     setOrderItems(prev => {
       const updated = [...prev];
       const q = parseFloat(updated[index].quantity) || 0;
-      const p = parseFloat(updated[index].price) || 0;
+      const prodPrice = prod.price !== undefined && prod.price !== null ? parseFloat(prod.price) : 0;
+      const currentP = parseFloat(updated[index].price) || prodPrice;
+      const p = currentP > 0 ? currentP : prodPrice;
       const amt = q * p;
 
       updated[index] = {
@@ -360,37 +426,193 @@ export default function PurchaseOrderWorkspace() {
         productId: String(prod.id),
         productName: prod.name,
         description: prod.specifications || prod.description || prod.name,
+        price: p > 0 ? p.toFixed(2) : (updated[index].price || ''),
         amount: amt > 0 ? amt.toFixed(2) : '0.00'
       };
       return updated;
     });
     setActiveAutocompleteIdx(null);
     setHighlightedSuggestionIdx(0);
+    setTimeout(() => {
+      focusCell(index, 1);
+    }, 20);
   };
 
-  // Keyboard navigation for product autocomplete
-  const handleProductInputKeyDown = (e, idx, filtered) => {
+  // Keyboard navigation for cells: Enter key, Arrow keys, Tab, etc.
+  const handleCellKeyDown = (e, rowIdx, colIdx) => {
     if (!isEditable) return;
-    const hasTyped = Boolean(orderItems[idx]?.productName && orderItems[idx]?.productName.trim());
-    if (activeAutocompleteIdx !== idx || filtered.length === 0 || !hasTyped) {
+
+    // 1. Delete Row with Ctrl+Delete / Ctrl+Backspace / Cmd+Backspace
+    const isCtrlDelete =
+      (e.ctrlKey && (e.key === 'Delete' || e.key === 'Del' || e.code === 'Delete' || e.key === 'Backspace')) ||
+      (e.metaKey && (e.key === 'Delete' || e.key === 'Del' || e.code === 'Delete' || e.key === 'Backspace'));
+
+    if (isCtrlDelete) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleDeleteRow(rowIdx, colIdx);
       return;
     }
 
+    // 2. Col 0 (Product Name) with Autocomplete open
+    if (colIdx === 0) {
+      const hasTypedText = Boolean(orderItems[rowIdx]?.productName?.trim());
+      const filtered = getFilteredProducts(orderItems[rowIdx]?.productName || '');
+      const isDropdownOpen = activeAutocompleteIdx === rowIdx && hasTypedText && filtered.length > 0;
+
+      if (isDropdownOpen) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setHighlightedSuggestionIdx(prev => (prev + 1) % filtered.length);
+          return;
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setHighlightedSuggestionIdx(prev => (prev - 1 + filtered.length) % filtered.length);
+          return;
+        } else if (e.key === 'Enter' || e.key === 'Tab') {
+          if (highlightedSuggestionIdx >= 0 && highlightedSuggestionIdx < filtered.length) {
+            e.preventDefault();
+            handleSelectProductSuggestion(rowIdx, filtered[highlightedSuggestionIdx]);
+            return;
+          } else {
+            setActiveAutocompleteIdx(null);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setActiveAutocompleteIdx(null);
+          return;
+        }
+      }
+    }
+
+    // 3. ENTER KEY navigation
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // If pressing Enter on empty product name in col 0, navigate directly down to Remark
+      if (colIdx === 0 && !orderItems[rowIdx]?.productName?.trim()) {
+        if (remarkTextareaRef.current) {
+          remarkTextareaRef.current.focus();
+          remarkTextareaRef.current.select?.();
+        }
+        return;
+      }
+
+      if (colIdx < 3) {
+        focusCell(rowIdx, colIdx + 1);
+      } else {
+        if (rowIdx === orderItems.length - 1) {
+          setOrderItems(prev => [...prev, { ...BLANK_ORDER_ROW }]);
+        }
+        focusCell(rowIdx + 1, 0);
+      }
+      return;
+    }
+
+    // 4. TAB KEY navigation
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      if (colIdx < 3) {
+        focusCell(rowIdx, colIdx + 1);
+      } else {
+        if (rowIdx === orderItems.length - 1) {
+          setOrderItems(prev => [...prev, { ...BLANK_ORDER_ROW }]);
+        }
+        focusCell(rowIdx + 1, 0);
+      }
+      return;
+    } else if (e.key === 'Tab' && e.shiftKey) {
+      e.preventDefault();
+      if (colIdx > 0) {
+        focusCell(rowIdx, colIdx - 1);
+      } else if (rowIdx > 0) {
+        focusCell(rowIdx - 1, 3);
+      } else {
+        partyInputRef.current?.focus();
+      }
+      return;
+    }
+
+    // 5. ARROW DOWN
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightedSuggestionIdx(prev => (prev + 1) % filtered.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlightedSuggestionIdx(prev => (prev - 1 + filtered.length) % filtered.length);
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      if (highlightedSuggestionIdx >= 0 && highlightedSuggestionIdx < filtered.length) {
-        e.preventDefault();
-        handleSelectProductSuggestion(idx, filtered[highlightedSuggestionIdx]);
-      } else {
-        setActiveAutocompleteIdx(null);
+      if (rowIdx === orderItems.length - 1) {
+        if (remarkTextareaRef.current) {
+          remarkTextareaRef.current.focus();
+        }
+        return;
       }
-    } else if (e.key === 'Escape') {
-      setActiveAutocompleteIdx(null);
+      focusCell(rowIdx + 1, colIdx);
+      return;
+    }
+
+    // 6. ARROW UP
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (rowIdx === 0) {
+        if (partyInputRef.current) {
+          partyInputRef.current.focus();
+          partyInputRef.current.select?.();
+        }
+      } else {
+        focusCell(rowIdx - 1, colIdx);
+      }
+      return;
+    }
+
+    // 7. ARROW RIGHT
+    if (e.key === 'ArrowRight') {
+      if (colIdx === 0 || colIdx === 1) {
+        const atEnd = e.target.selectionStart === (e.target.value?.length || 0);
+        if (atEnd) {
+          e.preventDefault();
+          if (colIdx < 3) {
+            focusCell(rowIdx, colIdx + 1);
+          } else {
+            focusCell(rowIdx + 1, 0);
+          }
+        }
+      } else {
+        e.preventDefault();
+        if (colIdx < 3) {
+          focusCell(rowIdx, colIdx + 1);
+        } else {
+          focusCell(rowIdx + 1, 0);
+        }
+      }
+      return;
+    }
+
+    // 8. ARROW LEFT
+    if (e.key === 'ArrowLeft') {
+      if (colIdx === 0 || colIdx === 1) {
+        const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
+        if (atStart) {
+          e.preventDefault();
+          if (colIdx > 0) {
+            focusCell(rowIdx, colIdx - 1);
+          } else {
+            if (rowIdx === 0 && partyInputRef.current) {
+              partyInputRef.current.focus();
+              partyInputRef.current.select?.();
+            } else if (rowIdx > 0) {
+              focusCell(rowIdx - 1, 3);
+            }
+          }
+        }
+      } else {
+        e.preventDefault();
+        if (colIdx > 0) {
+          focusCell(rowIdx, colIdx - 1);
+        } else {
+          if (rowIdx === 0 && partyInputRef.current) {
+            partyInputRef.current.focus();
+            partyInputRef.current.select?.();
+          } else if (rowIdx > 0) {
+            focusCell(rowIdx - 1, 3);
+          }
+        }
+      }
+      return;
     }
   };
 
@@ -510,6 +732,18 @@ export default function PurchaseOrderWorkspace() {
     setErrorMsg('');
     setSuccessMsg('');
     await resetToAddMode();
+  };
+
+  // CANCEL (only active when making a new entry)
+  const handleCancel = async () => {
+    if (mode !== 'ADD' || actionLoading) return;
+    if (isDirty) {
+      const confirmCancel = window.confirm('Are you sure you want to cancel? All entered details will be removed.');
+      if (!confirmCancel) return;
+    }
+    await resetToAddMode();
+    setErrorMsg('');
+    setSuccessMsg('Entry cancelled. All details have been removed.');
   };
 
   // 2. EDIT
@@ -848,6 +1082,7 @@ export default function PurchaseOrderWorkspace() {
             <label className="font-bold text-[11px] text-black w-22 shrink-0">Party Name</label>
             <div className="flex-1 relative">
               <input
+                ref={partyInputRef}
                 type="text"
                 value={partyName}
                 disabled={!isEditable}
@@ -860,6 +1095,13 @@ export default function PurchaseOrderWorkspace() {
                   markDirtyAndEdit();
                   setPartyName(e.target.value);
                   setShowPartySuggestions(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setShowPartySuggestions(false);
+                    focusCell(0, 0);
+                  }
                 }}
                 className={`w-full h-5 border border-[#7f9db9] px-1 text-[11px] font-bold focus:outline-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-800 cursor-not-allowed select-none'}`}
               />
@@ -945,12 +1187,17 @@ export default function PurchaseOrderWorkspace() {
                       {/* Product Name */}
                       <td className="border-r border-[#7f9db9] p-0 relative min-w-[200px]">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-0`] = el;
+                            else delete cellRefs.current[`${idx}-0`];
+                          }}
                           type="text"
                           value={item.productName}
                           disabled={!isEditable}
                           onChange={(e) => handleProductNameInputChange(idx, e.target.value)}
                           onFocus={() => {
                             setActiveRowIdx(idx);
+                            currentFocusedCol.current = 0;
                             if (isEditable && item.productName && item.productName.trim()) {
                               setActiveAutocompleteIdx(idx);
                               setHighlightedSuggestionIdx(0);
@@ -958,7 +1205,7 @@ export default function PurchaseOrderWorkspace() {
                               setActiveAutocompleteIdx(null);
                             }
                           }}
-                          onKeyDown={(e) => handleProductInputKeyDown(e, idx, filtered)}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 0)}
                           className={`w-full h-5 px-1 text-xs border-0 outline-none font-medium ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
 
@@ -1000,11 +1247,19 @@ export default function PurchaseOrderWorkspace() {
                       {/* Description (Optional) */}
                       <td className="border-r border-[#7f9db9] p-0 min-w-[220px]">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-1`] = el;
+                            else delete cellRefs.current[`${idx}-1`];
+                          }}
                           type="text"
                           value={item.description}
                           disabled={!isEditable}
                           onChange={(e) => handleItemDescriptionChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 1;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 1)}
                           className={`w-full h-5 px-1 text-xs border-0 outline-none ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
                       </td>
@@ -1012,12 +1267,20 @@ export default function PurchaseOrderWorkspace() {
                       {/* Quantity */}
                       <td className="border-r border-[#7f9db9] p-0 text-right w-32">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-2`] = el;
+                            else delete cellRefs.current[`${idx}-2`];
+                          }}
                           type="number"
                           step="any"
                           value={item.quantity}
                           disabled={!isEditable}
                           onChange={(e) => handleItemQuantityChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 2;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 2)}
                           className={`w-full h-5 px-1 text-right text-xs font-mono border-0 outline-none ${isEditable ? 'text-black bg-transparent' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
                       </td>
@@ -1025,12 +1288,20 @@ export default function PurchaseOrderWorkspace() {
                       {/* Price */}
                       <td className="p-0 text-right w-36">
                         <input
+                          ref={(el) => {
+                            if (el) cellRefs.current[`${idx}-3`] = el;
+                            else delete cellRefs.current[`${idx}-3`];
+                          }}
                           type="number"
                           step="any"
                           value={hasRowData ? item.price : ''}
                           disabled={!isEditable}
                           onChange={(e) => handleItemPriceChange(idx, e.target.value)}
-                          onFocus={() => setActiveRowIdx(idx)}
+                          onFocus={() => {
+                            setActiveRowIdx(idx);
+                            currentFocusedCol.current = 3;
+                          }}
+                          onKeyDown={(e) => handleCellKeyDown(e, idx, 3)}
                           className={`w-full h-5 px-1 text-right text-xs font-mono font-medium border-0 outline-none ${isEditable ? 'text-black bg-transparent focus:bg-white' : 'text-slate-800 bg-transparent cursor-not-allowed select-none'}`}
                         />
                       </td>
@@ -1141,6 +1412,17 @@ export default function PurchaseOrderWorkspace() {
                 title="Delete current Purchase Order"
               >
                 Delete
+              </button>
+
+              {/* 4. Cancel */}
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={actionLoading || mode !== 'ADD'}
+                className="px-3 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-gray-800 font-semibold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer"
+                title={mode === 'ADD' ? 'Cancel entry and remove all details' : 'Cancel is only active when making a new entry'}
+              >
+                Cancel
               </button>
 
               {/* 4. Previous */}
