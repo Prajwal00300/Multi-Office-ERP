@@ -18,21 +18,31 @@ export const getPurchaseEstimateById = async (id) => {
 };
 
 export const getPreviousPurchaseEstimate = async (currentId, organizationId) => {
-  const query = new URLSearchParams();
-  if (currentId) query.append('currentId', currentId);
-  if (organizationId) query.append('organizationId', organizationId);
-  const queryString = query.toString();
-  const res = await api.get(`/purchase-estimates/navigation/previous${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const query = new URLSearchParams();
+    if (currentId) query.append('currentId', currentId);
+    if (organizationId) query.append('organizationId', organizationId);
+    const queryString = query.toString();
+    const res = await api.get(`/purchase-estimates/navigation/previous${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextPurchaseEstimate = async (currentId, organizationId) => {
-  const query = new URLSearchParams();
-  if (currentId) query.append('currentId', currentId);
-  if (organizationId) query.append('organizationId', organizationId);
-  const queryString = query.toString();
-  const res = await api.get(`/purchase-estimates/navigation/next${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const query = new URLSearchParams();
+    if (currentId) query.append('currentId', currentId);
+    if (organizationId) query.append('organizationId', organizationId);
+    const queryString = query.toString();
+    const res = await api.get(`/purchase-estimates/navigation/next${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextPurchaseEstimateNumber = async (organizationId, date) => {
@@ -45,15 +55,25 @@ export const getNextPurchaseEstimateNumber = async (organizationId, date) => {
 };
 
 export const getFirstPurchaseEstimate = async (organizationId) => {
-  const query = organizationId ? `?organizationId=${organizationId}` : '';
-  const res = await api.get(`/purchase-estimates/navigation/first${query}`);
-  return res.data;
+  try {
+    const query = organizationId ? `?organizationId=${organizationId}` : '';
+    const res = await api.get(`/purchase-estimates/navigation/first${query}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getLastPurchaseEstimate = async (organizationId) => {
-  const query = organizationId ? `?organizationId=${organizationId}` : '';
-  const res = await api.get(`/purchase-estimates/navigation/last${query}`);
-  return res.data;
+  try {
+    const query = organizationId ? `?organizationId=${organizationId}` : '';
+    const res = await api.get(`/purchase-estimates/navigation/last${query}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const createPurchaseEstimate = async (data) => {

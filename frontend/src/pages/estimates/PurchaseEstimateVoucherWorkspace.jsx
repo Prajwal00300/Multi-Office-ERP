@@ -7,7 +7,7 @@ import {
   getNextPurchaseEstimate as getNextEstimate,
   getFirstPurchaseEstimate as getFirstEstimate,
   getLastPurchaseEstimate as getLastEstimate,
-  getNextPurchaseEstimateNumber as getNextEstimateNumber,
+  getNextPurchaseEstimateNumber,
   getPurchaseEstimateById as getEstimateById,
   createPurchaseEstimate as createEstimate,
   updatePurchaseEstimate as updateEstimate,
@@ -1249,6 +1249,8 @@ export default function PurchaseEstimateVoucherWorkspace() {
         populateEstimateIntoState(prevEst);
         setMode('VIEW');
         setSuccessMsg(`Loaded previous Purchase Estimate #${prevEst.estimateNumber}.`);
+      } else {
+        setErrorMsg('No earlier estimate found for this office.');
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'No earlier estimate found for this office.';
@@ -1275,6 +1277,8 @@ export default function PurchaseEstimateVoucherWorkspace() {
         populateEstimateIntoState(nextEst);
         setMode('VIEW');
         setSuccessMsg(`Loaded Purchase Estimate #${nextEst.estimateNumber}.`);
+      } else {
+        setErrorMsg('No subsequent estimate found for this office.');
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'No subsequent estimate found for this office.';

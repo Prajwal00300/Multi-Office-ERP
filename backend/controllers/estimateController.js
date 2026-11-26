@@ -473,7 +473,7 @@ exports.getPreviousEstimate = async (req, res) => {
     });
 
     if (!estimate) {
-      return res.status(404).json({ error: 'No previous estimate found for this office' });
+      return res.status(200).json(null);
     }
 
     await verifyRecordOwnership(estimate, req.user);
@@ -544,7 +544,7 @@ exports.getNextEstimate = async (req, res) => {
     });
 
     if (!estimate) {
-      return res.status(404).json({ error: 'No subsequent estimate found for this office' });
+      return res.status(200).json(null);
     }
 
     await verifyRecordOwnership(estimate, req.user);
@@ -604,7 +604,7 @@ exports.getFirstEstimate = async (req, res) => {
     });
 
     if (!estimate) {
-      return res.status(404).json({ error: 'No estimates found for this office' });
+      return res.status(200).json(null);
     }
 
     await verifyRecordOwnership(estimate, req.user);
@@ -663,7 +663,7 @@ exports.getLastEstimate = async (req, res) => {
     });
 
     if (!estimate) {
-      return res.status(404).json({ error: 'No estimates found for this office' });
+      return res.status(200).json(null);
     }
 
     await verifyRecordOwnership(estimate, req.user);

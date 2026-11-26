@@ -534,7 +534,7 @@ exports.getPreviousPurchaseEstimate = async (req, res) => {
       order: [['id', 'DESC']]
     });
 
-    if (!prevEstimate) return res.status(404).json({ error: 'No previous purchase estimate found' });
+    if (!prevEstimate) return res.status(200).json(null);
     res.status(200).json(prevEstimate);
   } catch (error) {
     if (error.statusCode) {
@@ -569,7 +569,7 @@ exports.getNextPurchaseEstimate = async (req, res) => {
       order: [['id', 'ASC']]
     });
 
-    if (!nextEstimate) return res.status(404).json({ error: 'No next purchase estimate found' });
+    if (!nextEstimate) return res.status(200).json(null);
     res.status(200).json(nextEstimate);
   } catch (error) {
     if (error.statusCode) {
@@ -600,7 +600,7 @@ exports.getFirstPurchaseEstimate = async (req, res) => {
       order: [['id', 'ASC']]
     });
 
-    if (!firstEstimate) return res.status(404).json({ error: 'No purchase estimates found' });
+    if (!firstEstimate) return res.status(200).json(null);
     res.status(200).json(firstEstimate);
   } catch (error) {
     if (error.statusCode) {
@@ -631,7 +631,7 @@ exports.getLastPurchaseEstimate = async (req, res) => {
       order: [['id', 'DESC']]
     });
 
-    if (!lastEstimate) return res.status(404).json({ error: 'No purchase estimates found' });
+    if (!lastEstimate) return res.status(200).json(null);
     res.status(200).json(lastEstimate);
   } catch (error) {
     if (error.statusCode) {

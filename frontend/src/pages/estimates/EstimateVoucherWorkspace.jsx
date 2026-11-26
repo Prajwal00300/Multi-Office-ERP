@@ -1211,6 +1211,8 @@ export default function EstimateVoucherWorkspace() {
         populateEstimateIntoState(prevEst);
         setMode('VIEW');
         setSuccessMsg(`Loaded previous Sale Voucher Estimate #${prevEst.estimateNumber}.`);
+      } else {
+        setErrorMsg('No earlier estimate found for this office.');
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'No earlier estimate found for this office.';
@@ -1237,6 +1239,8 @@ export default function EstimateVoucherWorkspace() {
         populateEstimateIntoState(nextEst);
         setMode('VIEW');
         setSuccessMsg(`Loaded Sale Voucher Estimate #${nextEst.estimateNumber}.`);
+      } else {
+        setErrorMsg('No subsequent estimate found for this office.');
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'No subsequent estimate found for this office.';

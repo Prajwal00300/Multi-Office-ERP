@@ -18,21 +18,31 @@ export const getEstimateById = async (id) => {
 };
 
 export const getPreviousEstimate = async (currentId, organizationId) => {
-  const query = new URLSearchParams();
-  if (currentId) query.append('currentId', currentId);
-  if (organizationId) query.append('organizationId', organizationId);
-  const queryString = query.toString();
-  const res = await api.get(`/estimates/navigation/previous${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const query = new URLSearchParams();
+    if (currentId) query.append('currentId', currentId);
+    if (organizationId) query.append('organizationId', organizationId);
+    const queryString = query.toString();
+    const res = await api.get(`/estimates/navigation/previous${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextEstimate = async (currentId, organizationId) => {
-  const query = new URLSearchParams();
-  if (currentId) query.append('currentId', currentId);
-  if (organizationId) query.append('organizationId', organizationId);
-  const queryString = query.toString();
-  const res = await api.get(`/estimates/navigation/next${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const query = new URLSearchParams();
+    if (currentId) query.append('currentId', currentId);
+    if (organizationId) query.append('organizationId', organizationId);
+    const queryString = query.toString();
+    const res = await api.get(`/estimates/navigation/next${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextEstimateNumber = async (organizationId, date) => {
@@ -45,15 +55,25 @@ export const getNextEstimateNumber = async (organizationId, date) => {
 };
 
 export const getFirstEstimate = async (organizationId) => {
-  const query = organizationId ? `?organizationId=${organizationId}` : '';
-  const res = await api.get(`/estimates/navigation/first${query}`);
-  return res.data;
+  try {
+    const query = organizationId ? `?organizationId=${organizationId}` : '';
+    const res = await api.get(`/estimates/navigation/first${query}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getLastEstimate = async (organizationId) => {
-  const query = organizationId ? `?organizationId=${organizationId}` : '';
-  const res = await api.get(`/estimates/navigation/last${query}`);
-  return res.data;
+  try {
+    const query = organizationId ? `?organizationId=${organizationId}` : '';
+    const res = await api.get(`/estimates/navigation/last${query}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const createEstimate = async (data) => {
