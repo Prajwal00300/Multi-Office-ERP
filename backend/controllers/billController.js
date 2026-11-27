@@ -233,7 +233,7 @@ exports.getPreviousBill = async (req, res) => {
     });
 
     if (!bill) {
-      return res.status(404).json({ error: 'No previous transaction found for this office' });
+      return res.status(200).json(null);
     }
 
     // Ownership check
@@ -321,7 +321,7 @@ exports.getNextBill = async (req, res) => {
     });
 
     if (!bill) {
-      return res.status(404).json({ error: 'No subsequent transaction found for this office' });
+      return res.status(200).json(null);
     }
 
     // Ownership check

@@ -121,7 +121,9 @@ const PurchasesList = () => {
   // In Hand Order State: Purchase Total Order Pending + In House Stock - Sales Total Order Pending = In Hand Order
   const [inHandSummary, setInHandSummary] = useState({
     purchaseTotalOrderPending: 0,
+    purchasePendingTotalPrice: 0,
     inHouseStock: 0,
+    inHouseStockTotalPrice: 0,
     salesTotalOrderPending: 0,
     inHandOrder: 0,
     inHandAveragePrice: 0,
@@ -170,31 +172,52 @@ const PurchasesList = () => {
   }, 0);
   const overallAveragePrice = totalOrderedTons > 0 ? (totalPurchaseValue / totalOrderedTons) : 0;
 
-  // Average Price formula as requested: (avgPrice1 + avgPrice2 + ...) / (qty1 + qty2 + ...)
-  // e.g. for 140 ton (avg 69000) and 100 ton (avg 58000) => (69000 + 58000) / (140 + 100)
-  const inHandAvgPrice = useMemo(() => {
-    let sumOfAvgPrices = 0;
-    let totalOrderedTons = 0;
+  // Total Pending Purchase Value = sum of (pendingQty * averagePrice) for pending orders
+  const purchasePendingTotalPrice = useMemo(() => {
+    let sum = 0;
+    let foundPending = false;
 
     (purchases || []).forEach(p => {
-      const q = parseFloat(p.totalOrderedQuantity) || parseFloat(p.totalQuantity) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity) || 0), 0);
-      const amt = parseFloat(p.totalAmount) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
-      const avg = q > 0 ? (amt / q) : (parseFloat(p.averagePrice) || 0);
+      if (p.status === 'CANCELLED') return;
+      const totalOrd = parseFloat(p.totalOrderedQuantity) || parseFloat(p.totalQuantity) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity) || 0), 0);
+      const totalRec = parseFloat(p.totalReceivedQuantity) || 0;
+      const totalPen = Math.max(0, totalOrd - totalRec);
 
-      if (q > 0 && avg > 0) {
-        sumOfAvgPrices += avg;
-        totalOrderedTons += q;
+      if (totalPen > 0) {
+        foundPending = true;
+        const orderAmt = parseFloat(p.totalAmount) || (p.items || []).reduce((s, it) => s + (parseFloat(it.quantity || 0) * parseFloat(it.rate || 0)), 0);
+        const orderAvgPrice = totalOrd > 0 ? (orderAmt / totalOrd) : (parseFloat(p.averagePrice) || 0);
+        sum += (totalPen * orderAvgPrice);
       }
     });
 
-    if (totalOrderedTons > 0 && sumOfAvgPrices > 0) {
-      return sumOfAvgPrices / totalOrderedTons;
+    if (foundPending) {
+      return sum;
+    }
+    if (inHandSummary && inHandSummary.purchasePendingTotalPrice !== undefined) {
+      return parseFloat(inHandSummary.purchasePendingTotalPrice) || 0;
+    }
+    return sum;
+  }, [purchases, inHandSummary.purchasePendingTotalPrice]);
+
+  // In Hand Average Price = (Price in Yellow Box + Price in Blue Box) / (Quantity in Yellow Box + Quantity in Blue Box)
+  const inHandAvgPrice = useMemo(() => {
+    const yellowPrice = parseFloat(purchasePendingTotalPrice) || 0;
+    const bluePrice = parseFloat(inHandSummary.inHouseStockTotalPrice) || 0;
+    const yellowQty = parseFloat(inHandSummary.purchaseTotalOrderPending) || 0;
+    const blueQty = parseFloat(inHandSummary.inHouseStock) || 0;
+
+    const totalQty = yellowQty + blueQty;
+    const totalPrice = yellowPrice + bluePrice;
+
+    if (totalQty > 0) {
+      return totalPrice / totalQty;
     }
     if (inHandSummary && parseFloat(inHandSummary.inHandAveragePrice) > 0) {
       return parseFloat(inHandSummary.inHandAveragePrice);
     }
-    return overallAveragePrice || 0;
-  }, [purchases, inHandSummary.inHandAveragePrice, overallAveragePrice]);
+    return 0;
+  }, [purchasePendingTotalPrice, inHandSummary.inHouseStockTotalPrice, inHandSummary.purchaseTotalOrderPending, inHandSummary.inHouseStock, inHandSummary.inHandAveragePrice]);
 
   // Standard Weighted Average Price: sum(qty * rate) / sum(qty)
   const weightedAvgPrice = useMemo(() => {
@@ -454,14 +477,12 @@ const PurchasesList = () => {
                 <span className="text-xs font-semibold text-amber-700">Tons</span>
               </div>
             </div>
-            {inHandAvgPrice > 0 && (
-              <div className="mt-2.5 pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs">
-                <span className="text-[10px] font-semibold text-amber-800 uppercase">Avg. Price:</span>
-                <span className="font-mono font-bold text-amber-900">
-                  ₹{inHandAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            )}
+            <div className="mt-2.5 pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs">
+              <span className="text-[10px] font-semibold text-amber-800 uppercase">Total Price:</span>
+              <span className="font-mono font-bold text-amber-900">
+                ₹{purchasePendingTotalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
             <p className="text-[10px] text-amber-700/80 mt-1">Pending to receive from suppliers</p>
           </div>
 
@@ -474,19 +495,27 @@ const PurchasesList = () => {
 
           {/* Box 2: In House Stock */}
           <div className="flex-1 bg-blue-50/80 border-2 border-blue-300 rounded-xl p-4 flex flex-col justify-between shadow-sm min-w-[210px]">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">
-                In House Stock
-              </span>
-              <Package className="w-4 h-4 text-blue-600 shrink-0" />
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">
+                  In House Stock
+                </span>
+                <Package className="w-4 h-4 text-blue-600 shrink-0" />
+              </div>
+              <div className="mt-2.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-blue-950 font-mono">
+                  {Number(inHandSummary.inHouseStock || 0).toFixed(3)}
+                </span>
+                <span className="text-xs font-semibold text-blue-700">Tons</span>
+              </div>
             </div>
-            <div className="mt-3 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-blue-950 font-mono">
-                {Number(inHandSummary.inHouseStock || 0).toFixed(3)}
+            <div className="mt-2.5 pt-2 border-t border-blue-200/80 flex items-center justify-between text-xs">
+              <span className="text-[10px] font-semibold text-blue-800 uppercase">Total Price:</span>
+              <span className="font-mono font-bold text-blue-900">
+                ₹{Number(inHandSummary.inHouseStockTotalPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span className="text-xs font-semibold text-blue-700">Tons</span>
             </div>
-            <p className="text-[11px] text-blue-700/80 mt-1">Current physical stock in warehouse</p>
+            <p className="text-[10px] text-blue-700/80 mt-1">Current physical stock in warehouse</p>
           </div>
 
           {/* Minus Sign */}
@@ -553,14 +582,6 @@ const PurchasesList = () => {
                   ₹{inHandAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
-              {weightedAvgPrice > 0 && Math.abs(weightedAvgPrice - inHandAvgPrice) > 1 && (
-                <div className="flex items-center justify-between text-[10px] text-emerald-200/90 pt-1 mt-1 border-t border-white/10">
-                  <span>Weighted Average:</span>
-                  <span className="font-mono font-semibold">
-                    ₹{weightedAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-              )}
             </div>
 
             <p className="text-[10px] text-white/80 mt-1.5">Net uncommitted order balance</p>
@@ -621,7 +642,12 @@ const PurchasesList = () => {
                           </td>
                           <td className="py-2 px-2 text-center text-gray-400 font-sans">+</td>
                           <td className="py-2 px-3 text-right text-blue-900 bg-blue-50/20">
-                            {Number(prod.inHouseStock || 0).toFixed(3)} T
+                            <div>{Number(prod.inHouseStock || 0).toFixed(3)} T</div>
+                            {Number(prod.price || 0) > 0 && (
+                              <div className="text-[10px] font-mono text-blue-800 font-semibold">
+                                Price: ₹{Number(prod.price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            )}
                           </td>
                           <td className="py-2 px-2 text-center text-gray-400 font-sans">−</td>
                           <td className="py-2 px-3 text-right text-rose-900 bg-rose-50/20">
@@ -647,11 +673,21 @@ const PurchasesList = () => {
                   <tr>
                     <td className="py-2.5 px-3 font-sans">Total Balance</td>
                     <td className="py-2.5 px-3 text-right text-amber-900">
-                      {Number(inHandSummary.purchaseTotalOrderPending || 0).toFixed(3)} T
+                      <div>{Number(inHandSummary.purchaseTotalOrderPending || 0).toFixed(3)} T</div>
+                      {purchasePendingTotalPrice > 0 && (
+                        <div className="text-[10px] font-mono text-amber-800 font-semibold">
+                          ₹{purchasePendingTotalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                     <td className="py-2.5 px-2 text-center font-sans">+</td>
                     <td className="py-2.5 px-3 text-right text-blue-900">
-                      {Number(inHandSummary.inHouseStock || 0).toFixed(3)} T
+                      <div>{Number(inHandSummary.inHouseStock || 0).toFixed(3)} T</div>
+                      {Number(inHandSummary.inHouseStockTotalPrice || 0) > 0 && (
+                        <div className="text-[10px] font-mono text-blue-800 font-semibold">
+                          ₹{Number(inHandSummary.inHouseStockTotalPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                     <td className="py-2.5 px-2 text-center font-sans">−</td>
                     <td className="py-2.5 px-3 text-right text-rose-900">

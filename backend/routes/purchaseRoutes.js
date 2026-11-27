@@ -6,7 +6,7 @@ const checkModulePermission = require('../middleware/checkModulePermission');
 
 // Role-based authorization middleware for Purchase module
 const authorizePurchaseAccess = (req, res, next) => {
-  const allowedRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'];
+  const allowedRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING', 'USER', 'WEIGHBRIDGE_CONTROLLER'];
 
   if (!allowedRoles.includes(req.user.role)) {
     return res.status(403).json({

@@ -13,7 +13,8 @@ import {
   Layers, 
   Ruler, 
   FileText,
-  AlertCircle
+  AlertCircle,
+  IndianRupee
 } from 'lucide-react';
 import api from '../../services/api';
 import { AuthContext } from '../../context/AuthContext';
@@ -350,6 +351,12 @@ const ProductsList = () => {
     );
   };
 
+  // Quick Summary Calculations
+  const inStockCount = products.filter(p => parseFloat(p.currentStock || 0) > 0).length;
+  const outOfStockCount = products.filter(p => parseFloat(p.currentStock || 0) <= 0).length;
+  const totalStockLeft = products.reduce((acc, p) => acc + (parseFloat(p.currentStock || 0)), 0);
+  const totalPrice = products.reduce((acc, p) => acc + (parseFloat(p.price || 0)), 0);
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -385,8 +392,8 @@ const ProductsList = () => {
         </div>
       )}
 
-      {/* Quick Stock Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Quick Stock & Price Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center space-x-3">
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
             <Package size={20} />
@@ -404,7 +411,7 @@ const ProductsList = () => {
           <div>
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">In Stock</p>
             <p className="text-xl font-bold text-emerald-700">
-              {products.filter(p => parseFloat(p.currentStock || 0) > 0).length}
+              {inStockCount}
             </p>
           </div>
         </div>
@@ -416,7 +423,7 @@ const ProductsList = () => {
           <div>
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Zero / Out of Stock</p>
             <p className="text-xl font-bold text-amber-700">
-              {products.filter(p => parseFloat(p.currentStock || 0) <= 0).length}
+              {outOfStockCount}
             </p>
           </div>
         </div>
@@ -428,7 +435,19 @@ const ProductsList = () => {
           <div>
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Stock Left</p>
             <p className="text-xl font-bold text-teal-700">
-              {products.reduce((acc, p) => acc + (parseFloat(p.currentStock || 0)), 0).toFixed(2)} Tons
+              {totalStockLeft.toFixed(2)} Tons
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center space-x-3">
+          <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-lg">
+            <IndianRupee size={20} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Price</p>
+            <p className="text-xl font-bold text-indigo-700">
+              ₹{totalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
         </div>

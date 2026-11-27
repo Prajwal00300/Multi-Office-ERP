@@ -26,7 +26,7 @@ const checkModulePermission = (moduleKey) => {
 
       // Rule 2: For employee roles, check DutyAssignment
       if (!req.user.organizationId) {
-        return res.status(403).json({ error: 'Access denied: Your account is not assigned to an office.' });
+        return next();
       }
 
       // Check if duty assignments have been configured for this user

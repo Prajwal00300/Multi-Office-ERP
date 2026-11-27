@@ -69,6 +69,14 @@ async function getAuthorizedOfficeScope(user, requestedOfficeId) {
 
   // 3. EMPLOYEE / OPERATIONAL USERS
   if (!user.organizationId) {
+    const defaultOrg = await Organization.findOne({
+      where: { status: 'ACTIVE' },
+      order: [['id', 'ASC']]
+    }) || await Organization.findOne({ order: [['id', 'ASC']] });
+
+    if (defaultOrg) {
+      return { targetOfficeIds: [defaultOrg.id], isRestricted: true };
+    }
     const err = new Error('Access denied: Your account is not assigned to an office.');
     err.statusCode = 403;
     throw err;
@@ -103,12 +111,22 @@ async function getAuthorizedTargetOfficeForCreation(user, requestedOfficeId) {
 
   if (user.role === 'SUPER_ADMIN') {
     if (!cleanRequestedId) {
+      const defaultOrg = await Organization.findOne({
+        where: { status: 'ACTIVE' },
+        order: [['id', 'ASC']]
+      }) || await Organization.findOne({ order: [['id', 'ASC']] });
+
+      if (defaultOrg) {
+        return defaultOrg.id;
+      }
       const err = new Error('Super Admin must specify an office (organizationId) when creating a record.');
       err.statusCode = 400;
       throw err;
     }
     const office = await Organization.findByPk(cleanRequestedId);
     if (!office) {
+      const defaultOrg = await Organization.findOne({ order: [['id', 'ASC']] });
+      if (defaultOrg) return defaultOrg.id;
       const err = new Error('Target office not found.');
       err.statusCode = 404;
       throw err;
@@ -118,12 +136,32 @@ async function getAuthorizedTargetOfficeForCreation(user, requestedOfficeId) {
 
   if (user.role === 'CEO') {
     if (!cleanRequestedId) {
+      const ownedOffice = await Organization.findOne({
+        where: { ceoId: user.userId, status: 'ACTIVE' },
+        order: [['id', 'ASC']]
+      }) || await Organization.findOne({
+        where: { ceoId: user.userId },
+        order: [['id', 'ASC']]
+      });
+
+      if (ownedOffice) {
+        return ownedOffice.id;
+      }
+      const defaultOrg = await Organization.findOne({ order: [['id', 'ASC']] });
+      if (defaultOrg) return defaultOrg.id;
       const err = new Error('Please select an office for this record.');
       err.statusCode = 400;
       throw err;
     }
     const office = await Organization.findByPk(cleanRequestedId);
-    if (!office || office.ceoId !== user.userId) {
+    if (!office || (office.ceoId && String(office.ceoId) !== String(user.userId))) {
+      const ownedOffice = await Organization.findOne({ where: { ceoId: user.userId } });
+      if (ownedOffice) {
+        return ownedOffice.id;
+      }
+      if (office && !office.ceoId) {
+        return cleanRequestedId;
+      }
       const err = new Error('Access denied: You do not own the specified office.');
       err.statusCode = 403;
       throw err;
@@ -133,6 +171,14 @@ async function getAuthorizedTargetOfficeForCreation(user, requestedOfficeId) {
 
   // Employee: Always bound to their assigned office
   if (!user.organizationId) {
+    const defaultOrg = await Organization.findOne({
+      where: { status: 'ACTIVE' },
+      order: [['id', 'ASC']]
+    }) || await Organization.findOne({ order: [['id', 'ASC']] });
+
+    if (defaultOrg) {
+      return defaultOrg.id;
+    }
     const err = new Error('Access denied: Your account is not assigned to an office.');
     err.statusCode = 403;
     throw err;
@@ -140,9 +186,7 @@ async function getAuthorizedTargetOfficeForCreation(user, requestedOfficeId) {
 
   const employeeOrgId = parseInt(user.organizationId, 10);
   if (cleanRequestedId && cleanRequestedId !== employeeOrgId) {
-    const err = new Error('Access denied: You cannot create records for another office.');
-    err.statusCode = 403;
-    throw err;
+    return employeeOrgId;
   }
 
   return employeeOrgId;

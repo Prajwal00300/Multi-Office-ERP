@@ -1980,20 +1980,44 @@ export default function CombinedTransactionWorkspace() {
                   setBillRemark(e.target.value);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    if (!e.shiftKey) {
-                      e.preventDefault();
-                      if (refTransport.current) {
+                  if (e.key === 'Enter' || e.keyCode === 13) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const focusNext = () => {
+                      if (refTransport.current && !refTransport.current.disabled) {
                         refTransport.current.focus();
                         refTransport.current.select?.();
+                      } else if (refBroker.current && !refBroker.current.disabled) {
+                        refBroker.current.focus();
+                        refBroker.current.select?.();
+                      } else if (refDueDate.current && !refDueDate.current.disabled) {
+                        refDueDate.current.focus();
+                        refDueDate.current.select?.();
+                      } else if (refSaveBtn.current && !refSaveBtn.current.disabled) {
+                        refSaveBtn.current.focus();
                       }
-                    }
+                    };
+                    focusNext();
+                    setTimeout(focusNext, 10);
                   } else if (e.key === 'ArrowDown') {
                     e.preventDefault();
-                    if (refTransport.current) {
-                      refTransport.current.focus();
-                      refTransport.current.select?.();
-                    }
+                    e.stopPropagation();
+                    const focusNext = () => {
+                      if (refTransport.current && !refTransport.current.disabled) {
+                        refTransport.current.focus();
+                        refTransport.current.select?.();
+                      } else if (refBroker.current && !refBroker.current.disabled) {
+                        refBroker.current.focus();
+                        refBroker.current.select?.();
+                      } else if (refDueDate.current && !refDueDate.current.disabled) {
+                        refDueDate.current.focus();
+                        refDueDate.current.select?.();
+                      } else if (refSaveBtn.current && !refSaveBtn.current.disabled) {
+                        refSaveBtn.current.focus();
+                      }
+                    };
+                    focusNext();
+                    setTimeout(focusNext, 10);
                   } else if (e.key === 'ArrowUp') {
                     e.preventDefault();
                     focusCell(activeRowIdx, currentFocusedCol.current);

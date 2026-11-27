@@ -91,10 +91,10 @@ export default function SaleOrderWorkspace() {
 
   const effectiveOrgId = useMemo(() => {
     if (user?.role === 'SUPER_ADMIN' || user?.role === 'CEO') {
-      return selectedOrgId || user?.organizationId || '';
+      return selectedOrgId || organizations[0]?.id || user?.organizationId || '';
     }
-    return user?.organizationId || '';
-  }, [user, selectedOrgId]);
+    return user?.organizationId || organizations[0]?.id || '';
+  }, [user, selectedOrgId, organizations]);
 
   // Master Data
   const [products, setProducts] = useState([]);
@@ -122,6 +122,7 @@ export default function SaleOrderWorkspace() {
   // Lower Section Fields
   const [orderRemark, setOrderRemark] = useState('');
   const remarkTextareaRef = useRef(null);
+  const refSaveBtn = useRef(null);
   const partyInputRef = useRef(null);
   const cellRefs = useRef({});
   const currentFocusedCol = useRef(0);
@@ -1333,6 +1334,24 @@ export default function SaleOrderWorkspace() {
                 markDirtyAndEdit();
                 setOrderRemark(e.target.value);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.keyCode === 13) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (refSaveBtn.current) {
+                    refSaveBtn.current.focus();
+                  }
+                  setTimeout(() => {
+                    refSaveBtn.current?.focus();
+                  }, 10);
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  refSaveBtn.current?.focus();
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  focusCell(activeRowIdx, currentFocusedCol.current);
+                }
+              }}
               className={`flex-1 h-12 border border-[#7f9db9] px-1.5 py-0.5 text-xs focus:outline-none resize-none ${isEditable ? 'bg-[#cce4f7] focus:bg-white text-black' : 'bg-[#e4ebf5] text-slate-800 cursor-not-allowed select-none'}`}
             />
           </div>
@@ -1425,10 +1444,11 @@ export default function SaleOrderWorkspace() {
 
               {/* 6. Save */}
               <button
+                ref={refSaveBtn}
                 type="button"
                 onClick={handleSaveOnly}
                 disabled={actionLoading || mode === 'VIEW'}
-                className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer"
+                className="px-4 py-1 bg-[#ece9d8] hover:bg-[#f5f4ef] text-black font-bold text-xs border-t-2 border-l-2 border-white border-r-2 border-b-2 border-r-[#707070] border-b-[#707070] active:border-t-[#707070] active:border-l-[#707070] active:border-r-white active:border-b-white disabled:opacity-50 select-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
                 title={mode === 'VIEW' ? 'Click Edit to modify this record before saving' : 'Save record only without printing'}
               >
                 {actionLoading && mode === 'SAVING' ? 'Saving...' : 'Save'}

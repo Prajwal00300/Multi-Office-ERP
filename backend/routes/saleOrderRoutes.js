@@ -5,7 +5,7 @@ const saleOrderController = require('../controllers/saleOrderController');
 const checkModulePermission = require('../middleware/checkModulePermission');
 
 const authorizeSaleAccess = (req, res, next) => {
-  const allowedRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING'];
+  const allowedRoles = ['SUPER_ADMIN', 'CEO', 'ADMIN', 'OPERATIONS_BILLING', 'USER', 'WEIGHBRIDGE_CONTROLLER'];
   if (!allowedRoles.includes(req.user.role)) {
     return res.status(403).json({
       error: 'Access denied. Insufficient permissions to access Sales Management.'

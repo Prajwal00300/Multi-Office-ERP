@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { Op } = require('sequelize');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 const DutyAssignment = require('../models/DutyAssignment');

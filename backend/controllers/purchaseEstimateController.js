@@ -236,10 +236,17 @@ async function revertPurchaseEstimateOrderAllocations(estimateId, transaction) {
 }
 
 /**
- * INCREASES stock in Product.currentStock and logs InventoryMovement IN for purchase estimate items
+ * INCREASES stock in Product.currentStock and adds goods price + GST rate to Product.price
+ * Logs InventoryMovement IN for purchase estimate items
  */
 async function addInventoryForPurchaseEstimateItems(items, estimate, userId, transaction, actionNote) {
   if (!items || !Array.isArray(items)) return;
+
+  // Tax multiplier: only goods price and GST / surcharge
+  const taxPct = parseFloat(estimate?.taxRate) || 0;
+  const surPct = parseFloat(estimate?.surchargeRate) || 0;
+  const taxMultiplier = 1 + (taxPct / 100) * (1 + (surPct / 100));
+
   for (const item of items) {
     if (item.productId) {
       const product = await Product.findByPk(item.productId, {
@@ -251,7 +258,18 @@ async function addInventoryForPurchaseEstimateItems(items, estimate, userId, tra
         if (addQty > 0) {
           const currentStock = parseFloat(product.currentStock) || 0;
           const newStock = parseFloat((currentStock + addQty).toFixed(3));
-          await product.update({ currentStock: newStock }, { transaction });
+
+          // Calculate goods price rate per Ton including GST
+          const itemBaseRate = parseFloat(item.negotiatedRate) || (addQty > 0 ? (parseFloat(item.amount) || 0) / addQty : 0);
+          const rateWithGst = parseFloat((itemBaseRate * taxMultiplier).toFixed(2));
+
+          const currentPrice = parseFloat(product.price) || 0;
+          const newPrice = parseFloat((currentPrice + rateWithGst).toFixed(2));
+
+          await product.update({
+            currentStock: newStock,
+            price: newPrice
+          }, { transaction });
 
           await InventoryMovement.create({
             organizationId: estimate.organizationId,
@@ -271,10 +289,14 @@ async function addInventoryForPurchaseEstimateItems(items, estimate, userId, tra
 }
 
 /**
- * Reverts previously added stock from Product.currentStock and removes previous PURCHASE_ESTIMATE InventoryMovements
+ * Reverts previously added stock and price from Product, and removes previous PURCHASE_ESTIMATE InventoryMovements
  */
 async function revertInventoryForPurchaseEstimateItems(items, estimate, transaction) {
   if (items && Array.isArray(items)) {
+    const taxPct = parseFloat(estimate?.taxRate) || 0;
+    const surPct = parseFloat(estimate?.surchargeRate) || 0;
+    const taxMultiplier = 1 + (taxPct / 100) * (1 + (surPct / 100));
+
     for (const item of items) {
       if (item.productId) {
         const product = await Product.findByPk(item.productId, {
@@ -285,8 +307,19 @@ async function revertInventoryForPurchaseEstimateItems(items, estimate, transact
           const revertQty = parseFloat(item.quantity) || 0;
           if (revertQty > 0) {
             const currentStock = parseFloat(product.currentStock) || 0;
-            const newStock = parseFloat((currentStock - revertQty).toFixed(3));
-            await product.update({ currentStock: newStock }, { transaction });
+            const newStock = Math.max(0, parseFloat((currentStock - revertQty).toFixed(3)));
+
+            // Revert goods price rate with GST added by this item
+            const itemBaseRate = parseFloat(item.negotiatedRate) || (revertQty > 0 ? (parseFloat(item.amount) || 0) / revertQty : 0);
+            const rateWithGst = parseFloat((itemBaseRate * taxMultiplier).toFixed(2));
+
+            const currentPrice = parseFloat(product.price) || 0;
+            const newPrice = Math.max(0, parseFloat((currentPrice - rateWithGst).toFixed(2)));
+
+            await product.update({
+              currentStock: newStock,
+              price: newPrice
+            }, { transaction });
           }
         }
       }
@@ -974,6 +1007,7 @@ exports.createPurchaseEstimate = async (req, res) => {
             organizationId: targetOrgId,
             name: productNameSnapshot,
             unit: unit || 'Ton',
+            price: 0.00,
             difference: 0,
             specifications: productSpecificationsSnapshot || null,
             currentStock: 0,
@@ -1247,6 +1281,7 @@ exports.updatePurchaseEstimate = async (req, res) => {
             organizationId: targetOrgId,
             name: productNameSnapshot,
             unit: unit || 'Ton',
+            price: 0.00,
             difference: 0,
             specifications: productSpecificationsSnapshot || null,
             currentStock: 0,
@@ -1567,6 +1602,7 @@ exports.overridePurchaseEstimate = async (req, res) => {
             organizationId: targetOrgId,
             name: productNameSnapshot,
             unit: unit || 'Ton',
+            price: 0.00,
             difference: 0,
             specifications: productSpecificationsSnapshot || null,
             currentStock: 0,

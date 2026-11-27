@@ -37,8 +37,13 @@ export const getPreviousPurchase = async (currentId = null, organizationId = nul
   if (currentId) query.append('currentId', currentId);
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/purchases/navigation/previous${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/purchases/navigation/previous${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextPurchase = async (currentId = null, organizationId = null) => {
@@ -46,8 +51,13 @@ export const getNextPurchase = async (currentId = null, organizationId = null) =
   if (currentId) query.append('currentId', currentId);
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/purchases/navigation/next${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/purchases/navigation/next${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getPurchaseAudits = async (id) => {

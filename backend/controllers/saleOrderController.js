@@ -854,7 +854,7 @@ exports.getPreviousSaleOrder = async (req, res) => {
       order: [['id', 'DESC']]
     });
 
-    if (!prevOrder) return res.status(404).json({ error: 'No previous sale order found' });
+    if (!prevOrder) return res.status(200).json(null);
     res.status(200).json(prevOrder);
   } catch (error) {
     if (error.statusCode) {
@@ -887,7 +887,7 @@ exports.getNextSaleOrder = async (req, res) => {
       order: [['id', 'ASC']]
     });
 
-    if (!nextOrder) return res.status(404).json({ error: 'No next sale order found' });
+    if (!nextOrder) return res.status(200).json(null);
     res.status(200).json(nextOrder);
   } catch (error) {
     if (error.statusCode) {
@@ -916,7 +916,7 @@ exports.getFirstSaleOrder = async (req, res) => {
       order: [['id', 'ASC']]
     });
 
-    if (!firstOrder) return res.status(404).json({ error: 'No sale order found' });
+    if (!firstOrder) return res.status(200).json(null);
     res.status(200).json(firstOrder);
   } catch (error) {
     if (error.statusCode) {
@@ -945,7 +945,7 @@ exports.getLastSaleOrder = async (req, res) => {
       order: [['id', 'DESC']]
     });
 
-    if (!lastOrder) return res.status(404).json({ error: 'No sale order found' });
+    if (!lastOrder) return res.status(200).json(null);
     res.status(200).json(lastOrder);
   } catch (error) {
     if (error.statusCode) {

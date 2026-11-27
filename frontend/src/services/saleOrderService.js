@@ -39,8 +39,13 @@ export const getPreviousSaleOrder = async (currentId = null, organizationId = nu
   if (currentId) query.append('currentId', currentId);
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/sale-orders/navigation/previous${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/sale-orders/navigation/previous${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextSaleOrder = async (currentId = null, organizationId = null) => {
@@ -48,24 +53,39 @@ export const getNextSaleOrder = async (currentId = null, organizationId = null) 
   if (currentId) query.append('currentId', currentId);
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/sale-orders/navigation/next${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/sale-orders/navigation/next${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getFirstSaleOrder = async (organizationId = null) => {
   const query = new URLSearchParams();
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/sale-orders/navigation/first${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/sale-orders/navigation/first${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getLastSaleOrder = async (organizationId = null) => {
   const query = new URLSearchParams();
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/sale-orders/navigation/last${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/sale-orders/navigation/last${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const createSaleOrder = async (data) => {

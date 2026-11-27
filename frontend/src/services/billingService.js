@@ -22,8 +22,13 @@ export const getPreviousBill = async (currentId, organizationId) => {
   if (currentId) query.append('currentId', currentId);
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/bills/navigation/previous${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/bills/navigation/previous${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextBill = async (currentId, organizationId) => {
@@ -31,8 +36,13 @@ export const getNextBill = async (currentId, organizationId) => {
   if (currentId) query.append('currentId', currentId);
   if (organizationId) query.append('organizationId', organizationId);
   const queryString = query.toString();
-  const res = await api.get(`/bills/navigation/next${queryString ? `?${queryString}` : ''}`);
-  return res.data;
+  try {
+    const res = await api.get(`/bills/navigation/next${queryString ? `?${queryString}` : ''}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 };
 
 export const getNextBillNumber = async (organizationId) => {

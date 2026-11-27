@@ -219,17 +219,20 @@ exports.getInHandOrderSummary = async (req, res) => {
     const products = await Product.findAll({
       where: {
         ...officeWhereClause,
-        status: 'ACTIVE'
+        status: { [Op.ne]: 'INACTIVE' }
       },
-      attributes: ['id', 'name', 'unit', 'currentStock', 'organizationId']
+      attributes: ['id', 'name', 'unit', 'currentStock', 'price', 'organizationId']
     });
 
     const productMap = new Map();
     let totalInHouseStock = 0;
+    let totalInHouseStockPrice = 0;
 
     for (const prod of products) {
       const stock = parseFloat(prod.currentStock) || 0;
+      const price = parseFloat(prod.price) || 0;
       totalInHouseStock += stock;
+      totalInHouseStockPrice += price;
 
       productMap.set(prod.id, {
         productId: prod.id,
@@ -237,6 +240,7 @@ exports.getInHandOrderSummary = async (req, res) => {
         unit: prod.unit || 'Tons',
         purchasePending: 0,
         inHouseStock: stock,
+        price: price,
         salesPending: 0,
         inHandOrder: stock
       });
@@ -259,6 +263,7 @@ exports.getInHandOrderSummary = async (req, res) => {
         unit: 'Tons',
         purchasePending: 0,
         inHouseStock: 0,
+        price: 0,
         salesPending: 0,
         inHandOrder: 0
       };
@@ -285,6 +290,7 @@ exports.getInHandOrderSummary = async (req, res) => {
     });
 
     let totalPurchasePending = 0;
+    let totalPurchasePendingPrice = 0;
     let sumOfOrderAvgPrices = 0;
     let totalPurchasesOrderedTons = 0;
     let totalPurchasesValue = 0;
@@ -292,9 +298,11 @@ exports.getInHandOrderSummary = async (req, res) => {
     for (const po of purchases) {
       const pJson = po.toJSON();
       let poOrdered = parseFloat(pJson.totalOrderedQuantity) || parseFloat(pJson.totalQuantity) || 0;
+      let poReceived = parseFloat(pJson.totalReceivedQuantity) || 0;
       let poValue = parseFloat(pJson.totalAmount) || 0;
       let itemsVal = 0;
       let itemsQty = 0;
+      let poPendingFromItems = 0;
 
       for (const it of (pJson.items || [])) {
         const ord = parseFloat(it.quantity) || 0;
@@ -305,6 +313,7 @@ exports.getInHandOrderSummary = async (req, res) => {
 
         itemsQty += ord;
         itemsVal += amt;
+        poPendingFromItems += pen;
 
         const entry = findOrAddProduct(it.productId, it.productNameSnapshot);
         if (pen > 0) {
@@ -322,6 +331,14 @@ exports.getInHandOrderSummary = async (req, res) => {
       if (poValue <= 0) poValue = itemsVal;
       const poAvgPrice = poOrdered > 0 ? (poValue / poOrdered) : (parseFloat(pJson.averagePrice) || 0);
 
+      const poPending = (pJson.totalReceivedQuantity !== undefined && pJson.totalReceivedQuantity !== null && pJson.totalOrderedQuantity)
+        ? Math.max(0, poOrdered - poReceived)
+        : poPendingFromItems;
+
+      if (poPending > 0 && poAvgPrice > 0) {
+        totalPurchasePendingPrice += (poPending * poAvgPrice);
+      }
+
       if (poOrdered > 0 && poAvgPrice > 0) {
         sumOfOrderAvgPrices += poAvgPrice;
         totalPurchasesOrderedTons += poOrdered;
@@ -329,9 +346,11 @@ exports.getInHandOrderSummary = async (req, res) => {
       }
     }
 
-    // Formula: (avgPrice1 + avgPrice2 + ...) / (qty1 + qty2 + ...) e.g. (69000 + 58000) / (140 + 100)
-    const inHandAveragePrice = totalPurchasesOrderedTons > 0 ? parseFloat((sumOfOrderAvgPrices / totalPurchasesOrderedTons).toFixed(2)) : 0;
-    const weightedAveragePrice = totalPurchasesOrderedTons > 0 ? parseFloat((totalPurchasesValue / totalPurchasesOrderedTons).toFixed(2)) : 0;
+    // Average Price = (Price in Yellow Box + Price in Blue Box) / (Quantity in Yellow Box + Quantity in Blue Box)
+    const combinedPendingInHouseQty = totalPurchasePending + totalInHouseStock;
+    const combinedPendingInHousePrice = totalPurchasePendingPrice + totalInHouseStockPrice;
+    const inHandAveragePrice = combinedPendingInHouseQty > 0 ? parseFloat((combinedPendingInHousePrice / combinedPendingInHouseQty).toFixed(2)) : 0;
+    const weightedAveragePrice = inHandAveragePrice;
 
     // 3. Fetch Pending Quantities from Sale Orders
     let totalSalesPending = 0;
@@ -390,6 +409,7 @@ exports.getInHandOrderSummary = async (req, res) => {
         unit: p.unit,
         purchasePending: pPend,
         inHouseStock: sStock,
+        price: parseFloat((p.price || 0).toFixed(2)),
         salesPending: sPend,
         inHandOrder: inHand,
         averagePrice: avgPrice
@@ -398,7 +418,9 @@ exports.getInHandOrderSummary = async (req, res) => {
 
     res.status(200).json({
       purchaseTotalOrderPending: totalPurchasePending,
+      purchasePendingTotalPrice: parseFloat(totalPurchasePendingPrice.toFixed(2)),
       inHouseStock: totalInHouseStock,
+      inHouseStockTotalPrice: parseFloat(totalInHouseStockPrice.toFixed(2)),
       salesTotalOrderPending: totalSalesPending,
       inHandOrder: totalInHandOrder,
       inHandAveragePrice,
@@ -609,7 +631,7 @@ exports.getPreviousPurchase = async (req, res) => {
     });
 
     if (!purchase) {
-      return res.status(404).json({ error: 'No preceding purchase order found for this office' });
+      return res.status(200).json(null);
     }
 
     await verifyRecordOwnership(purchase, req.user);
@@ -663,7 +685,7 @@ exports.getNextPurchase = async (req, res) => {
     });
 
     if (!purchase) {
-      return res.status(404).json({ error: 'No subsequent purchase order found for this office' });
+      return res.status(200).json(null);
     }
 
     await verifyRecordOwnership(purchase, req.user);
