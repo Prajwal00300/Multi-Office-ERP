@@ -336,8 +336,8 @@ export default function EstimateVoucherWorkspace() {
               difference: diffNum.toFixed(2),
               pcs: '0',
               quantity: '', // ALWAYS BLANK for manual entry per user instructions!
-              basicRate: rateNum > 0 ? (bRateNum > 0 ? bRateNum.toFixed(2) : String(rateNum)) : '',
-              finalRate: rateNum > 0 ? rateNum.toFixed(2) : '0.00',
+              basicRate: '', // ALWAYS BLANK for manual entry per user instructions!
+              finalRate: '0.00',
               amount: '0.00',
               unit: p.unit || prodMatch?.unit || 'Ton'
             };
@@ -403,8 +403,8 @@ export default function EstimateVoucherWorkspace() {
               difference: diffNum.toFixed(2),
               pcs: '0',
               quantity: '', // ALWAYS BLANK for manual entry per user instructions!
-              basicRate: rateNum > 0 ? (bRateNum > 0 ? bRateNum.toFixed(2) : String(rateNum)) : '',
-              finalRate: rateNum > 0 ? rateNum.toFixed(2) : '0.00',
+              basicRate: '', // ALWAYS BLANK for manual entry per user instructions!
+              finalRate: '0.00',
               amount: '0.00',
               unit: it.unit || prodMatch?.unit || 'Ton'
             };
@@ -676,9 +676,7 @@ export default function EstimateVoucherWorkspace() {
 
       const match = products.find(p => p.name.toLowerCase() === text.trim().toLowerCase());
 
-      const bRate = updated[index].isCustomBRate
-        ? updated[index].basicRate
-        : (headerBRate || updated[index].basicRate || '');
+      const bRate = updated[index].basicRate || '';
       let diff = parseFloat(updated[index].difference) || 0;
       let prodId = updated[index].productId;
       let desc = updated[index].description;
@@ -692,7 +690,7 @@ export default function EstimateVoucherWorkspace() {
       }
 
       const bRateNum = parseFloat(bRate) || 0;
-      const fRate = bRateNum + diff;
+      const fRate = bRateNum > 0 ? bRateNum + diff : 0;
       const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
@@ -700,9 +698,9 @@ export default function EstimateVoucherWorkspace() {
         productId: prodId,
         productName: text,
         description: desc,
-        basicRate: String(bRate),
+        basicRate: bRate,
         difference: diff.toFixed(2),
-        finalRate: fRate.toFixed(2),
+        finalRate: fRate > 0 ? fRate.toFixed(2) : '0.00',
         amount: (fRate * q).toFixed(2)
       };
       return updated;
@@ -767,11 +765,9 @@ export default function EstimateVoucherWorkspace() {
       const prodDiff = prod.difference !== undefined && prod.difference !== null
         ? parseFloat(prod.difference)
         : 0;
-      const bRate = updated[index].isCustomBRate
-        ? updated[index].basicRate
-        : (headerBRate || updated[index].basicRate || '');
+      const bRate = updated[index].basicRate || '';
       const bRateNum = parseFloat(bRate) || 0;
-      const fRate = bRateNum + prodDiff;
+      const fRate = bRateNum > 0 ? bRateNum + prodDiff : 0;
       const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
@@ -782,8 +778,8 @@ export default function EstimateVoucherWorkspace() {
         difference: prodDiff.toFixed(2),
         pcs: updated[index].pcs || '0',
         quantity: updated[index].quantity || '',
-        basicRate: String(bRate),
-        finalRate: fRate.toFixed(2),
+        basicRate: bRate,
+        finalRate: fRate > 0 ? fRate.toFixed(2) : '0.00',
         amount: (fRate * q).toFixed(2)
       };
       return updated;
@@ -964,18 +960,15 @@ export default function EstimateVoucherWorkspace() {
     setTransactionItems(prev => {
       const updated = [...prev];
       const diff = parseFloat(val) || 0;
-      const bRateStr = updated[index].isCustomBRate
-        ? updated[index].basicRate
-        : (headerBRate || updated[index].basicRate || '');
+      const bRateStr = updated[index].basicRate || '';
       const bRate = parseFloat(bRateStr) || 0;
-      const fRate = bRate + diff;
+      const fRate = bRateStr !== '' ? bRate + diff : 0;
       const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
         ...updated[index],
         difference: val,
-        basicRate: bRateStr,
-        finalRate: fRate.toFixed(2),
+        finalRate: fRate > 0 ? fRate.toFixed(2) : '0.00',
         amount: (fRate * q).toFixed(2)
       };
       return updated;
@@ -999,13 +992,14 @@ export default function EstimateVoucherWorkspace() {
       const updated = [...prev];
       const q = parseFloat(val) || 0;
       const diff = parseFloat(updated[index].difference) || 0;
-      const bRate = parseFloat(updated[index].basicRate || headerBRate || 0) || 0;
-      const fRate = bRate + diff;
+      const bRateStr = updated[index].basicRate || '';
+      const bRate = parseFloat(bRateStr) || 0;
+      const fRate = bRateStr !== '' ? bRate + diff : 0;
 
       updated[index] = {
         ...updated[index],
         quantity: val,
-        finalRate: fRate.toFixed(2),
+        finalRate: fRate > 0 ? fRate.toFixed(2) : '0.00',
         amount: (fRate * q).toFixed(2)
       };
       return updated;
@@ -1017,17 +1011,16 @@ export default function EstimateVoucherWorkspace() {
     markDirtyAndEdit();
     setTransactionItems(prev => {
       const updated = [...prev];
-      const isCustom = val !== '' && val !== headerBRate;
       const diff = parseFloat(updated[index].difference) || 0;
       const bRate = parseFloat(val) || 0;
-      const fRate = bRate + diff;
+      const fRate = val !== '' && !isNaN(parseFloat(val)) ? (bRate + diff) : 0;
       const q = parseFloat(updated[index].quantity) || 0;
 
       updated[index] = {
         ...updated[index],
         basicRate: val,
-        isCustomBRate: isCustom,
-        finalRate: fRate.toFixed(2),
+        isCustomBRate: true,
+        finalRate: fRate > 0 ? fRate.toFixed(2) : '0.00',
         amount: (fRate * q).toFixed(2)
       };
       return updated;
@@ -2177,7 +2170,7 @@ export default function EstimateVoucherWorkspace() {
                           }}
                           type="number"
                           step="any"
-                          value={hasProduct ? (item.basicRate || headerBRate || '') : (item.basicRate || '')}
+                          value={item.basicRate || ''}
                           disabled={!isEditable}
                           onChange={(e) => handleItemBasicRateChange(idx, e.target.value)}
                           onFocus={() => {
