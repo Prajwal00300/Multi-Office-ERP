@@ -582,7 +582,6 @@ const ProductsList = () => {
                       ) : (
                         <span className="text-gray-400 font-normal">₹0.00</span>
                       )}
-                      <span className="text-[11px] text-gray-500 font-sans ml-1 font-normal">/ Ton</span>
                     </td>
 
                     {/* Stock Left */}

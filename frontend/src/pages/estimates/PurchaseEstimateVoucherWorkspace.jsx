@@ -757,7 +757,7 @@ export default function PurchaseEstimateVoucherWorkspace() {
     }
 
     const boundedRow = Math.max(0, Math.min(rowIdx, transactionItems.length - 1));
-    const boundedCol = Math.max(0, Math.min(colIdx, 2));
+    const boundedCol = Math.max(0, Math.min(colIdx, 7));
 
     setActiveRowIdx(boundedRow);
     currentFocusedCol.current = boundedCol;

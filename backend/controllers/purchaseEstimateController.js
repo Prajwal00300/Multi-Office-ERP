@@ -236,13 +236,17 @@ async function revertPurchaseEstimateOrderAllocations(estimateId, transaction) {
 }
 
 /**
- * INCREASES stock in Product.currentStock and adds goods price + GST rate to Product.price
+ * INCREASES stock in Product.currentStock and adds voucher Grand Total to Product.price
  * Logs InventoryMovement IN for purchase estimate items
  */
 async function addInventoryForPurchaseEstimateItems(items, estimate, userId, transaction, actionNote) {
-  if (!items || !Array.isArray(items)) return;
+  if (!items || !Array.isArray(items) || items.length === 0) return;
 
-  // Tax multiplier: only goods price and GST / surcharge
+  const estGrandTotal = parseFloat(estimate?.grandTotal) || 0;
+  const estTotal = parseFloat(estimate?.total) || items.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+  const estTotalQty = parseFloat(estimate?.totalQuantity) || items.reduce((s, it) => s + (parseFloat(it.quantity) || 0), 0);
+
+  // Tax multiplier: goods price and GST / surcharge fallback
   const taxPct = parseFloat(estimate?.taxRate) || 0;
   const surPct = parseFloat(estimate?.surchargeRate) || 0;
   const taxMultiplier = 1 + (taxPct / 100) * (1 + (surPct / 100));
@@ -259,12 +263,25 @@ async function addInventoryForPurchaseEstimateItems(items, estimate, userId, tra
           const currentStock = parseFloat(product.currentStock) || 0;
           const newStock = parseFloat((currentStock + addQty).toFixed(3));
 
-          // Calculate goods price rate per Ton including GST
-          const itemBaseRate = parseFloat(item.negotiatedRate) || (addQty > 0 ? (parseFloat(item.amount) || 0) / addQty : 0);
-          const rateWithGst = parseFloat((itemBaseRate * taxMultiplier).toFixed(2));
+          // Calculate this item's contribution to the Grand Total
+          const itemAmt = parseFloat(item.amount) || (addQty * (parseFloat(item.negotiatedRate) || 0));
+          let itemGrandTotalAddition = 0;
+
+          if (estGrandTotal > 0) {
+            if (estTotal > 0) {
+              itemGrandTotalAddition = parseFloat(((itemAmt / estTotal) * estGrandTotal).toFixed(2));
+            } else if (estTotalQty > 0) {
+              itemGrandTotalAddition = parseFloat(((addQty / estTotalQty) * estGrandTotal).toFixed(2));
+            } else {
+              itemGrandTotalAddition = estGrandTotal;
+            }
+          } else {
+            // Fallback: item goods amount including tax multiplier
+            itemGrandTotalAddition = parseFloat((itemAmt * taxMultiplier).toFixed(2));
+          }
 
           const currentPrice = parseFloat(product.price) || 0;
-          const newPrice = parseFloat((currentPrice + rateWithGst).toFixed(2));
+          const newPrice = parseFloat((currentPrice + itemGrandTotalAddition).toFixed(2));
 
           await product.update({
             currentStock: newStock,
@@ -292,7 +309,11 @@ async function addInventoryForPurchaseEstimateItems(items, estimate, userId, tra
  * Reverts previously added stock and price from Product, and removes previous PURCHASE_ESTIMATE InventoryMovements
  */
 async function revertInventoryForPurchaseEstimateItems(items, estimate, transaction) {
-  if (items && Array.isArray(items)) {
+  if (items && Array.isArray(items) && items.length > 0) {
+    const estGrandTotal = parseFloat(estimate?.grandTotal) || 0;
+    const estTotal = parseFloat(estimate?.total) || items.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+    const estTotalQty = parseFloat(estimate?.totalQuantity) || items.reduce((s, it) => s + (parseFloat(it.quantity) || 0), 0);
+
     const taxPct = parseFloat(estimate?.taxRate) || 0;
     const surPct = parseFloat(estimate?.surchargeRate) || 0;
     const taxMultiplier = 1 + (taxPct / 100) * (1 + (surPct / 100));
@@ -309,12 +330,24 @@ async function revertInventoryForPurchaseEstimateItems(items, estimate, transact
             const currentStock = parseFloat(product.currentStock) || 0;
             const newStock = Math.max(0, parseFloat((currentStock - revertQty).toFixed(3)));
 
-            // Revert goods price rate with GST added by this item
-            const itemBaseRate = parseFloat(item.negotiatedRate) || (revertQty > 0 ? (parseFloat(item.amount) || 0) / revertQty : 0);
-            const rateWithGst = parseFloat((itemBaseRate * taxMultiplier).toFixed(2));
+            // Revert this item's contribution to Grand Total
+            const itemAmt = parseFloat(item.amount) || (revertQty * (parseFloat(item.negotiatedRate) || 0));
+            let itemGrandTotalAddition = 0;
+
+            if (estGrandTotal > 0) {
+              if (estTotal > 0) {
+                itemGrandTotalAddition = parseFloat(((itemAmt / estTotal) * estGrandTotal).toFixed(2));
+              } else if (estTotalQty > 0) {
+                itemGrandTotalAddition = parseFloat(((revertQty / estTotalQty) * estGrandTotal).toFixed(2));
+              } else {
+                itemGrandTotalAddition = estGrandTotal;
+              }
+            } else {
+              itemGrandTotalAddition = parseFloat((itemAmt * taxMultiplier).toFixed(2));
+            }
 
             const currentPrice = parseFloat(product.price) || 0;
-            const newPrice = Math.max(0, parseFloat((currentPrice - rateWithGst).toFixed(2)));
+            const newPrice = Math.max(0, parseFloat((currentPrice - itemGrandTotalAddition).toFixed(2)));
 
             await product.update({
               currentStock: newStock,

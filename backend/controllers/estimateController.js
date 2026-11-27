@@ -22,16 +22,11 @@ const {
 } = require('../utils/scopeFilter');
 
 /**
- * Deducts stock from Product.currentStock and deducts goods price + GST from Product.price
+ * Deducts stock from Product.currentStock
  * Logs InventoryMovement OUT for estimate items
  */
 async function deductInventoryForEstimateItems(items, estimate, userId, transaction, actionNote) {
   if (!items || !Array.isArray(items)) return;
-
-  // Tax multiplier: only goods price and GST / surcharge
-  const taxPct = parseFloat(estimate?.taxRate) || 0;
-  const surPct = parseFloat(estimate?.surchargeRate) || 0;
-  const taxMultiplier = 1 + (taxPct / 100) * (1 + (surPct / 100));
 
   for (const item of items) {
     if (item.productId) {
@@ -45,16 +40,8 @@ async function deductInventoryForEstimateItems(items, estimate, userId, transact
           const currentStock = parseFloat(product.currentStock) || 0;
           const newStock = parseFloat((currentStock - deductQty).toFixed(3));
 
-          // Calculate goods price rate per Ton including GST to deduct
-          const itemBaseRate = parseFloat(item.negotiatedRate) || (deductQty > 0 ? (parseFloat(item.amount) || 0) / deductQty : 0);
-          const rateWithGst = parseFloat((itemBaseRate * taxMultiplier).toFixed(2));
-
-          const currentPrice = parseFloat(product.price) || 0;
-          const newPrice = Math.max(0, parseFloat((currentPrice - rateWithGst).toFixed(2)));
-
           await product.update({
-            currentStock: newStock,
-            price: newPrice
+            currentStock: newStock
           }, { transaction });
 
           await InventoryMovement.create({
@@ -75,14 +62,10 @@ async function deductInventoryForEstimateItems(items, estimate, userId, transact
 }
 
 /**
- * Reverts previously deducted stock and price from Product, and removes previous ESTIMATE InventoryMovements
+ * Reverts previously deducted stock from Product, and removes previous ESTIMATE InventoryMovements
  */
 async function revertInventoryForEstimateItems(items, estimate, transaction) {
   if (items && Array.isArray(items)) {
-    const taxPct = parseFloat(estimate?.taxRate) || 0;
-    const surPct = parseFloat(estimate?.surchargeRate) || 0;
-    const taxMultiplier = 1 + (taxPct / 100) * (1 + (surPct / 100));
-
     for (const item of items) {
       if (item.productId) {
         const product = await Product.findByPk(item.productId, {
@@ -95,16 +78,8 @@ async function revertInventoryForEstimateItems(items, estimate, transaction) {
             const currentStock = parseFloat(product.currentStock) || 0;
             const newStock = parseFloat((currentStock + revertQty).toFixed(3));
 
-            // Revert deducted goods price rate with GST
-            const itemBaseRate = parseFloat(item.negotiatedRate) || (revertQty > 0 ? (parseFloat(item.amount) || 0) / revertQty : 0);
-            const rateWithGst = parseFloat((itemBaseRate * taxMultiplier).toFixed(2));
-
-            const currentPrice = parseFloat(product.price) || 0;
-            const newPrice = parseFloat((currentPrice + rateWithGst).toFixed(2));
-
             await product.update({
-              currentStock: newStock,
-              price: newPrice
+              currentStock: newStock
             }, { transaction });
           }
         }
